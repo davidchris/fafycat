@@ -11,3 +11,4 @@ wheels/
 
 # databases
 *.db
+*.pkl

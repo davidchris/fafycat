@@ -17,7 +17,7 @@ from fafycat.core.database import DatabaseManager
 
 
 def main() -> None:
-    """Initialize production database with default categories."""
+    """Initialize production database (empty - no default categories)."""
     print("🐱 Initializing FafyCat PRODUCTION database")
 
     config = AppConfig()
@@ -30,15 +30,13 @@ def main() -> None:
     print("Creating database tables...")
     db_manager.create_tables()
 
-    print("Initializing default categories...")
-    db_manager.init_default_categories()
-
     print("✅ Production database initialization complete!")
     print("\n📝 Next steps:")
-    print("1. Import your real transaction data through the UI")
-    print("2. Review and categorize transactions")
-    print("3. Train the model with your data")
-    print("4. Use: uv run python run_prod.py")
+    print("1. Import your labeled transaction data: uv run scripts/import_labeled_data.py")
+    print("   OR create categories manually through the UI")
+    print("2. Launch production mode: uv run python run_prod.py")
+    print("3. Go to Settings → Categories to review and set budgets")
+    print("4. Train the model with your data")
 
 
 if __name__ == "__main__":

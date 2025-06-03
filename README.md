@@ -168,16 +168,19 @@ uv install
 
 ### 2. Initialize Database and Load Data
 ```bash
-# Initialize production database (for real transactions)
+# Initialize production database (empty - no default categories)
 uv run scripts/init_prod_db.py
 
-# Option A: Import your labeled transaction data
-uv run scripts/import_labeled_data.py path/to/your/transactions.csv
+# Option A: Import your labeled transaction data (RECOMMENDED)
+# This automatically discovers categories from your data
+uv run scripts/import_labeled_data.py
 
 # Option B: Use synthetic data for testing (development only)
 uv run scripts/init_db.py  # Creates dev database
 uv run scripts/import_synthetic.py  # Adds test data
 ```
+
+**📋 Category Discovery**: When you import labeled data, FafyCat automatically discovers and creates categories from your transaction data without any predefined defaults. This ensures the ML model learns from YOUR actual spending patterns, not generic assumptions.
 
 ### 3. Train Your First Model
 ```bash
@@ -195,9 +198,10 @@ uv run python run_dev.py   # For development/testing
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 # Open your browser to http://localhost:8000 (FastAPI) or http://localhost:8501 (legacy)
-# 1. Go to "Import" page to add new CSV files
-# 2. Use "Review" page to check and correct predictions
-# 3. Re-train model periodically as you add more labeled data
+# 1. Go to "Settings" page to review discovered categories and set budgets (optional)
+# 2. Go to "Import" page to add new CSV files
+# 3. Use "Review" page to check and correct predictions
+# 4. Re-train model periodically as you add more labeled data
 ```
 
 ### 📝 Expected CSV Format
@@ -212,31 +216,61 @@ The system auto-detects column names and formats during import.
 
 ## 📂 Category Management
 
-### Reviewing Categories and Budgets
+FafyCat uses a **data-first approach** to categories - no default categories are created. Instead, categories are discovered from your actual transaction data to ensure the ML model learns from your real spending patterns.
 
-View and manage your categories through the web UI:
+### 🏷️ Category Discovery (Recommended)
+
+When you import labeled transaction data, FafyCat automatically:
+
+1. **Scans your data** for existing category labels (looks for "Cat" or "Category" columns)
+2. **Discovers unique categories** from your actual spending patterns
+3. **Infers category types** (Spending 💸, Income 💰, Saving 🏦) using intelligent pattern matching
+4. **Creates categories without budgets** initially (budget = 0.0)
+
+```bash
+# Import labeled data and discover categories automatically
+uv run scripts/import_labeled_data.py
+
+# Expected output:
+# 🏷️  Discovering categories from labeled data...
+# 📋 Creating 15 categories (without budgets)...
+# ✅ Created 15 new categories
+```
+
+### 🎛️ Category Management Interface
+
+Access the full category management interface through the web UI:
 
 1. **Launch the app**: `uv run python run_prod.py` or `uv run uvicorn main:app --host 0.0.0.0 --port 8000`
 2. **Navigate to Settings**: Use sidebar → "Settings & Categories"
-3. **View Categories**: Click "📋 Categories" tab
 
-This shows all categories by type (Spending 💸, Income 💰, Saving 🏦) with monthly budgets and status.
+#### Empty State (No Categories)
+- Shows guidance to import labeled data or create categories manually
+- Recommends the data-first approach for better ML accuracy
 
-### Modifying Existing Categories
+#### Active Management
+- **View by type**: Categories grouped by Spending/Income/Saving
+- **Budget management**: Set monthly budgets (optional but prompted)
+- **Deactivate unwanted**: Hide categories while preserving historical data
+- **Create new**: Manual category creation for edge cases
+
+### 🔧 Category Operations
 
 **✅ Safe Operations:**
-- **Update names/budgets**: Changes apply immediately to all transactions
-- **Deactivate categories**: Set `is_active = False` to remove from workflows while preserving historical data
+- **Set/update budgets**: Optional monthly budget targets for tracking
+- **Deactivate categories**: Hide from workflows while preserving transaction history
+- **Create new categories**: Manual creation when needed
 
-**🛡️ Protected Operations:**
+**🛡️ Data Protection:**
 - **Category deletion**: Blocked if any transactions use the category
-- Error message shows usage count: `"Cannot delete category - used by 147 transactions"`
+- **Historical preservation**: Deactivated categories maintain all transaction links
+- **No data loss**: Deactivation preferred over deletion for data integrity
 
-**💡 Recommended Approach:**
-Instead of deleting categories with existing transactions, **deactivate** them:
-- Removes category from new transaction workflows  
-- Preserves all historical transaction labels
-- Prevents data loss while cleaning up your category list
+**💡 Best Practices:**
+- **Import labeled data first** to discover your actual categories
+- **Review discovered categories** and deactivate any unwanted ones
+- **Set budgets gradually** as you understand your spending patterns
+- **Use deactivation** instead of deletion to preserve transaction history
 
 ## 🔧 Development
 
@@ -273,11 +307,12 @@ The FastAPI + FastHTML migration is **functionally complete** and addresses the 
 - **Status**: Review page now displays real transactions with working category dropdowns and save functionality
 - **Remaining**: Add pagination, filtering, and sorting controls (Phase 2 enhancement)
 
-#### 3. **Category Management Interface**
-- Complete Settings page with working category CRUD operations
-- Add budget management and category activation controls  
-- Connect to existing category API endpoints
-- **Files to modify**: `web/pages/settings_page.py`, create `web/components/category_manager.py`
+#### 3. **Category Management Interface** ✅ **COMPLETED**
+- ~~Complete Settings page with working category CRUD operations~~ → **Full category management implemented**
+- ~~Add budget management and category activation controls~~ → **Budget editing and deactivation working**
+- ~~Connect to existing category API endpoints~~ → **Complete with data-first category discovery**
+- **Status**: Data-first category discovery system implemented with comprehensive management interface
+- **Added features**: Empty state UI, category discovery from labeled data, budget management, deactivation
 
 ### 🟡 Medium Priority
 
@@ -343,15 +378,21 @@ uv run streamlit run streamlit_app.py --server.port 8501
 - ✅ **Core Migration**: All Streamlit functionality migrated to FastAPI + FastHTML
 - ✅ **State Persistence**: Category settings persist correctly across navigation  
 - ✅ **Architecture**: Clean separation of API and web layers
-- ✅ **Code Quality**: Lint errors reduced from 122 → 0, all tests passing (22/22)
+- ✅ **Code Quality**: Lint errors reduced from 122 → 4 minor warnings, all tests passing (22/22)
 - ✅ **Transaction Display**: Review page shows real data with working categorization workflow
 - ✅ **ML Integration**: Complete ML pipeline integration with FastAPI endpoints
+- ✅ **Category Management**: Data-first category discovery and comprehensive management interface
 - ⏳ **Feature Parity**: All original features working in new system
 - ⏳ **Testing**: Comprehensive test coverage for reliability
 
 ### 🎯 Immediate Next Task
 
-**Continue with Task #3 (Category Management Interface)** as both the ML pipeline integration and transaction display are now complete. The system now has automatic categorization predictions and manual review capabilities. Next priorities:
+**Continue with Task #4 (Enhanced UX with HTMX)** and **Task #5 (Export Functionality)** as the core category management is now complete. The system now has:
 
-1. **Category Management**: Complete the Settings page for full category lifecycle management
-2. **Export Functionality**: Implement data export workflows for analysis-ready data
+1. ✅ **Complete ML pipeline** with automatic predictions
+2. ✅ **Full transaction review** workflow with manual corrections  
+3. ✅ **Data-first category management** with discovery from labeled data
+
+Next priorities:
+1. **Export Functionality**: Implement data export workflows for analysis-ready data
+2. **Enhanced UX**: Add HTMX for better user interactions and real-time updates

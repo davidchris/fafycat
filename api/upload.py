@@ -23,6 +23,7 @@ def _predict_transaction_categories(db: Session, transactions: list, new_count: 
     if new_count > 0:
         try:
             from api.ml import get_categorizer
+
             categorizer = get_categorizer(db)
 
             # Get newly imported transactions for prediction
@@ -41,6 +42,7 @@ def _predict_transaction_categories(db: Session, transactions: list, new_count: 
                 txn_inputs = []
                 for txn in new_txns:
                     from src.fafycat.core.models import TransactionInput
+
                     txn_input = TransactionInput(
                         date=txn.date,
                         value_date=txn.value_date or txn.date,
@@ -65,6 +67,7 @@ def _predict_transaction_categories(db: Session, transactions: list, new_count: 
         except Exception as e:
             # Don't fail upload if ML prediction fails, just log it
             import logging
+
             logging.warning("ML prediction failed during upload: %s", e)
 
     return predictions_made

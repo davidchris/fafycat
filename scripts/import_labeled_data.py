@@ -99,6 +99,18 @@ def import_all_labeled_data():
     config.ensure_dirs()
     db_manager = DatabaseManager(config)
 
+    # First, discover all categories from the labeled data
+    print("🏷️  Discovering categories from labeled data...")
+    discovered_categories = check_categories()
+
+    if discovered_categories:
+        print(f"📋 Creating {len(discovered_categories)} categories (without budgets)...")
+        created_count = db_manager.discover_categories_from_data(discovered_categories)
+        print(f"✅ Created {created_count} new categories")
+        if created_count < len(discovered_categories):
+            print(f"ℹ️  {len(discovered_categories) - created_count} categories already existed")
+        print()
+
     total_imported = 0
     total_duplicates = 0
     total_errors = 0
@@ -142,8 +154,10 @@ def import_all_labeled_data():
         print("\n✨ Great! Your labeled data is now imported.")
         print("📝 Next steps:")
         print("  1. Launch production mode: uv run python run_prod.py")
-        print("  2. Go to Settings → Train New Model")
-        print("  3. Review predictions on new transactions")
+        print("  2. Go to Settings → Categories to review discovered categories")
+        print("  3. Set budgets for your categories (optional)")
+        print("  4. Go to Settings → Train New Model")
+        print("  5. Review predictions on new transactions")
 
 
 def check_categories():

@@ -127,7 +127,7 @@ class DatabaseManager:
         return self.SessionLocal()
 
     def init_default_categories(self) -> None:
-        """Initialize default categories."""
+        """Initialize default categories - DEPRECATED: Use discover_categories_from_data instead."""
         default_categories = [
             ("spending", "groceries", 400.0),
             ("spending", "restaurants", 200.0),
@@ -155,6 +155,60 @@ class DatabaseManager:
                     category = CategoryORM(type=cat_type, name=name, budget=budget)
                     session.add(category)
                 session.commit()
+
+    def discover_categories_from_data(self, categories: set[str]) -> int:
+        """Discover and create categories from imported labeled data (without budgets).
+
+        Args:
+            categories: Set of category names found in labeled data
+
+        Returns:
+            Number of new categories created
+        """
+        if not categories:
+            return 0
+
+        created_count = 0
+
+        with self.get_session() as session:
+            for category_name in sorted(categories):
+                # Check if category already exists
+                existing = session.query(CategoryORM).filter(CategoryORM.name == category_name).first()
+
+                if not existing:
+                    # Infer category type based on common patterns
+                    category_type = self._infer_category_type(category_name)
+
+                    # Create category without budget (0.0)
+                    new_category = CategoryORM(
+                        type=category_type,
+                        name=category_name,
+                        budget=0.0,  # No budget initially
+                        is_active=True,
+                    )
+                    session.add(new_category)
+                    created_count += 1
+
+            session.commit()
+
+        return created_count
+
+    def _infer_category_type(self, category_name: str) -> str:
+        """Infer category type from category name patterns."""
+        name_lower = category_name.lower()
+
+        # Income patterns
+        income_keywords = ["salary", "income", "freelance", "dividend", "interest", "bonus", "wage"]
+        if any(keyword in name_lower for keyword in income_keywords):
+            return "income"
+
+        # Saving patterns
+        saving_keywords = ["saving", "investment", "fund", "pension", "retirement"]
+        if any(keyword in name_lower for keyword in saving_keywords):
+            return "saving"
+
+        # Default to spending
+        return "spending"
 
 
 def get_categories(session: Session, active_only: bool = True) -> list[CategoryORM]:

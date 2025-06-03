@@ -43,9 +43,14 @@ async def review_page(request: Request):
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     """Settings and categories page."""
+    from api.dependencies import get_db_manager
     from web.pages.settings_page import render_settings_page
 
-    return render_settings_page(request)
+    # Get database manager and session
+    db_manager = get_db_manager(request)
+
+    with db_manager.get_session() as db_session:
+        return render_settings_page(request, db_session)
 
 
 @router.post("/upload-csv", response_class=HTMLResponse)

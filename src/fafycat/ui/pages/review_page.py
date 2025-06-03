@@ -174,8 +174,11 @@ def _display_transaction_review(session, transactions: list[TransactionORM], cat
                 )
 
                 # Accept prediction button
-                if (txn.predicted_category_id and selected_category != txn.predicted_category_id and
-                    st.button("✅ Accept Prediction", key=f"accept_{txn.id}")):
+                if (
+                    txn.predicted_category_id
+                    and selected_category != txn.predicted_category_id
+                    and st.button("✅ Accept Prediction", key=f"accept_{txn.id}")
+                ):
                     selected_category = txn.predicted_category_id
 
             with col4:
