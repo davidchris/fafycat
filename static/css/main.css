@@ -1,0 +1,28 @@
+/* Custom styles for FafyCat */
+
+/* Additional utility classes and customizations */
+.sidebar-nav a.active {
+    background-color: #3b82f6;
+    color: white;
+}
+
+/* Form styling improvements */
+.form-group {
+    margin-bottom: 1rem;
+}
+
+/* Table improvements */
+.table-responsive {
+    overflow-x: auto;
+}
+
+/* Loading states */
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+/* Animation for smooth transitions */
+.transition-smooth {
+    transition: all 0.2s ease-in-out;
+}

@@ -1,0 +1,11 @@
+date,name,purpose,amount,currency,category
+2024-01-15,EDEKA Markt 1234,Lastschrift,-45.67,EUR,groceries
+2024-01-16,McDonald's Berlin,Kartenzahlung,-12.50,EUR,restaurants
+2024-01-01,IMMOBILIEN AG,Miete Wohnung,-1200.00,EUR,rent
+2024-01-25,TECH COMPANY GMBH,Gehalt Januar 2024,3500.00,EUR,salary
+2024-01-20,Amazon Marketplace,Online-Kauf,-89.99,EUR,shopping
+2024-01-22,Shell Tankstelle,Kraftstoff,-65.00,EUR,transportation
+2024-01-28,Vattenfall,Lastschrift Strom,-78.45,EUR,utilities
+2024-02-01,REWE Markt 5678,Lastschrift,-52.34,EUR,groceries
+2024-02-05,Pizza Express,Kartenzahlung,-28.90,EUR,restaurants
+2024-02-10,Deutsche Bahn,Online-Ticket,-45.00,EUR,transportation
