@@ -33,12 +33,14 @@ def create_app() -> FastAPI:
 
     # Include API routes
     from api.categories import router as categories_router
+    from api.ml import router as ml_router
     from api.transactions import router as transactions_router
     from api.upload import router as upload_router
 
     app.include_router(transactions_router, prefix="/api")
     app.include_router(categories_router, prefix="/api")
     app.include_router(upload_router, prefix="/api")
+    app.include_router(ml_router, prefix="/api")
 
     # Include web routes (FastHTML)
     from web.routes import router as web_router

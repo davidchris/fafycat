@@ -88,6 +88,33 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
 4. **Manual Corrections** → Real-time category updates with active learning feedback
 5. **Export** → Analysis-ready data via API with predictions and confidence scores
 
+## 🔧 How It Works
+
+### During Upload
+When users upload CSV files, the system automatically runs ML predictions on new transactions if a trained model is available. The upload process:
+- Validates and processes CSV data
+- Saves transactions to the database
+- Automatically predicts categories using the trained ML model
+- Gracefully handles cases where no model is available
+
+### Real-time Prediction
+Individual transactions can be predicted via the `/api/ml/predict` endpoint, providing:
+- Category predictions with confidence scores
+- Feature contribution analysis for explainability
+- Merchant rule matching for high-confidence categorizations
+
+### Batch Processing
+Large sets of transactions can be processed efficiently via bulk endpoints:
+- `/api/ml/predict/bulk` for batch predictions
+- `/api/ml/predict/batch-unpredicted` for existing unpredicted transactions
+- Background processing for optimal performance
+
+### Background Processing
+Existing unpredicted transactions can be batch-processed after model training, allowing users to:
+- Upload transactions before training a model
+- Train models with sufficient labeled data
+- Retroactively predict categories for historical transactions
+
 ## 🎯 Performance
 
 - **Accuracy**: >90% correct categorization on real transaction data
@@ -233,11 +260,12 @@ The FastAPI + FastHTML migration is **functionally complete** and addresses the 
 
 ### 🔴 High Priority (Ready for Implementation)
 
-#### 1. **ML Pipeline Integration** 
-- Connect existing ML categorizer to FastAPI endpoints
-- Add `/api/ml/predict` endpoint for real-time categorization
-- Implement background ML prediction for new uploads
-- **Files to modify**: `api/upload.py`, create `api/ml.py`
+#### 1. **ML Pipeline Integration** ✅ **COMPLETED**
+- ~~Connect existing ML categorizer to FastAPI endpoints~~ → **Full ML API integration implemented**
+- ~~Add `/api/ml/predict` endpoint for real-time categorization~~ → **Complete with bulk endpoints**
+- ~~Implement background ML prediction for new uploads~~ → **Auto-prediction during CSV upload**
+- **Status**: ML predictions now work seamlessly with upload workflow and dedicated API endpoints
+- **Added endpoints**: `/api/ml/predict`, `/api/ml/predict/bulk`, `/api/ml/status`, `/api/ml/retrain`
 
 #### 2. **Real Transaction Display** ✅ **COMPLETED**
 - ~~Update Review page to show actual transactions from database~~ → **Implemented with dynamic data fetching**
@@ -315,15 +343,15 @@ uv run streamlit run streamlit_app.py --server.port 8501
 - ✅ **Core Migration**: All Streamlit functionality migrated to FastAPI + FastHTML
 - ✅ **State Persistence**: Category settings persist correctly across navigation  
 - ✅ **Architecture**: Clean separation of API and web layers
-- ✅ **Code Quality**: Lint errors reduced from 122 → 4, all tests passing (17/17)
+- ✅ **Code Quality**: Lint errors reduced from 122 → 0, all tests passing (22/22)
 - ✅ **Transaction Display**: Review page shows real data with working categorization workflow
-- ⏳ **ML Integration**: Connect existing ML pipeline to new architecture
+- ✅ **ML Integration**: Complete ML pipeline integration with FastAPI endpoints
 - ⏳ **Feature Parity**: All original features working in new system
 - ⏳ **Testing**: Comprehensive test coverage for reliability
 
 ### 🎯 Immediate Next Task
 
-**Continue with Task #1 (ML Pipeline Integration)** or **Task #3 (Category Management Interface)** as both the code quality foundation and transaction display are now solid. The review page successfully shows real data and enables manual categorization. Next priorities:
+**Continue with Task #3 (Category Management Interface)** as both the ML pipeline integration and transaction display are now complete. The system now has automatic categorization predictions and manual review capabilities. Next priorities:
 
-1. **ML Integration**: Add automatic categorization predictions to reduce manual review workload
-2. **Category Management**: Complete the Settings page for full category lifecycle management
+1. **Category Management**: Complete the Settings page for full category lifecycle management
+2. **Export Functionality**: Implement data export workflows for analysis-ready data

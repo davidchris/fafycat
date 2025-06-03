@@ -78,6 +78,7 @@ class UploadResponse(BaseModel):
     rows_processed: int
     transactions_imported: int
     duplicates_skipped: int
+    predictions_made: int = 0
 
 
 class ExportRequest(BaseModel):
@@ -87,3 +88,39 @@ class ExportRequest(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     categories: list[str] | None = None
+
+
+class TransactionPredictRequest(BaseModel):
+    """Request model for ML prediction of a transaction."""
+
+    date: date
+    name: str
+    purpose: str = ""
+    amount: float
+    currency: str = "EUR"
+    value_date: date | None = None
+
+
+class TransactionPredictResponse(BaseModel):
+    """Response model for ML prediction."""
+
+    predicted_category_id: int | None = None
+    predicted_category_name: str | None = None
+    confidence_score: float
+    feature_contributions: dict[str, float]
+    confidence_level: str
+    merchant_suggestions: list[dict] | None = None
+
+
+class BulkPredictRequest(BaseModel):
+    """Request model for bulk ML predictions."""
+
+    transactions: list[TransactionPredictRequest]
+
+
+class BulkPredictResponse(BaseModel):
+    """Response model for bulk ML predictions."""
+
+    predictions: list[TransactionPredictResponse]
+    total_processed: int
+    processing_time_ms: float

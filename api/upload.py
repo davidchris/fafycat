@@ -17,6 +17,59 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 upload_sessions = {}
 
 
+def _predict_transaction_categories(db: Session, transactions: list, new_count: int) -> int:
+    """Predict categories for newly uploaded transactions."""
+    predictions_made = 0
+    if new_count > 0:
+        try:
+            from api.ml import get_categorizer
+            categorizer = get_categorizer(db)
+
+            # Get newly imported transactions for prediction
+            new_transaction_ids = [t.generate_id() for t in transactions]
+            from src.fafycat.core.database import TransactionORM
+
+            new_txns = (
+                db.query(TransactionORM)
+                .filter(TransactionORM.id.in_(new_transaction_ids))
+                .filter(TransactionORM.predicted_category_id.is_(None))  # Only predict for unpredicted transactions
+                .all()
+            )
+
+            if new_txns:
+                # Convert to TransactionInput for prediction
+                txn_inputs = []
+                for txn in new_txns:
+                    from src.fafycat.core.models import TransactionInput
+                    txn_input = TransactionInput(
+                        date=txn.date,
+                        value_date=txn.value_date or txn.date,
+                        name=txn.name,
+                        purpose=txn.purpose or "",
+                        amount=txn.amount,
+                        currency=txn.currency,
+                    )
+                    txn_inputs.append(txn_input)
+
+                # Get predictions
+                predictions = categorizer.predict_with_confidence(txn_inputs)
+
+                # Update transactions with predictions
+                for txn, prediction in zip(new_txns, predictions, strict=True):
+                    txn.predicted_category_id = prediction.predicted_category_id
+                    txn.confidence_score = prediction.confidence_score
+                    predictions_made += 1
+
+                db.commit()
+
+        except Exception as e:
+            # Don't fail upload if ML prediction fails, just log it
+            import logging
+            logging.warning("ML prediction failed during upload: %s", e)
+
+    return predictions_made
+
+
 @router.post("/csv", response_model=UploadResponse)
 async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_session)) -> UploadResponse:
     """Upload and process a CSV file containing transactions."""
@@ -54,6 +107,9 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
         # Save transactions to database
         new_count, duplicate_count = processor.save_transactions(transactions)
 
+        # Auto-predict categories for new transactions if model is available
+        predictions_made = _predict_transaction_categories(db, transactions, new_count)
+
         upload_id = str(uuid.uuid4())
 
         # Store session info for potential preview/confirmation workflow
@@ -62,6 +118,7 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
             "total_rows": len(transactions),
             "imported": new_count,
             "duplicates": duplicate_count,
+            "predictions_made": predictions_made,
             "transaction_ids": [t.generate_id() for t in transactions[:10]],  # Store first 10 for preview
         }
 
@@ -71,6 +128,7 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
             rows_processed=len(transactions),
             transactions_imported=new_count,
             duplicates_skipped=duplicate_count,
+            predictions_made=predictions_made,
         )
 
     except HTTPException:
@@ -113,6 +171,7 @@ async def get_upload_preview(upload_id: str, db: Session = Depends(get_db_sessio
             "total_rows": session_data["total_rows"],
             "imported": session_data["imported"],
             "duplicates": session_data["duplicates"],
+            "predictions_made": session_data.get("predictions_made", 0),
         },
         "preview": preview_data,
     }
@@ -132,5 +191,9 @@ async def confirm_upload(upload_id: str, db: Session = Depends(get_db_session)) 
     return {
         "message": "Upload confirmed and transactions saved",
         "upload_id": upload_id,
-        "summary": {"imported": session_data["imported"], "duplicates": session_data["duplicates"]},
+        "summary": {
+            "imported": session_data["imported"],
+            "duplicates": session_data["duplicates"],
+            "predictions_made": session_data.get("predictions_made", 0),
+        },
     }
