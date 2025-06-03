@@ -81,24 +81,21 @@ class TestFeatureExtractor:
         extractor = FeatureExtractor()
 
         transaction = TransactionInput(
-            date=date(2024, 1, 15),
-            name="EDEKA Markt 1234",
-            purpose="Lastschrift",
-            amount=-45.67
+            date=date(2024, 1, 15), name="EDEKA Markt 1234", purpose="Lastschrift", amount=-45.67
         )
 
         features = extractor.extract_features(transaction)
 
         # Check numerical features
-        assert features['amount'] == -45.67
-        assert features['amount_abs'] == 45.67
-        assert features['is_income'] == 0
-        assert features['day_of_month'] == 15
-        assert features['day_of_week'] == 0  # Monday
-        assert features['month'] == 1
-        assert features['is_weekend'] == 0
-        assert features['is_month_start'] == 0
-        assert features['is_month_end'] == 0
+        assert features["amount"] == -45.67
+        assert features["amount_abs"] == 45.67
+        assert features["is_income"] == 0
+        assert features["day_of_month"] == 15
+        assert features["day_of_week"] == 0  # Monday
+        assert features["month"] == 1
+        assert features["is_weekend"] == 0
+        assert features["is_month_start"] == 0
+        assert features["is_month_end"] == 0
 
     def test_temporal_features(self):
         """Test extraction of temporal features."""
@@ -109,33 +106,30 @@ class TestFeatureExtractor:
             date=date(2024, 1, 28),  # Sunday
             name="Restaurant",
             purpose="Kartenzahlung",
-            amount=-25.50
+            amount=-25.50,
         )
 
         features = extractor.extract_features(transaction)
 
-        assert features['day_of_week'] == 6  # Sunday
-        assert features['is_weekend'] == 1
-        assert features['is_month_end'] == 1  # 28th is >= 25
+        assert features["day_of_week"] == 6  # Sunday
+        assert features["is_weekend"] == 1
+        assert features["is_month_end"] == 1  # 28th is >= 25
 
     def test_merchant_features(self):
         """Test merchant-specific features."""
         extractor = FeatureExtractor()
 
         transaction = TransactionInput(
-            date=date(2024, 1, 15),
-            name="EDEKA Markt Berlin 1234",
-            purpose="Lastschrift",
-            amount=-35.90
+            date=date(2024, 1, 15), name="EDEKA Markt Berlin 1234", purpose="Lastschrift", amount=-35.90
         )
 
         features = extractor.extract_features(transaction)
 
-        assert features['is_supermarket'] == 1
-        assert features['is_lastschrift'] == 1
-        assert features['merchant_clean'] == "EDEKA MARKT"
-        assert features['merchant_length'] > 0
-        assert features['merchant_word_count'] == 2
+        assert features["is_supermarket"] == 1
+        assert features["is_lastschrift"] == 1
+        assert features["merchant_clean"] == "EDEKA MARKT"
+        assert features["merchant_length"] > 0
+        assert features["merchant_word_count"] == 2
 
     def test_transaction_type_features(self):
         """Test transaction type detection."""
@@ -143,64 +137,46 @@ class TestFeatureExtractor:
 
         # Online transaction
         transaction = TransactionInput(
-            date=date(2024, 1, 15),
-            name="Amazon Marketplace",
-            purpose="Online-Kauf PayPal",
-            amount=-89.99
+            date=date(2024, 1, 15), name="Amazon Marketplace", purpose="Online-Kauf PayPal", amount=-89.99
         )
 
         features = extractor.extract_features(transaction)
 
-        assert features['is_online'] == 1
-        assert features['is_tech'] == 1
+        assert features["is_online"] == 1
+        assert features["is_tech"] == 1
 
     def test_amount_magnitude(self):
         """Test amount magnitude categorization."""
         extractor = FeatureExtractor()
 
         test_cases = [
-            (5.50, 0),    # small
-            (25.00, 1),   # medium
+            (5.50, 0),  # small
+            (25.00, 1),  # medium
             (150.00, 2),  # large
             (750.00, 3),  # very large
-            (1500.00, 4), # huge
+            (1500.00, 4),  # huge
         ]
 
         for amount, expected_magnitude in test_cases:
-            transaction = TransactionInput(
-                date=date(2024, 1, 15),
-                name="Test",
-                purpose="Test",
-                amount=-amount
-            )
+            transaction = TransactionInput(date=date(2024, 1, 15), name="Test", purpose="Test", amount=-amount)
 
             features = extractor.extract_features(transaction)
-            assert features['amount_magnitude'] == expected_magnitude
+            assert features["amount_magnitude"] == expected_magnitude
 
     def test_batch_processing(self):
         """Test batch feature extraction."""
         extractor = FeatureExtractor()
 
         transactions = [
-            TransactionInput(
-                date=date(2024, 1, 15),
-                name="EDEKA",
-                purpose="Lastschrift",
-                amount=-45.67
-            ),
-            TransactionInput(
-                date=date(2024, 1, 16),
-                name="McDonald's",
-                purpose="Kartenzahlung",
-                amount=-12.50
-            )
+            TransactionInput(date=date(2024, 1, 15), name="EDEKA", purpose="Lastschrift", amount=-45.67),
+            TransactionInput(date=date(2024, 1, 16), name="McDonald's", purpose="Kartenzahlung", amount=-12.50),
         ]
 
         features_list = extractor.extract_batch_features(transactions)
 
         assert len(features_list) == 2
-        assert features_list[0]['is_supermarket'] == 1
-        assert features_list[1]['is_restaurant'] == 1
+        assert features_list[0]["is_supermarket"] == 1
+        assert features_list[1]["is_restaurant"] == 1
 
 
 if __name__ == "__main__":

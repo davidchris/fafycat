@@ -17,33 +17,33 @@ class DatabaseConfig(BaseModel):
 class MLConfig(BaseModel):
     """Machine learning configuration."""
 
-    lgbm_params: dict[str, Any] = Field(default_factory=lambda: {
-        "n_estimators": 200,
-        "num_leaves": 31,
-        "max_depth": 8,
-        "learning_rate": 0.05,
-        "feature_fraction": 0.8,
-        "bagging_fraction": 0.8,
-        "bagging_freq": 5,
-        "min_child_samples": 10,
-        "class_weight": "balanced",
-        "random_state": 42,
-        "n_jobs": -1
-    })
+    lgbm_params: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "n_estimators": 200,
+            "num_leaves": 31,
+            "max_depth": 8,
+            "learning_rate": 0.05,
+            "feature_fraction": 0.8,
+            "bagging_fraction": 0.8,
+            "bagging_freq": 5,
+            "min_child_samples": 10,
+            "class_weight": "balanced",
+            "random_state": 42,
+            "n_jobs": -1,
+        }
+    )
 
-    tfidf_params: dict[str, Any] = Field(default_factory=lambda: {
-        "max_features": 500,
-        "analyzer": "char_wb",
-        "ngram_range": (3, 5),
-        "min_df": 2,
-        "max_df": 0.95
-    })
+    tfidf_params: dict[str, Any] = Field(
+        default_factory=lambda: {
+            "max_features": 500,
+            "analyzer": "char_wb",
+            "ngram_range": (3, 5),
+            "min_df": 2,
+            "max_df": 0.95,
+        }
+    )
 
-    confidence_thresholds: dict[str, float] = Field(default_factory=lambda: {
-        "high": 0.9,
-        "medium": 0.7,
-        "low": 0.5
-    })
+    confidence_thresholds: dict[str, float] = Field(default_factory=lambda: {"high": 0.9, "medium": 0.7, "low": 0.5})
 
     model_dir: Path = Field(default_factory=lambda: Path(os.getenv("FAFYCAT_MODEL_DIR", "data/models")))
     min_training_samples: int = 50

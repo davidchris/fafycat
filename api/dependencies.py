@@ -1,6 +1,7 @@
 """Dependency injection for API routes."""
 
-from typing import Generator
+from collections.abc import Generator
+
 from fastapi import Depends, Request
 
 from src.fafycat.core.config import AppConfig

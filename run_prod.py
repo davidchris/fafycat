@@ -14,21 +14,22 @@ def main():
     os.environ["FAFYCAT_ENV"] = "production"
 
     app_dir = Path(__file__).parent
-    streamlit_app = app_dir / "streamlit_app.py"
 
-    print("🐱 Starting FafyCat in PRODUCTION mode")
+    print("🐱 Starting FafyCat in PRODUCTION mode (FastAPI)")
     print(f"📊 Database: {os.environ['FAFYCAT_DB_URL']}")
     print("💰 Using real transaction data")
     print("⚠️  Make sure you have imported your real data!")
+    print("🌐 Web UI will be available at: http://localhost:8000")
+    print("📚 API docs available at: http://localhost:8000/docs")
     print("-" * 50)
 
     try:
-        subprocess.run([
-            sys.executable, "-m", "streamlit", "run", str(streamlit_app),
-            "--server.port", "8502"
-        ], cwd=app_dir)
+        subprocess.run(
+            [sys.executable, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"], cwd=app_dir
+        )
     except KeyboardInterrupt:
         print("\n👋 FafyCat production mode stopped.")
+
 
 if __name__ == "__main__":
     main()

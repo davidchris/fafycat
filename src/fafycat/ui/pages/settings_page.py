@@ -16,13 +16,13 @@ def show() -> None:
     st.markdown("Manage categories, budgets, and export data.")
 
     db_manager = st.session_state.db_manager
-    
+
     # Mark that we're on the settings page and clear stale widget states
     # This prevents checkbox states from other pages from interfering
-    if st.session_state.get('current_page') != 'settings':
-        st.session_state.current_page = 'settings'
+    if st.session_state.get("current_page") != "settings":
+        st.session_state.current_page = "settings"
         # Clear any widget states that might be stale when coming from other pages
-        keys_to_clear = [key for key in st.session_state.keys() if key.startswith(('active_', 'name_', 'budget_'))]
+        keys_to_clear = [key for key in st.session_state if key.startswith(("active_", "name_", "budget_"))]
         for key in keys_to_clear:
             del st.session_state[key]
 
@@ -57,11 +57,7 @@ def _show_category_management(db_manager) -> None:
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
-            new_type = st.selectbox(
-                "Type",
-                options=[t.value for t in CategoryType],
-                key="new_category_type"
-            )
+            new_type = st.selectbox("Type", options=[t.value for t in CategoryType], key="new_category_type")
 
         with col2:
             new_name = st.text_input("Name", key="new_category_name")
@@ -73,11 +69,7 @@ def _show_category_management(db_manager) -> None:
             if st.button("➕ Add Category"):
                 if new_name:
                     try:
-                        category = CategoryORM(
-                            type=new_type,
-                            name=new_name.lower().strip(),
-                            budget=new_budget
-                        )
+                        category = CategoryORM(type=new_type, name=new_name.lower().strip(), budget=new_budget)
                         session.add(category)
                         session.commit()
                         st.success(f"Added category: {new_name}")
@@ -94,11 +86,15 @@ def _show_category_management(db_manager) -> None:
 
         if categories:
             # Group by type
-            spending_cats = [c for c in categories if c.type == 'spending']
-            income_cats = [c for c in categories if c.type == 'income']
-            saving_cats = [c for c in categories if c.type == 'saving']
+            spending_cats = [c for c in categories if c.type == "spending"]
+            income_cats = [c for c in categories if c.type == "income"]
+            saving_cats = [c for c in categories if c.type == "saving"]
 
-            for cat_type, cats in [("💸 Spending", spending_cats), ("💰 Income", income_cats), ("🏦 Saving", saving_cats)]:
+            for cat_type, cats in [
+                ("💸 Spending", spending_cats),
+                ("💰 Income", income_cats),
+                ("🏦 Saving", saving_cats),
+            ]:
                 if cats:
                     st.markdown(f"**{cat_type}**")
 
@@ -107,10 +103,7 @@ def _show_category_management(db_manager) -> None:
 
                         with col1:
                             new_name = st.text_input(
-                                "Name",
-                                value=cat.name,
-                                key=f"name_{cat.id}",
-                                label_visibility="collapsed"
+                                "Name", value=cat.name, key=f"name_{cat.id}", label_visibility="collapsed"
                             )
 
                         with col2:
@@ -120,15 +113,11 @@ def _show_category_management(db_manager) -> None:
                                 min_value=0.0,
                                 step=10.0,
                                 key=f"budget_{cat.id}",
-                                label_visibility="collapsed"
+                                label_visibility="collapsed",
                             )
 
                         with col3:
-                            new_active = st.checkbox(
-                                "Active",
-                                value=cat.is_active,
-                                key=f"active_{cat.id}"
-                            )
+                            new_active = st.checkbox("Active", value=cat.is_active, key=f"active_{cat.id}")
 
                         with col4:
                             if st.button("💾", key=f"save_{cat.id}", help="Save changes"):
@@ -137,7 +126,7 @@ def _show_category_management(db_manager) -> None:
                                 cat.is_active = new_active
                                 session.commit()
                                 # Clear cached category data to ensure fresh load
-                                if 'categories_cache' in st.session_state:
+                                if "categories_cache" in st.session_state:
                                     del st.session_state.categories_cache
                                 st.success("Updated!")
                                 st.rerun()
@@ -145,10 +134,14 @@ def _show_category_management(db_manager) -> None:
                         with col5:
                             if st.button("🗑️", key=f"delete_{cat.id}", help="Delete category"):
                                 # Check if category is used
-                                usage_count = session.query(TransactionORM).filter(
-                                    (TransactionORM.category_id == cat.id) |
-                                    (TransactionORM.predicted_category_id == cat.id)
-                                ).count()
+                                usage_count = (
+                                    session.query(TransactionORM)
+                                    .filter(
+                                        (TransactionORM.category_id == cat.id)
+                                        | (TransactionORM.predicted_category_id == cat.id)
+                                    )
+                                    .count()
+                                )
 
                                 if usage_count > 0:
                                     st.error(f"Cannot delete category - used by {usage_count} transactions")
@@ -168,12 +161,8 @@ def _show_statistics(db_manager) -> None:
     with db_manager.get_session() as session:
         # Basic stats
         total_transactions = session.query(TransactionORM).count()
-        reviewed_transactions = session.query(TransactionORM).filter(
-            TransactionORM.is_reviewed == True
-        ).count()
-        categorized_transactions = session.query(TransactionORM).filter(
-            TransactionORM.category_id.isnot(None)
-        ).count()
+        reviewed_transactions = session.query(TransactionORM).filter(TransactionORM.is_reviewed).count()
+        categorized_transactions = session.query(TransactionORM).filter(TransactionORM.category_id.isnot(None)).count()
 
         col1, col2, col3 = st.columns(3)
 
@@ -193,16 +182,14 @@ def _show_statistics(db_manager) -> None:
             # Get spending data for last 30 days
             thirty_days_ago = date.today() - timedelta(days=30)
 
-            spending_query = session.query(
-                CategoryORM.name,
-                TransactionORM.amount
-            ).join(
-                TransactionORM, CategoryORM.id == TransactionORM.category_id
-            ).filter(
-                CategoryORM.type == 'spending',
-                TransactionORM.date >= thirty_days_ago,
-                TransactionORM.amount < 0
-            ).all()
+            spending_query = (
+                session.query(CategoryORM.name, TransactionORM.amount)
+                .join(TransactionORM, CategoryORM.id == TransactionORM.category_id)
+                .filter(
+                    CategoryORM.type == "spending", TransactionORM.date >= thirty_days_ago, TransactionORM.amount < 0
+                )
+                .all()
+            )
 
             if spending_query:
                 spending_data = {}
@@ -212,25 +199,23 @@ def _show_statistics(db_manager) -> None:
                     spending_data[category_name] += abs(amount)
 
                 # Create chart
-                spending_df = pd.DataFrame(
-                    list(spending_data.items()),
-                    columns=['Category', 'Amount']
-                ).sort_values('Amount', ascending=False)
+                spending_df = pd.DataFrame(list(spending_data.items()), columns=["Category", "Amount"]).sort_values(
+                    "Amount", ascending=False
+                )
 
-                st.bar_chart(spending_df.set_index('Category'))
+                st.bar_chart(spending_df.set_index("Category"))
 
                 # Top spending categories
                 st.markdown("**Top Spending Categories**")
                 for i, (category, amount) in enumerate(spending_df.head(5).values):
-                    st.write(f"{i+1}. **{category}**: €{amount:.2f}")
+                    st.write(f"{i + 1}. **{category}**: €{amount:.2f}")
 
         # Model performance (if available)
         st.markdown("**Model Performance**")
 
         from ...core.database import ModelMetadataORM
-        latest_model = session.query(ModelMetadataORM).filter(
-            ModelMetadataORM.is_active == True
-        ).first()
+
+        latest_model = session.query(ModelMetadataORM).filter(ModelMetadataORM.is_active).first()
 
         if latest_model:
             col1, col2 = st.columns(2)
@@ -253,23 +238,17 @@ def _show_export_options(db_manager) -> None:
         col1, col2 = st.columns(2)
 
         with col1:
-            start_date = st.date_input(
-                "Start Date",
-                value=date.today() - timedelta(days=90)
-            )
+            start_date = st.date_input("Start Date", value=date.today() - timedelta(days=90))
 
         with col2:
-            end_date = st.date_input(
-                "End Date",
-                value=date.today()
-            )
+            end_date = st.date_input("End Date", value=date.today())
 
         # Category filter
         categories = get_categories(session)
         selected_categories = st.multiselect(
             "Categories (leave empty for all)",
             options=[cat.id for cat in categories],
-            format_func=lambda x: next(cat.name for cat in categories if cat.id == x)
+            format_func=lambda x: next(cat.name for cat in categories if cat.id == x),
         )
 
         # Export button
@@ -282,19 +261,14 @@ def _show_export_options(db_manager) -> None:
                     export_path,
                     start_date=start_date,
                     end_date=end_date,
-                    category_ids=selected_categories if selected_categories else None
+                    category_ids=selected_categories if selected_categories else None,
                 )
 
                 st.success(f"Data exported to: {export_path}")
 
                 # Show download link
-                with open(export_path, 'rb') as f:
-                    st.download_button(
-                        "📥 Download CSV",
-                        data=f.read(),
-                        file_name=export_path.name,
-                        mime="text/csv"
-                    )
+                with open(export_path, "rb") as f:
+                    st.download_button("📥 Download CSV", data=f.read(), file_name=export_path.name, mime="text/csv")
 
             except Exception as e:
                 st.error(f"Export failed: {e}")
@@ -331,18 +305,14 @@ def _show_advanced_settings(db_manager) -> None:
     with col1:
         if st.button("🗑️ Delete All Unreviewed"):
             with db_manager.get_session() as session:
-                deleted = session.query(TransactionORM).filter(
-                    TransactionORM.is_reviewed == False
-                ).delete()
+                deleted = session.query(TransactionORM).filter(~TransactionORM.is_reviewed).delete()
                 session.commit()
                 st.success(f"Deleted {deleted} unreviewed transactions")
 
     with col2:
         if st.button("🔄 Reset All Reviews"):
             with db_manager.get_session() as session:
-                updated = session.query(TransactionORM).update(
-                    {'is_reviewed': False, 'category_id': None}
-                )
+                updated = session.query(TransactionORM).update({"is_reviewed": False, "category_id": None})
                 session.commit()
                 st.success(f"Reset {updated} transaction reviews")
 
@@ -366,13 +336,12 @@ def _show_advanced_settings(db_manager) -> None:
             try:
                 from ...ml.categorizer import TransactionCategorizer
 
-                with st.spinner("Training model..."):
-                    with db_manager.get_session() as session:
-                        categorizer = TransactionCategorizer(session, st.session_state.config.ml)
-                        metrics = categorizer.train()
-                        categorizer.save_model(model_path)
+                with st.spinner("Training model..."), db_manager.get_session() as session:
+                    categorizer = TransactionCategorizer(session, st.session_state.config.ml)
+                    metrics = categorizer.train()
+                    categorizer.save_model(model_path)
 
-                        st.success(f"Model trained! Accuracy: {metrics.accuracy:.1%}")
+                    st.success(f"Model trained! Accuracy: {metrics.accuracy:.1%}")
 
             except Exception as e:
                 st.error(f"Training failed: {e}")

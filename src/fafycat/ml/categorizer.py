@@ -45,14 +45,14 @@ class TransactionCategorizer:
     def prepare_training_data(self) -> tuple[pd.DataFrame, np.ndarray]:
         """Prepare training data from database transactions."""
         # Get transactions with confirmed categories
-        query = self.session.query(TransactionORM).filter(
-            TransactionORM.category_id.isnot(None)
-        )
+        query = self.session.query(TransactionORM).filter(TransactionORM.category_id.isnot(None))
 
         transactions = query.all()
 
         if len(transactions) < self.config.min_training_samples:
-            raise ValueError(f"Not enough training data. Need at least {self.config.min_training_samples} transactions.")
+            raise ValueError(
+                f"Not enough training data. Need at least {self.config.min_training_samples} transactions."
+            )
 
         # Filter out categories with too few samples for cross-validation
         min_samples_per_category = 3  # Need at least 3 for CV
@@ -94,7 +94,7 @@ class TransactionCategorizer:
                 name=txn.name,
                 purpose=txn.purpose or "",
                 amount=txn.amount,
-                currency=txn.currency
+                currency=txn.currency,
             )
             txn_inputs.append(txn_input)
             categories.append(txn.category_id)
@@ -137,15 +137,11 @@ class TransactionCategorizer:
         # Use cv=2 to handle small classes (need at least 2 samples per fold)
         # and fallback to sigmoid method if isotonic fails
         try:
-            self.calibrated_classifier = CalibratedClassifierCV(
-                self.classifier, cv=2, method='isotonic'
-            )
+            self.calibrated_classifier = CalibratedClassifierCV(self.classifier, cv=2, method="isotonic")
             self.calibrated_classifier.fit(X_train_prepared, y_train)
         except ValueError as e:
             print(f"Isotonic calibration failed ({e}), using sigmoid method...")
-            self.calibrated_classifier = CalibratedClassifierCV(
-                self.classifier, cv=2, method='sigmoid'
-            )
+            self.calibrated_classifier = CalibratedClassifierCV(self.classifier, cv=2, method="sigmoid")
             self.calibrated_classifier.fit(X_train_prepared, y_train)
 
         # Calculate metrics
@@ -171,15 +167,12 @@ class TransactionCategorizer:
         X_numerical = X_df[numerical_features].fillna(0).values
 
         # Get text features
-        text_features = X_df['text_combined'].fillna('').values
+        text_features = X_df["text_combined"].fillna("").values
 
         if fit:
             X_text = self.text_vectorizer.fit_transform(text_features)
             # Store feature names
-            self.feature_names = (
-                numerical_features +
-                [f'text_{i}' for i in range(X_text.shape[1])]
-            )
+            self.feature_names = numerical_features + [f"text_{i}" for i in range(X_text.shape[1])]
         else:
             X_text = self.text_vectorizer.transform(text_features)
 
@@ -188,10 +181,7 @@ class TransactionCategorizer:
 
         return X_combined
 
-    def predict_with_confidence(
-        self,
-        transactions: list[TransactionInput]
-    ) -> list[TransactionPrediction]:
+    def predict_with_confidence(self, transactions: list[TransactionInput]) -> list[TransactionPrediction]:
         """Predict categories with confidence scores."""
         if not self.is_trained:
             raise ValueError("Model must be trained before prediction")
@@ -202,12 +192,14 @@ class TransactionCategorizer:
             # First try rule-based merchant mapping
             merchant_match = self.merchant_mapper.get_category(txn.name)
             if merchant_match and merchant_match.confidence > 0.95:
-                predictions.append(TransactionPrediction(
-                    transaction_id=txn.generate_id(),
-                    predicted_category_id=merchant_match.category_id,
-                    confidence_score=merchant_match.confidence,
-                    feature_contributions={'merchant_rule': 1.0}
-                ))
+                predictions.append(
+                    TransactionPrediction(
+                        transaction_id=txn.generate_id(),
+                        predicted_category_id=merchant_match.category_id,
+                        confidence_score=merchant_match.confidence,
+                        feature_contributions={"merchant_rule": 1.0},
+                    )
+                )
                 continue
 
             # Otherwise use ML model
@@ -228,20 +220,18 @@ class TransactionCategorizer:
             # Get feature importance for this prediction
             feature_contributions = self._get_feature_contributions(X_prepared[0], pred_idx)
 
-            predictions.append(TransactionPrediction(
-                transaction_id=txn.generate_id(),
-                predicted_category_id=predicted_category_id,
-                confidence_score=confidence,
-                feature_contributions=feature_contributions
-            ))
+            predictions.append(
+                TransactionPrediction(
+                    transaction_id=txn.generate_id(),
+                    predicted_category_id=predicted_category_id,
+                    confidence_score=confidence,
+                    feature_contributions=feature_contributions,
+                )
+            )
 
         return predictions
 
-    def _get_feature_contributions(
-        self,
-        X_instance: np.ndarray,
-        predicted_class: int
-    ) -> dict[str, float]:
+    def _get_feature_contributions(self, X_instance: np.ndarray, predicted_class: int) -> dict[str, float]:
         """Get feature contributions for explainability."""
         # Get feature importance from the model
         feature_importance = self.classifier.feature_importances_
@@ -260,7 +250,7 @@ class TransactionCategorizer:
         # Normalize contributions
         total = sum(contributions.values())
         if total > 0:
-            contributions = {k: v/total for k, v in contributions.items()}
+            contributions = {k: v / total for k, v in contributions.items()}
 
         return contributions
 
@@ -278,16 +268,12 @@ class TransactionCategorizer:
         accuracy = accuracy_score(y_test, y_pred)
 
         # Per-category metrics
-        precision, recall, _, support = precision_recall_fscore_support(
-            y_test, y_pred, average=None, zero_division=0
-        )
+        precision, recall, _, support = precision_recall_fscore_support(y_test, y_pred, average=None, zero_division=0)
 
         # Get category names
         category_names = {}
         for category_id in self.classes_:
-            category = self.session.query(CategoryORM).filter(
-                CategoryORM.id == category_id
-            ).first()
+            category = self.session.query(CategoryORM).filter(CategoryORM.id == category_id).first()
             if category:
                 category_names[str(category_id)] = category.name
 
@@ -305,23 +291,22 @@ class TransactionCategorizer:
         cm = confusion_matrix(y_test, y_pred)
 
         # Feature importance
-        feature_importance = dict(zip(
-            self.feature_names,
-            [float(x) for x in self.classifier.feature_importances_], strict=False
-        ))
+        feature_importance = dict(
+            zip(self.feature_names, [float(x) for x in self.classifier.feature_importances_], strict=False)
+        )
 
         return ModelMetrics(
             accuracy=accuracy,
             precision_per_category=precision_per_category,
             recall_per_category=recall_per_category,
             confusion_matrix=cm.tolist(),
-            feature_importance=feature_importance
+            feature_importance=feature_importance,
         )
 
     def _save_model_metadata(self, metrics: ModelMetrics) -> None:
         """Save model metadata to database."""
         # Deactivate previous models
-        self.session.query(ModelMetadataORM).update({'is_active': False})
+        self.session.query(ModelMetadataORM).update({"is_active": False})
 
         # Create new model metadata
         metadata = ModelMetadataORM(
@@ -329,7 +314,7 @@ class TransactionCategorizer:
             accuracy=metrics.accuracy,
             feature_importance=json.dumps(metrics.feature_importance),
             parameters=json.dumps(self.config.lgbm_params),
-            is_active=True
+            is_active=True,
         )
 
         self.session.add(metadata)
@@ -343,31 +328,31 @@ class TransactionCategorizer:
         model_path.parent.mkdir(parents=True, exist_ok=True)
 
         model_data = {
-            'classifier': self.classifier,
-            'calibrated_classifier': self.calibrated_classifier,
-            'text_vectorizer': self.text_vectorizer,
-            'label_encoder': self.label_encoder,
-            'feature_names': self.feature_names,
-            'classes_': self.classes_,
-            'model_version': self.model_version,
-            'config': self.config.model_dump()
+            "classifier": self.classifier,
+            "calibrated_classifier": self.calibrated_classifier,
+            "text_vectorizer": self.text_vectorizer,
+            "label_encoder": self.label_encoder,
+            "feature_names": self.feature_names,
+            "classes_": self.classes_,
+            "model_version": self.model_version,
+            "config": self.config.model_dump(),
         }
 
-        with open(model_path, 'wb') as f:
+        with open(model_path, "wb") as f:
             pickle.dump(model_data, f)
 
     def load_model(self, model_path: Path) -> None:
         """Load trained model from disk."""
-        with open(model_path, 'rb') as f:
+        with open(model_path, "rb") as f:
             model_data = pickle.load(f)
 
-        self.classifier = model_data['classifier']
-        self.calibrated_classifier = model_data['calibrated_classifier']
-        self.text_vectorizer = model_data['text_vectorizer']
-        self.label_encoder = model_data['label_encoder']
-        self.feature_names = model_data['feature_names']
-        self.classes_ = model_data['classes_']
-        self.model_version = model_data['model_version']
+        self.classifier = model_data["classifier"]
+        self.calibrated_classifier = model_data["calibrated_classifier"]
+        self.text_vectorizer = model_data["text_vectorizer"]
+        self.label_encoder = model_data["label_encoder"]
+        self.feature_names = model_data["feature_names"]
+        self.classes_ = model_data["classes_"]
+        self.model_version = model_data["model_version"]
 
         self.is_trained = True
 
@@ -381,25 +366,23 @@ class TransactionCategorizer:
         prediction = predictions[0]
 
         # Get category name
-        category = self.session.query(CategoryORM).filter(
-            CategoryORM.id == prediction.predicted_category_id
-        ).first()
+        category = self.session.query(CategoryORM).filter(CategoryORM.id == prediction.predicted_category_id).first()
 
         # Get merchant suggestions
         merchant_suggestions = self.merchant_mapper.get_mapping_suggestions(transaction.name)
 
         return {
-            'prediction': prediction,
-            'category_name': category.name if category else 'Unknown',
-            'feature_contributions': prediction.feature_contributions,
-            'merchant_suggestions': merchant_suggestions,
-            'confidence_level': self._get_confidence_level(prediction.confidence_score)
+            "prediction": prediction,
+            "category_name": category.name if category else "Unknown",
+            "feature_contributions": prediction.feature_contributions,
+            "merchant_suggestions": merchant_suggestions,
+            "confidence_level": self._get_confidence_level(prediction.confidence_score),
         }
 
     def _get_confidence_level(self, confidence: float) -> str:
         """Convert confidence score to human-readable level."""
-        if confidence >= self.config.confidence_thresholds['high']:
-            return 'High'
-        if confidence >= self.config.confidence_thresholds['medium']:
-            return 'Medium'
-        return 'Low'
+        if confidence >= self.config.confidence_thresholds["high"]:
+            return "High"
+        if confidence >= self.config.confidence_thresholds["medium"]:
+            return "Medium"
+        return "Low"

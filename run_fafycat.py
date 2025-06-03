@@ -12,11 +12,10 @@ def main():
     streamlit_app = app_dir / "streamlit_app.py"
 
     try:
-        subprocess.run([
-            sys.executable, "-m", "streamlit", "run", str(streamlit_app)
-        ], cwd=app_dir)
+        subprocess.run([sys.executable, "-m", "streamlit", "run", str(streamlit_app)], cwd=app_dir)
     except KeyboardInterrupt:
         print("\n👋 FafyCat app stopped.")
+
 
 if __name__ == "__main__":
     main()

@@ -66,12 +66,12 @@ class TestCSVProcessor:
         db_manager = setup_db
 
         # Create test CSV file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             writer = csv.writer(f)
-            writer.writerow(['date', 'name', 'purpose', 'amount', 'currency'])
-            writer.writerow(['2024-01-15', 'EDEKA Markt', 'Lastschrift', '-45.67', 'EUR'])
-            writer.writerow(['2024-01-16', 'McDonald\'s', 'Kartenzahlung', '-12.50', 'EUR'])
-            writer.writerow(['2024-01-25', 'COMPANY GMBH', 'Gehalt', '3500.00', 'EUR'])
+            writer.writerow(["date", "name", "purpose", "amount", "currency"])
+            writer.writerow(["2024-01-15", "EDEKA Markt", "Lastschrift", "-45.67", "EUR"])
+            writer.writerow(["2024-01-16", "McDonald's", "Kartenzahlung", "-12.50", "EUR"])
+            writer.writerow(["2024-01-25", "COMPANY GMBH", "Gehalt", "3500.00", "EUR"])
 
             temp_path = Path(f.name)
 
@@ -86,9 +86,9 @@ class TestCSVProcessor:
                 assert len(transactions) == 3
 
                 # Check transaction data
-                assert transactions[0].name == 'EDEKA Markt'
+                assert transactions[0].name == "EDEKA Markt"
                 assert transactions[0].amount == -45.67
-                assert transactions[1].name == 'McDonald\'s'
+                assert transactions[1].name == "McDonald's"
                 assert transactions[2].amount == 3500.00
 
         finally:
@@ -99,12 +99,12 @@ class TestCSVProcessor:
         db_manager = setup_db
 
         # Create test CSV file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             writer = csv.writer(f)
-            writer.writerow(['date', 'name', 'purpose', 'amount', 'currency'])
-            writer.writerow(['2024-01-15', 'EDEKA Markt', 'Lastschrift', '-45.67', 'EUR'])
-            writer.writerow(['2024-01-15', 'EDEKA Markt', 'Lastschrift', '-45.67', 'EUR'])  # Duplicate
-            writer.writerow(['2024-01-16', 'McDonald\'s', 'Kartenzahlung', '-12.50', 'EUR'])
+            writer.writerow(["date", "name", "purpose", "amount", "currency"])
+            writer.writerow(["2024-01-15", "EDEKA Markt", "Lastschrift", "-45.67", "EUR"])
+            writer.writerow(["2024-01-15", "EDEKA Markt", "Lastschrift", "-45.67", "EUR"])  # Duplicate
+            writer.writerow(["2024-01-16", "McDonald's", "Kartenzahlung", "-12.50", "EUR"])
 
             temp_path = Path(f.name)
 
@@ -157,9 +157,9 @@ class TestCSVProcessor:
                 transaction_types.add(txn.category)
 
         # Should have variety of categories
-        assert 'groceries' in transaction_types
-        assert 'salary' in transaction_types
-        assert 'rent' in transaction_types
+        assert "groceries" in transaction_types
+        assert "salary" in transaction_types
+        assert "rent" in transaction_types
 
         # Check date range (should span a year)
         dates = [txn.date for txn in transactions]
@@ -178,7 +178,7 @@ class TestCSVProcessor:
             processor.save_transactions(transactions)
 
             # Export to temporary file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
                 export_path = Path(f.name)
 
             try:
@@ -190,7 +190,7 @@ class TestCSVProcessor:
                 # Read and verify content
                 with open(export_path) as f:
                     content = f.read()
-                    assert 'id,date,value_date,name,purpose,amount' in content
+                    assert "id,date,value_date,name,purpose,amount" in content
                     assert len(content.splitlines()) > 1  # Header + data
 
             finally:

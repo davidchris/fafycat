@@ -22,10 +22,7 @@ class MerchantMapper:
         """Load merchant mappings from database into cache."""
         mappings = self.session.query(MerchantMappingORM).all()
         self._cache = {
-            mapping.merchant_pattern: {
-                'category_id': mapping.category_id,
-                'confidence': mapping.confidence
-            }
+            mapping.merchant_pattern: {"category_id": mapping.category_id, "confidence": mapping.confidence}
             for mapping in mappings
         }
 
@@ -41,8 +38,8 @@ class MerchantMapper:
             mapping_data = self._cache[clean_merchant]
             return MerchantMapping(
                 merchant_pattern=clean_merchant,
-                category_id=mapping_data['category_id'],
-                confidence=mapping_data['confidence']
+                category_id=mapping_data["category_id"],
+                confidence=mapping_data["confidence"],
             )
 
         # Partial matches for common merchants
@@ -50,8 +47,8 @@ class MerchantMapper:
             if self._is_partial_match(clean_merchant, pattern):
                 return MerchantMapping(
                     merchant_pattern=pattern,
-                    category_id=mapping_data['category_id'],
-                    confidence=mapping_data['confidence'] * 0.9  # Slightly lower confidence
+                    category_id=mapping_data["category_id"],
+                    confidence=mapping_data["confidence"] * 0.9,  # Slightly lower confidence
                 )
 
         return None
@@ -74,19 +71,14 @@ class MerchantMapper:
         overlap = len(merchant_words & pattern_words)
         return overlap >= min(2, len(pattern_words))
 
-    def add_mapping(
-        self,
-        merchant_pattern: str,
-        category_id: int,
-        confidence: float = 1.0
-    ) -> None:
+    def add_mapping(self, merchant_pattern: str, category_id: int, confidence: float = 1.0) -> None:
         """Add new merchant mapping."""
         clean_pattern = self.merchant_cleaner.clean(merchant_pattern)
 
         # Check if mapping already exists
-        existing = self.session.query(MerchantMappingORM).filter(
-            MerchantMappingORM.merchant_pattern == clean_pattern
-        ).first()
+        existing = (
+            self.session.query(MerchantMappingORM).filter(MerchantMappingORM.merchant_pattern == clean_pattern).first()
+        )
 
         if existing:
             # Update existing mapping
@@ -97,20 +89,14 @@ class MerchantMapper:
         else:
             # Create new mapping
             mapping = MerchantMappingORM(
-                merchant_pattern=clean_pattern,
-                category_id=category_id,
-                confidence=confidence,
-                last_seen=date.today()
+                merchant_pattern=clean_pattern, category_id=category_id, confidence=confidence, last_seen=date.today()
             )
             self.session.add(mapping)
 
         self.session.commit()
 
         # Update cache
-        self._cache[clean_pattern] = {
-            'category_id': category_id,
-            'confidence': confidence
-        }
+        self._cache[clean_pattern] = {"category_id": category_id, "confidence": confidence}
 
     def update_from_transactions(self, min_occurrences: int = 3) -> None:
         """Update merchant mappings from confirmed transactions."""
@@ -118,7 +104,7 @@ class MerchantMapper:
 
         # Find merchants with consistent categorization
         query = text("""
-        SELECT 
+        SELECT
             t.name,
             t.category_id,
             COUNT(*) as occurrence_count,
@@ -140,10 +126,11 @@ class MerchantMapper:
                 continue
 
             # Calculate confidence based on consistency
-            total_for_merchant = self.session.query(TransactionORM).filter(
-                TransactionORM.name == merchant_name,
-                TransactionORM.category_id.isnot(None)
-            ).count()
+            total_for_merchant = (
+                self.session.query(TransactionORM)
+                .filter(TransactionORM.name == merchant_name, TransactionORM.category_id.isnot(None))
+                .count()
+            )
 
             confidence = min(0.95, count / total_for_merchant)
 
@@ -161,20 +148,20 @@ class MerchantMapper:
             similarity = self._calculate_similarity(clean_merchant, pattern)
             if similarity > 0.7:
                 # Get category name
-                category = self.session.query(CategoryORM).filter(
-                    CategoryORM.id == mapping_data['category_id']
-                ).first()
+                category = self.session.query(CategoryORM).filter(CategoryORM.id == mapping_data["category_id"]).first()
 
                 if category:
-                    suggestions.append({
-                        'category_id': mapping_data['category_id'],
-                        'category_name': category.name,
-                        'similarity': similarity,
-                        'confidence': mapping_data['confidence'] * similarity
-                    })
+                    suggestions.append(
+                        {
+                            "category_id": mapping_data["category_id"],
+                            "category_name": category.name,
+                            "similarity": similarity,
+                            "confidence": mapping_data["confidence"] * similarity,
+                        }
+                    )
 
         # Sort by confidence
-        suggestions.sort(key=lambda x: x['confidence'], reverse=True)
+        suggestions.sort(key=lambda x: x["confidence"], reverse=True)
         return suggestions[:3]  # Return top 3 suggestions
 
     def _calculate_similarity(self, merchant1: str, merchant2: str) -> float:
@@ -205,16 +192,14 @@ class MerchantMapper:
                 confidence=mapping.confidence,
                 occurrence_count=mapping.occurrence_count,
                 last_seen=mapping.last_seen,
-                created_at=mapping.created_at
+                created_at=mapping.created_at,
             )
             for mapping in mappings
         ]
 
     def delete_mapping(self, mapping_id: int) -> bool:
         """Delete a merchant mapping."""
-        mapping = self.session.query(MerchantMappingORM).filter(
-            MerchantMappingORM.id == mapping_id
-        ).first()
+        mapping = self.session.query(MerchantMappingORM).filter(MerchantMappingORM.id == mapping_id).first()
 
         if mapping:
             # Remove from cache

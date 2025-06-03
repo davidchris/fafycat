@@ -19,13 +19,9 @@ class CSVProcessor:
     def __init__(self, session: Session):
         self.session = session
 
-    def import_csv(
-        self,
-        file_path: Path,
-        csv_format: str = "generic"
-    ) -> tuple[list[TransactionInput], list[str]]:
+    def import_csv(self, file_path: Path, csv_format: str = "generic") -> tuple[list[TransactionInput], list[str]]:
         """Import transactions from CSV file.
-        
+
         Returns:
             Tuple of (successful_transactions, error_messages)
         """
@@ -87,7 +83,7 @@ class CSVProcessor:
                     purpose=purpose,
                     account=account,
                     amount=amount,
-                    currency=currency
+                    currency=currency,
                 )
 
                 transactions.append(transaction)
@@ -178,14 +174,7 @@ class CSVProcessor:
         date_str = str(date_str).strip()
 
         # Try common date formats
-        date_formats = [
-            "%Y-%m-%d",
-            "%d.%m.%Y",
-            "%d/%m/%Y",
-            "%m/%d/%Y",
-            "%d-%m-%Y",
-            "%Y/%m/%d"
-        ]
+        date_formats = ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]
 
         for fmt in date_formats:
             try:
@@ -196,12 +185,10 @@ class CSVProcessor:
         raise ValueError(f"Could not parse date: {date_str}")
 
     def save_transactions(
-        self,
-        transactions: list[TransactionInput],
-        import_batch: str | None = None
+        self, transactions: list[TransactionInput], import_batch: str | None = None
     ) -> tuple[int, int]:
         """Save transactions to database with deduplication.
-        
+
         Returns:
             Tuple of (new_count, duplicate_count)
         """
@@ -215,9 +202,7 @@ class CSVProcessor:
             txn_id = txn.generate_id()
 
             # Check for existing transaction
-            existing = self.session.query(TransactionORM).filter(
-                TransactionORM.id == txn_id
-            ).first()
+            existing = self.session.query(TransactionORM).filter(TransactionORM.id == txn_id).first()
 
             if existing:
                 duplicate_count += 1
@@ -233,21 +218,19 @@ class CSVProcessor:
                 amount=txn.amount,
                 currency=txn.currency,
                 imported_at=datetime.utcnow(),
-                import_batch=import_batch
+                import_batch=import_batch,
             )
 
             # Try to match existing category if provided
             if txn.category:
                 # Try exact match first (case insensitive)
-                category = self.session.query(CategoryORM).filter(
-                    CategoryORM.name.ilike(txn.category.strip())
-                ).first()
+                category = self.session.query(CategoryORM).filter(CategoryORM.name.ilike(txn.category.strip())).first()
 
                 # If no exact match, try with lowercased input
                 if not category:
-                    category = self.session.query(CategoryORM).filter(
-                        CategoryORM.name == txn.category.lower().strip()
-                    ).first()
+                    category = (
+                        self.session.query(CategoryORM).filter(CategoryORM.name == txn.category.lower().strip()).first()
+                    )
 
                 if category:
                     db_txn.category_id = category.id
@@ -263,7 +246,7 @@ class CSVProcessor:
         output_path: Path,
         start_date: date | None = None,
         end_date: date | None = None,
-        category_ids: list[int] | None = None
+        category_ids: list[int] | None = None,
     ) -> None:
         """Export transactions to CSV."""
         query = self.session.query(TransactionORM)
@@ -280,33 +263,48 @@ class CSVProcessor:
         # Get categories for lookup
         categories = {cat.id: cat.name for cat in self.session.query(CategoryORM).all()}
 
-        with open(output_path, 'w', newline='', encoding='utf-8') as csvfile:
+        with open(output_path, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
 
             # Header
-            writer.writerow([
-                'id', 'date', 'value_date', 'name', 'purpose', 'amount', 'currency',
-                'category', 'predicted_category', 'confidence_score', 'is_reviewed'
-            ])
+            writer.writerow(
+                [
+                    "id",
+                    "date",
+                    "value_date",
+                    "name",
+                    "purpose",
+                    "amount",
+                    "currency",
+                    "category",
+                    "predicted_category",
+                    "confidence_score",
+                    "is_reviewed",
+                ]
+            )
 
             # Data
             for txn in transactions:
-                category_name = categories.get(txn.category_id, '') if txn.category_id else ''
-                predicted_category_name = categories.get(txn.predicted_category_id, '') if txn.predicted_category_id else ''
+                category_name = categories.get(txn.category_id, "") if txn.category_id else ""
+                predicted_category_name = (
+                    categories.get(txn.predicted_category_id, "") if txn.predicted_category_id else ""
+                )
 
-                writer.writerow([
-                    txn.id,
-                    txn.date.isoformat(),
-                    txn.value_date.isoformat() if txn.value_date else '',
-                    txn.name,
-                    txn.purpose,
-                    txn.amount,
-                    txn.currency,
-                    category_name,
-                    predicted_category_name,
-                    txn.confidence_score or '',
-                    txn.is_reviewed
-                ])
+                writer.writerow(
+                    [
+                        txn.id,
+                        txn.date.isoformat(),
+                        txn.value_date.isoformat() if txn.value_date else "",
+                        txn.name,
+                        txn.purpose,
+                        txn.amount,
+                        txn.currency,
+                        category_name,
+                        predicted_category_name,
+                        txn.confidence_score or "",
+                        txn.is_reviewed,
+                    ]
+                )
 
 
 def create_synthetic_transactions() -> list[TransactionInput]:
@@ -323,13 +321,15 @@ def create_synthetic_transactions() -> list[TransactionInput]:
         txn_date = base_date + timedelta(days=random.randint(0, 330))
         merchant = random.choice(grocery_merchants)
         amount = -round(random.uniform(15.50, 89.99), 2)
-        transactions.append(TransactionInput(
-            date=txn_date,
-            name=f"{merchant} Markt {random.randint(1001, 9999)}",
-            purpose="Lastschrift",
-            amount=amount,
-            category="groceries"
-        ))
+        transactions.append(
+            TransactionInput(
+                date=txn_date,
+                name=f"{merchant} Markt {random.randint(1001, 9999)}",
+                purpose="Lastschrift",
+                amount=amount,
+                category="groceries",
+            )
+        )
 
     # Restaurant transactions
     restaurants = ["McDonald's", "Burger King", "Pizza Express", "Vapiano", "Subway"]
@@ -337,35 +337,33 @@ def create_synthetic_transactions() -> list[TransactionInput]:
         txn_date = base_date + timedelta(days=random.randint(0, 330))
         restaurant = random.choice(restaurants)
         amount = -round(random.uniform(8.50, 45.90), 2)
-        transactions.append(TransactionInput(
-            date=txn_date,
-            name=f"{restaurant} Berlin",
-            purpose="Kartenzahlung",
-            amount=amount,
-            category="restaurants"
-        ))
+        transactions.append(
+            TransactionInput(
+                date=txn_date,
+                name=f"{restaurant} Berlin",
+                purpose="Kartenzahlung",
+                amount=amount,
+                category="restaurants",
+            )
+        )
 
     # Salary
     for month in range(12):
         txn_date = date(2024, month + 1, 25)
-        transactions.append(TransactionInput(
-            date=txn_date,
-            name="TECH COMPANY GMBH",
-            purpose="Gehalt Januar 2024",
-            amount=3500.00,
-            category="salary"
-        ))
+        transactions.append(
+            TransactionInput(
+                date=txn_date, name="TECH COMPANY GMBH", purpose="Gehalt Januar 2024", amount=3500.00, category="salary"
+            )
+        )
 
     # Rent
     for month in range(12):
         txn_date = date(2024, month + 1, 1)
-        transactions.append(TransactionInput(
-            date=txn_date,
-            name="IMMOBILIEN AG",
-            purpose="Miete Wohnung",
-            amount=-1200.00,
-            category="rent"
-        ))
+        transactions.append(
+            TransactionInput(
+                date=txn_date, name="IMMOBILIEN AG", purpose="Miete Wohnung", amount=-1200.00, category="rent"
+            )
+        )
 
     # Utilities
     utility_companies = ["Vattenfall", "GASAG", "BWB", "Telekom"]
@@ -373,12 +371,10 @@ def create_synthetic_transactions() -> list[TransactionInput]:
         for quarter in range(4):
             txn_date = base_date + timedelta(days=quarter * 90 + random.randint(1, 30))
             amount = -round(random.uniform(45.00, 120.00), 2)
-            transactions.append(TransactionInput(
-                date=txn_date,
-                name=company,
-                purpose="Lastschrift Rechnung",
-                amount=amount,
-                category="utilities"
-            ))
+            transactions.append(
+                TransactionInput(
+                    date=txn_date, name=company, purpose="Lastschrift Rechnung", amount=amount, category="utilities"
+                )
+            )
 
     return transactions

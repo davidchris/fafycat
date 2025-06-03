@@ -3,7 +3,7 @@
 
 def create_sidebar():
     """Create the navigation sidebar HTML."""
-    return '''
+    return """
     <div class="w-64 bg-gray-50 h-screen p-4 fixed left-0 top-0 flex flex-col">
         <div class="mb-6">
             <h2 class="text-xl font-bold mb-2">🐱 FafyCat</h2>
@@ -22,12 +22,12 @@ def create_sidebar():
             <p class="text-xs text-gray-500">Local-first • Privacy-focused • ML-powered</p>
         </div>
     </div>
-    '''
+    """
 
 
 def create_page_layout(title: str, content: str):
     """Create the main page layout with sidebar and content area."""
-    return f'''
+    return f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -45,4 +45,4 @@ def create_page_layout(title: str, content: str):
         <script src="/static/js/main.js"></script>
     </body>
     </html>
-    '''
+    """

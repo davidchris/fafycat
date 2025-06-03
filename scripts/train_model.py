@@ -39,11 +39,7 @@ def main() -> None:
                 print(f"  {category}: {precision:.3f}")
 
             print("\nTop Feature Importance:")
-            sorted_features = sorted(
-                metrics.feature_importance.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )[:10]
+            sorted_features = sorted(metrics.feature_importance.items(), key=lambda x: x[1], reverse=True)[:10]
 
             for feature, importance in sorted_features:
                 print(f"  {feature}: {importance:.3f}")

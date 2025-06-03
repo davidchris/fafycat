@@ -91,9 +91,7 @@ class MerchantMappingORM(Base):
     last_seen = Column(Date)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        Index("idx_merchant_mappings_pattern", "merchant_pattern"),
-    )
+    __table_args__ = (Index("idx_merchant_mappings_pattern", "merchant_pattern"),)
 
     category = relationship("CategoryORM", back_populates="merchant_mappings")
 
@@ -163,19 +161,15 @@ def get_categories(session: Session, active_only: bool = True) -> list[CategoryO
     """Get all categories."""
     query = session.query(CategoryORM)
     if active_only:
-        query = query.filter(CategoryORM.is_active == True)
+        query = query.filter(CategoryORM.is_active)
     return query.all()
 
 
-def get_transactions(
-    session: Session,
-    limit: int | None = None,
-    unreviewed_only: bool = False
-) -> list[TransactionORM]:
+def get_transactions(session: Session, limit: int | None = None, unreviewed_only: bool = False) -> list[TransactionORM]:
     """Get transactions with optional filtering."""
     query = session.query(TransactionORM)
     if unreviewed_only:
-        query = query.filter(TransactionORM.is_reviewed == False)
+        query = query.filter(~TransactionORM.is_reviewed)
     query = query.order_by(TransactionORM.date.desc())
     if limit:
         query = query.limit(limit)
@@ -184,6 +178,4 @@ def get_transactions(
 
 def get_merchant_mapping(session: Session, merchant_pattern: str) -> MerchantMappingORM | None:
     """Get merchant mapping by pattern."""
-    return session.query(MerchantMappingORM).filter(
-        MerchantMappingORM.merchant_pattern == merchant_pattern
-    ).first()
+    return session.query(MerchantMappingORM).filter(MerchantMappingORM.merchant_pattern == merchant_pattern).first()

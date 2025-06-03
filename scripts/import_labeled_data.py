@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """Import labeled transaction data from fafycat-v1."""
 
-from fafycat.data.csv_processor import CSVProcessor
-from fafycat.core.models import TransactionInput
-from fafycat.core.database import DatabaseManager
-from fafycat.core.config import AppConfig
 import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 
+# Add project root to Python path for imports
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+# Module imports after path manipulation (required by E402)
+from src.fafycat.core.config import AppConfig  # noqa: E402
+from src.fafycat.core.database import DatabaseManager  # noqa: E402
+from src.fafycat.core.models import TransactionInput  # noqa: E402
+from src.fafycat.data.csv_processor import CSVProcessor  # noqa: E402
+
 # Set production environment
 os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_prod.db"
 os.environ["FAFYCAT_ENV"] = "production"
-
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
 def parse_labeled_csv(file_path: Path) -> list[TransactionInput]:
@@ -29,27 +32,26 @@ def parse_labeled_csv(file_path: Path) -> list[TransactionInput]:
     for _, row in df.iterrows():
         try:
             # Parse date
-            date_str = str(row['Date']).strip()
+            date_str = str(row["Date"]).strip()
             txn_date = pd.to_datetime(date_str, dayfirst=True).date()
 
             # Parse value date if different
             value_date = None
-            if 'Value date' in row and pd.notna(row['Value date']):
-                value_date_str = str(row['Value date']).strip()
+            if "Value date" in row and pd.notna(row["Value date"]):
+                value_date_str = str(row["Value date"]).strip()
                 if value_date_str != date_str:
-                    value_date = pd.to_datetime(
-                        value_date_str, dayfirst=True).date()
+                    value_date = pd.to_datetime(value_date_str, dayfirst=True).date()
 
             # Extract fields
-            name = str(row['Name']).strip()
-            purpose = str(row.get('Purpose', '')).strip()
-            amount = float(row['Amount'])
-            currency = str(row.get('Currency', 'EUR')).strip()
+            name = str(row["Name"]).strip()
+            purpose = str(row.get("Purpose", "")).strip()
+            amount = float(row["Amount"])
+            currency = str(row.get("Currency", "EUR")).strip()
 
             # Get the human-labeled category
             category = None
-            if 'Cat' in row and pd.notna(row['Cat']):
-                category = str(row['Cat']).strip()
+            if "Cat" in row and pd.notna(row["Cat"]):
+                category = str(row["Cat"]).strip()
 
             # Create transaction
             transaction = TransactionInput(
@@ -59,7 +61,7 @@ def parse_labeled_csv(file_path: Path) -> list[TransactionInput]:
                 purpose=purpose,
                 amount=amount,
                 currency=currency,
-                category=category
+                category=category,
             )
 
             transactions.append(transaction)
@@ -114,15 +116,13 @@ def import_all_labeled_data():
                 if transactions:
                     # Import to database
                     new_count, duplicate_count = processor.save_transactions(
-                        transactions,
-                        f"labeled_import_{csv_file.stem}"
+                        transactions, f"labeled_import_{csv_file.stem}"
                     )
 
                     total_imported += new_count
                     total_duplicates += duplicate_count
 
-                    print(f"  ✅ Imported: {new_count} new, {
-                          duplicate_count} duplicates")
+                    print(f"  ✅ Imported: {new_count} new, {duplicate_count} duplicates")
                 else:
                     print("  ⚠️  No valid transactions found")
 
@@ -136,8 +136,7 @@ def import_all_labeled_data():
     print(f"  📊 Total imported: {total_imported}")
     print(f"  🔄 Duplicates skipped: {total_duplicates}")
     print(f"  ❌ Files with errors: {total_errors}")
-    print(f"  📈 Success rate: {
-        ((len(csv_files) - total_errors) / len(csv_files)) * 100:.1f}%")
+    print(f"  📈 Success rate: {((len(csv_files) - total_errors) / len(csv_files)) * 100:.1f}%")
 
     if total_imported > 0:
         print("\n✨ Great! Your labeled data is now imported.")
@@ -159,8 +158,8 @@ def check_categories():
     for csv_file in csv_files:
         try:
             df = pd.read_csv(csv_file)
-            if 'Cat' in df.columns:
-                categories = df['Cat'].dropna().unique()
+            if "Cat" in df.columns:
+                categories = df["Cat"].dropna().unique()
                 all_categories.update(categories)
         except Exception as e:
             print(f"Error reading {csv_file}: {e}")
@@ -180,9 +179,9 @@ def main():
     # First show what categories we have
     categories = check_categories()
 
-
-len(categories)} categories automatically...")          len(categories)} categories automatically...")
+    print(f"Found {len(categories)} categories. Will import and categorize transactions automatically...")
     import_all_labeled_data()
-    if __name__ == "__main__":
-    main()
+
+
+if __name__ == "__main__":
     main()

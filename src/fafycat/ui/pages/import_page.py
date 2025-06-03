@@ -15,19 +15,19 @@ def show() -> None:
     st.markdown("Upload CSV files containing your banking transactions for automatic categorization.")
 
     db_manager = st.session_state.db_manager
-    
+
     # Mark current page for state management
-    if st.session_state.get('current_page') != 'import':
-        st.session_state.current_page = 'import'
+    if st.session_state.get("current_page") != "import":
+        st.session_state.current_page = "import"
 
     # File upload section
     st.subheader("Upload CSV File")
 
     uploaded_file = st.file_uploader(
         "Choose a CSV file",
-        type=['csv'],
+        type=["csv"],
         help="Upload a CSV file containing your banking transactions. "
-             "The system will automatically detect column formats."
+        "The system will automatically detect column formats.",
     )
 
     if uploaded_file is not None:
@@ -60,14 +60,14 @@ def show() -> None:
                 csv_format = st.selectbox(
                     "CSV Format",
                     ["generic"],
-                    help="Select the format of your CSV file. Generic format auto-detects columns."
+                    help="Select the format of your CSV file. Generic format auto-detects columns.",
                 )
 
             with col2:
                 import_batch_name = st.text_input(
                     "Import Batch Name",
                     value=f"import_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    help="Name for this import batch to track transactions."
+                    help="Name for this import batch to track transactions.",
                 )
 
             # Import button
@@ -135,11 +135,11 @@ def show() -> None:
     )
 
     example_data = {
-        'date': ['2024-01-15', '2024-01-16', '2024-01-20'],
-        'name': ['EDEKA Markt 1234', "McDonald's Berlin", 'Amazon Marketplace'],
-        'purpose': ['Lastschrift', 'Kartenzahlung', 'Online-Kauf'],
-        'amount': [-45.67, -12.50, -89.99],
-        'currency': ['EUR', 'EUR', 'EUR']
+        "date": ["2024-01-15", "2024-01-16", "2024-01-20"],
+        "name": ["EDEKA Markt 1234", "McDonald's Berlin", "Amazon Marketplace"],
+        "purpose": ["Lastschrift", "Kartenzahlung", "Online-Kauf"],
+        "amount": [-45.67, -12.50, -89.99],
+        "currency": ["EUR", "EUR", "EUR"],
     }
 
     example_df = pd.DataFrame(example_data)
@@ -174,17 +174,18 @@ def show() -> None:
         from ...core.database import TransactionORM
 
         # Get recent import batches
-        recent_imports = session.query(
-            TransactionORM.import_batch,
-            TransactionORM.imported_at
-        ).distinct().order_by(TransactionORM.imported_at.desc()).limit(5).all()
+        recent_imports = (
+            session.query(TransactionORM.import_batch, TransactionORM.imported_at)
+            .distinct()
+            .order_by(TransactionORM.imported_at.desc())
+            .limit(5)
+            .all()
+        )
 
         if recent_imports:
             for batch_name, imported_at in recent_imports:
                 # Count transactions in this batch
-                count = session.query(TransactionORM).filter(
-                    TransactionORM.import_batch == batch_name
-                ).count()
+                count = session.query(TransactionORM).filter(TransactionORM.import_batch == batch_name).count()
 
                 st.write(f"**{batch_name}** - {count} transactions ({imported_at.strftime('%Y-%m-%d %H:%M')})")
         else:
