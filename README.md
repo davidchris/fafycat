@@ -167,6 +167,23 @@ uv install
 ```
 
 ### 2. Initialize Database and Load Data
+
+#### Start Fresh with Real Data (Recommended)
+```bash
+# Reset everything and import your labeled data (uses production database)
+uv run python scripts/reset_and_import.py --labeled-data-path /path/to/your/csv/files
+
+# Or use default path (fafycat-v1 location)
+uv run python scripts/reset_and_import.py
+
+# Also train model after import
+uv run python scripts/reset_and_import.py --train-model
+
+# For development/testing (uses development database)
+uv run python scripts/reset_and_import.py --dev-mode --use-sample-data
+```
+
+#### Alternative: Manual Setup
 ```bash
 # Initialize production database (empty - no default categories)
 uv run scripts/init_prod_db.py

@@ -1,6 +1,6 @@
 """Service layer for database operations."""
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
 from src.fafycat.core.database import CategoryORM, TransactionORM
@@ -20,7 +20,10 @@ class TransactionService:
         confidence_lt: float | None = None,
     ) -> list[TransactionResponse]:
         """Get transactions with filtering."""
-        query = session.query(TransactionORM)
+        query = session.query(TransactionORM).options(
+            joinedload(TransactionORM.category),
+            joinedload(TransactionORM.predicted_category)
+        )
 
         # Apply filters
         if category:

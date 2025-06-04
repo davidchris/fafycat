@@ -16,9 +16,6 @@ def _generate_transaction_table(transactions, categories):
         </div>
         """
 
-    # Generate category options for dropdown
-    category_options = "".join([f'<option value="{cat.name}">{cat.name}</option>' for cat in categories])
-
     # Generate table rows
     table_rows = ""
     for tx in transactions:
@@ -31,6 +28,13 @@ def _generate_transaction_table(transactions, categories):
         )
         confidence_display = f"{tx.confidence:.1%}" if tx.confidence else "N/A"
 
+        # Generate category options with current category selected
+        current_category = tx.actual_category or tx.predicted_category
+        category_options = '<option value="">Select category...</option>'
+        for cat in categories:
+            selected = ' selected' if cat.name == current_category else ''
+            category_options += f'<option value="{cat.name}"{selected}>{cat.name}</option>'
+
         table_rows += f"""
         <tr class="border-b hover:bg-gray-50">
             <td class="px-4 py-3 text-sm">{tx.date}</td>
@@ -38,14 +42,13 @@ def _generate_transaction_table(transactions, categories):
             <td class="px-4 py-3 text-sm text-right">${tx.amount:,.2f}</td>
             <td class="px-4 py-3 text-sm">
                 <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
-                    {tx.predicted_category or "Uncategorized"}
+                    {tx.actual_category or tx.predicted_category or "Uncategorized"}
                 </span>
             </td>
             <td class="px-4 py-3 text-sm {confidence_color} font-medium">{confidence_display}</td>
             <td class="px-4 py-3 text-sm">
                 <form method="post" action="/transactions/{tx.id}/categorize" class="flex gap-2">
                     <select name="actual_category" class="text-sm border border-gray-300 rounded px-2 py-1">
-                        <option value="">Select category...</option>
                         {category_options}
                     </select>
                     <button type="submit" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">

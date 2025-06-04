@@ -172,17 +172,20 @@ class DatabaseManager:
 
         with self.get_session() as session:
             for category_name in sorted(categories):
-                # Check if category already exists
-                existing = session.query(CategoryORM).filter(CategoryORM.name == category_name).first()
+                # Normalize category name to match Pydantic model behavior
+                normalized_name = category_name.strip().lower()
+                
+                # Check if category already exists (using normalized name)
+                existing = session.query(CategoryORM).filter(CategoryORM.name == normalized_name).first()
 
                 if not existing:
                     # Infer category type based on common patterns
                     category_type = self._infer_category_type(category_name)
 
-                    # Create category without budget (0.0)
+                    # Create category without budget (0.0) - use normalized name
                     new_category = CategoryORM(
                         type=category_type,
-                        name=category_name,
+                        name=normalized_name,
                         budget=0.0,  # No budget initially
                         is_active=True,
                     )

@@ -223,14 +223,11 @@ class CSVProcessor:
 
             # Try to match existing category if provided
             if txn.category:
-                # Try exact match first (case insensitive)
-                category = self.session.query(CategoryORM).filter(CategoryORM.name.ilike(txn.category.strip())).first()
-
-                # If no exact match, try with lowercased input
-                if not category:
-                    category = (
-                        self.session.query(CategoryORM).filter(CategoryORM.name == txn.category.lower().strip()).first()
-                    )
+                # Normalize category name to match database storage
+                normalized_category = txn.category.strip().lower()
+                
+                # Find matching category (categories are stored normalized)
+                category = self.session.query(CategoryORM).filter(CategoryORM.name == normalized_category).first()
 
                 if category:
                     db_txn.category_id = category.id
