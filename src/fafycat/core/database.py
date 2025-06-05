@@ -174,7 +174,7 @@ class DatabaseManager:
             for category_name in sorted(categories):
                 # Normalize category name to match Pydantic model behavior
                 normalized_name = category_name.strip().lower()
-                
+
                 # Check if category already exists (using normalized name)
                 existing = session.query(CategoryORM).filter(CategoryORM.name == normalized_name).first()
 
@@ -200,17 +200,58 @@ class DatabaseManager:
         """Infer category type from category name patterns."""
         name_lower = category_name.lower()
 
-        # Income patterns
-        income_keywords = ["salary", "income", "freelance", "dividend", "interest", "bonus", "wage"]
+        # Income patterns - expanded list
+        income_keywords = [
+            "salary",
+            "income",
+            "freelance",
+            "dividend",
+            "interest",
+            "bonus",
+            "wage",
+            "pay",
+            "paycheck",
+            "earnings",
+            "revenue",
+            "profit",
+            "refund",
+            "tax_refund",
+            "gift",
+            "prize",
+            "winnings",
+            "commission",
+            "royalties",
+            "cashback",
+        ]
         if any(keyword in name_lower for keyword in income_keywords):
             return "income"
 
-        # Saving patterns
-        saving_keywords = ["saving", "investment", "fund", "pension", "retirement"]
+        # Saving patterns - expanded list
+        saving_keywords = [
+            "saving",
+            "investment",
+            "fund",
+            "pension",
+            "retirement",
+            "401k",
+            "ira",
+            "emergency",
+            "vacation_fund",
+            "house_fund",
+            "stocks",
+            "bonds",
+            "mutual",
+            "etf",
+            "crypto",
+            "bitcoin",
+            "savings_account",
+            "cd",
+            "certificate",
+        ]
         if any(keyword in name_lower for keyword in saving_keywords):
             return "saving"
 
-        # Default to spending
+        # Default to spending for all other categories
         return "spending"
 
 

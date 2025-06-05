@@ -60,3 +60,18 @@ async def update_category_budget(category_id: int, budget: float, db: Session = 
         raise HTTPException(status_code=404, detail="Category not found")
 
     return {"message": "Budget updated", "budget": budget}
+
+
+@router.put("/{category_id}/type")
+async def update_category_type(category_id: int, type: str, db: Session = Depends(get_db_session)) -> dict:
+    """Update category type."""
+    if type not in ["spending", "income", "saving"]:
+        raise HTTPException(status_code=400, detail="Invalid category type")
+
+    update = CategoryUpdate(type=type)
+    result = CategoryService.update_category(session=db, category_id=category_id, update=update)
+
+    if not result:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    return {"message": "Category type updated", "type": type}

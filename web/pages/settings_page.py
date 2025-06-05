@@ -151,6 +151,12 @@ def render_categories_management(category_groups, inactive_categories):
                                 Edit Budget
                             </button>
                             <button
+                                onclick="editCategoryType({category.id}, '{category.name}', '{category.type}')"
+                                class="text-purple-600 hover:text-purple-800 text-sm"
+                            >
+                                Edit Type
+                            </button>
+                            <button
                                 onclick="deactivateCategory({category.id}, '{category.name}')"
                                 class="text-gray-600 hover:text-gray-800 text-sm"
                             >
@@ -221,6 +227,19 @@ def render_categories_management(category_groups, inactive_categories):
                 .then(response => response.json())
                 .then(() => location.reload())
                 .catch(error => alert('Error updating budget: ' + error));
+            }
+        }
+
+        function editCategoryType(categoryId, categoryName, currentType) {
+            const newType = prompt(`Change type for "${categoryName}" (spending/income/saving):`, currentType);
+            if (newType && ['spending', 'income', 'saving'].includes(newType)) {
+                fetch(`/api/categories/${categoryId}/type?type=${newType}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' }
+                })
+                .then(response => response.json())
+                .then(() => location.reload())
+                .catch(error => alert('Error updating category type: ' + error));
             }
         }
 
