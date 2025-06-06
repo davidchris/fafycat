@@ -89,7 +89,6 @@ class TestSettingsMLTraining:
         assert "trainModel()" in html  # JavaScript function
         assert "bg-blue-50" in html  # Blue alert
 
-
     def test_settings_ml_javascript_functions(self, test_client, db_session):
         """Test that ML training JavaScript functions are included."""
         response = test_client.get("/settings")

@@ -79,7 +79,8 @@ class EnsembleCategorizer:
             print(f"⚠️  Excluding categories with <{min_samples_per_category} samples: {', '.join(excluded_names)}")
 
         print(
-            f"📊 Training ensemble with {len(filtered_transactions)} transactions across {len(valid_categories)} categories"
+            f"📊 Training ensemble with {len(filtered_transactions)} transactions "
+            f"across {len(valid_categories)} categories"
         )
 
         # Convert to TransactionInput format
@@ -109,6 +110,7 @@ class EnsembleCategorizer:
 
         # Split into train/validation for weight optimization
         from sklearn.model_selection import train_test_split
+
         train_transactions, val_transactions, train_labels, val_labels = train_test_split(
             transactions, labels, test_size=0.2, stratify=labels, random_state=42
         )
@@ -117,7 +119,7 @@ class EnsembleCategorizer:
 
         # Train LightGBM component
         print("  Training LightGBM...")
-        lgbm_temp = TransactionCategorizer(self.session, self.config) 
+        lgbm_temp = TransactionCategorizer(self.session, self.config)
         lgbm_temp.train(test_size=0.0)  # Use all available data in the current session
 
         # Train Naive Bayes component
@@ -147,18 +149,22 @@ class EnsembleCategorizer:
             # Combine predictions
             ensemble_probas = weights["lgbm"] * lgbm_val_probas + weights["nb"] * nb_val_probas
             ensemble_predictions = nb_temp.label_encoder.inverse_transform(np.argmax(ensemble_probas, axis=1))
-            
+
             # Calculate accuracy
             from sklearn.metrics import accuracy_score
+
             score = accuracy_score(val_labels, ensemble_predictions)
-            
+
             print(f"  Weights LightGBM={weights['lgbm']:.1f}, NB={weights['nb']:.1f}: {score:.4f}")
-            
+
             if score > best_score:
                 best_score = score
                 best_weights = weights
 
-        print(f"🎯 Best weights: LightGBM={best_weights['lgbm']:.1f}, NB={best_weights['nb']:.1f} (accuracy: {best_score:.4f})")
+        print(
+            f"🎯 Best weights: LightGBM={best_weights['lgbm']:.1f}, "
+            f"NB={best_weights['nb']:.1f} (accuracy: {best_score:.4f})"
+        )
 
         # Set optimal weights
         self.ensemble_weights = best_weights
@@ -174,7 +180,7 @@ class EnsembleCategorizer:
             "validation_accuracy": best_score,
             "weight_candidates": weight_candidates,
             "n_training_samples": len(transactions),
-            "n_validation_samples": len(val_transactions)
+            "n_validation_samples": len(val_transactions),
         }
 
         # Update merchant mappings
@@ -194,7 +200,7 @@ class EnsembleCategorizer:
         n_samples = len(lgbm_preds)
         n_classes = len(nb_classes)
         probas = np.zeros((n_samples, n_classes))
-        
+
         for i, pred in enumerate(lgbm_preds):
             # Find class index in NB classes
             class_idx = np.where(nb_classes == pred.predicted_category_id)[0]
@@ -209,7 +215,7 @@ class EnsembleCategorizer:
             else:
                 # Uniform distribution if class not found
                 probas[i, :] = 1.0 / n_classes
-                
+
         return probas
 
     def _create_lgbm_wrapper_class(self):
@@ -225,7 +231,7 @@ class EnsembleCategorizer:
                 from sklearn.preprocessing import LabelEncoder
 
                 self.label_encoder = LabelEncoder()
-                encoded_labels = self.label_encoder.fit_transform(labels)
+                self.label_encoder.fit_transform(labels)
 
                 # We need to temporarily store the transactions with labels in the database
                 # This is a simplified approach - in practice you might want a more sophisticated method

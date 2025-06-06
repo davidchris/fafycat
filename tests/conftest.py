@@ -80,6 +80,7 @@ def test_client(temp_db, db_session):
 
     # Clear any cached categorizer instances
     import api.ml
+
     api.ml._categorizer = None
     api.ml._config = None
 

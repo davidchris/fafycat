@@ -28,9 +28,6 @@ def test_ml_status_endpoint_exists():
         assert "status" in data
 
 
-
-
-
 def test_ml_retrain_endpoint_exists():
     """Test that ML retrain endpoint exists."""
     from main import create_app

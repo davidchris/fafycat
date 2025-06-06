@@ -159,7 +159,7 @@ def main():
 
     # Step 2: Initialize fresh database
     print("\nStep 2: Initializing fresh database...")
-    db_manager = initialize_fresh_database(config)
+    initialize_fresh_database(config)
 
     # Step 3: Import labeled data
     print("\nStep 3: Importing labeled data...")

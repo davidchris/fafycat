@@ -136,13 +136,13 @@ class StratifiedKFoldValidator:
 
         print(f"Testing {len(weight_candidates)} weight combinations...")
 
-        for weight_idx, weights in enumerate(weight_candidates):
+        for _weight_idx, weights in enumerate(weight_candidates):
             print(f"  Testing weights: LightGBM={weights['lgbm']:.1f}, NB={weights['nb']:.1f}")
 
             fold_scores = []
             transactions_array = np.array(transactions)
 
-            for fold_idx, (train_idx, val_idx) in enumerate(self.skf.split(transactions, labels)):
+            for _fold_idx, (train_idx, val_idx) in enumerate(self.skf.split(transactions, labels)):
                 # Split data
                 train_transactions = transactions_array[train_idx].tolist()
                 val_transactions = transactions_array[val_idx].tolist()
@@ -217,7 +217,8 @@ class StratifiedKFoldValidator:
             results[model_name] = cv_results
 
             print(
-                f"  {model_name} CV accuracy: {cv_results['cv_accuracy_mean']:.4f} ± {cv_results['cv_accuracy_std']:.4f}"
+                f"  {model_name} CV accuracy: {cv_results['cv_accuracy_mean']:.4f} "
+                f"± {cv_results['cv_accuracy_std']:.4f}"
             )
 
         return results

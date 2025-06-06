@@ -104,10 +104,7 @@ def parse_labeled_csv(file_path: Path) -> list[TransactionInput]:
 def import_all_labeled_data(data_path: Path = None):
     """Import all labeled data files."""
     # Path to labeled data - use provided path or default
-    if data_path is None:
-        labeled_data_dir = Path("/Users/david/dev/fafycat-v1/dev_data/labeld")
-    else:
-        labeled_data_dir = data_path
+    labeled_data_dir = Path("/Users/david/dev/fafycat-v1/dev_data/labeld") if data_path is None else data_path
 
     if not labeled_data_dir.exists():
         print(f"❌ Labeled data directory not found: {labeled_data_dir}")
@@ -193,10 +190,7 @@ def import_all_labeled_data(data_path: Path = None):
 
 def check_categories(data_path: Path = None):
     """Check what categories exist in the labeled data."""
-    if data_path is None:
-        labeled_data_dir = Path("/Users/david/dev/fafycat-v1/dev_data/labeld")
-    else:
-        labeled_data_dir = data_path
+    labeled_data_dir = Path("/Users/david/dev/fafycat-v1/dev_data/labeld") if data_path is None else data_path
     csv_files = sorted(labeled_data_dir.glob("*.csv"))
 
     all_categories = set()

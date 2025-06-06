@@ -57,7 +57,10 @@ def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategor
             model_type = "ensemble" if _config.ml.use_ensemble else "single"
             raise HTTPException(
                 status_code=503,
-                detail=f"No trained {model_type} ML model found. Please train a model first using 'uv run scripts/train_model.py'",
+                detail=(
+                    f"No trained {model_type} ML model found. Please train a model first using "
+                    "'uv run scripts/train_model.py'"
+                ),
             )
 
     return _categorizer
@@ -174,7 +177,8 @@ async def get_ml_status(
         from src.fafycat.core.database import TransactionORM
 
         config = AppConfig()
-        model_path = config.ml.model_dir / "categorizer.pkl"
+        model_filename = "ensemble_categorizer.pkl" if config.ml.use_ensemble else "categorizer.pkl"
+        model_path = config.ml.model_dir / model_filename
 
         # Check training data readiness
         reviewed_count = (
@@ -250,26 +254,47 @@ async def retrain_model(
         _config = AppConfig()
         _config.ensure_dirs()
 
-        # Create new categorizer instance for training
-        categorizer = TransactionCategorizer(db, _config.ml)
+        # Choose between ensemble and single model based on config
+        if _config.ml.use_ensemble:
+            categorizer = EnsembleCategorizer(db, _config.ml)
+            model_filename = "ensemble_categorizer.pkl"
 
-        # Train the model
-        metrics = categorizer.train()
+            # Train ensemble with validation optimization
+            cv_results = categorizer.train_with_validation_optimization()
+
+            response_data = {
+                "status": "success",
+                "message": "Ensemble model retrained successfully",
+                "accuracy": cv_results["validation_accuracy"],  # Frontend expects 'accuracy' field
+                "validation_accuracy": cv_results["validation_accuracy"],  # Keep for backwards compatibility
+                "ensemble_weights": cv_results["best_weights"],
+                "model_path": str(_config.ml.model_dir / model_filename),
+                "training_samples": cv_results["n_training_samples"],
+                "validation_samples": cv_results["n_validation_samples"],
+            }
+        else:
+            categorizer = TransactionCategorizer(db, _config.ml)
+            model_filename = "categorizer.pkl"
+
+            # Train single model
+            metrics = categorizer.train()
+
+            response_data = {
+                "status": "success",
+                "message": "Model retrained successfully",
+                "accuracy": metrics.accuracy,
+                "model_path": str(_config.ml.model_dir / model_filename),
+                "training_samples": len(categorizer.prepare_training_data()[0]),
+            }
 
         # Save the trained model
-        model_path = _config.ml.model_dir / "categorizer.pkl"
+        model_path = _config.ml.model_dir / model_filename
         categorizer.save_model(model_path)
 
         # Reset global categorizer to force reload
         _categorizer = None
 
-        return {
-            "status": "success",
-            "message": "Model retrained successfully",
-            "accuracy": metrics.accuracy,
-            "model_path": str(model_path),
-            "training_samples": len(categorizer.prepare_training_data()[0]),
-        }
+        return response_data
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Training failed: {str(e)}") from e

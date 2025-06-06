@@ -116,17 +116,16 @@ async def upload_csv_web(request: Request, file: UploadFile):
 
             prediction_component = ""
             if predictions_made > 0:
-                prediction_component = str(create_purple_alert(
-                    "🤖 ML Predictions Made",
-                    f"{predictions_made} transactions received automatic category predictions"
-                ))
+                prediction_component = str(
+                    create_purple_alert(
+                        "🤖 ML Predictions Made",
+                        f"{predictions_made} transactions received automatic category predictions",
+                    )
+                )
             elif new_count > 0:
-                prediction_component = str(create_info_alert(
-                    "ℹ️ No ML Predictions",
-                    "No trained model available",
-                    "Train a model",
-                    "/settings"
-                ))
+                prediction_component = str(
+                    create_info_alert("ℹ️ No ML Predictions", "No trained model available", "Train a model", "/settings")
+                )
 
             # Create action buttons
             import_button = create_action_button("Import Another File", "/import", "blue")

@@ -39,6 +39,7 @@ def _get_ml_status_sync():
             total_time = time.time() - start_time
             if total_time > 0.1:
                 import logging
+
                 logging.info("ML status sync (import) took %.3fs", total_time)
 
             if not model_path.exists():
