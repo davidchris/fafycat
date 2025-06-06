@@ -6,6 +6,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from api.dependencies import get_db_manager
 from api.models import TransactionUpdate
 from api.services import TransactionService
+from web.components.alerts import create_info_alert, create_purple_alert, create_upload_result_alert
+from web.components.buttons import create_action_button, create_button_group
 from web.components.layout import create_page_layout
 
 router = APIRouter()
@@ -107,47 +109,36 @@ async def upload_csv_web(request: Request, file: UploadFile):
             else:
                 success_msg = f"ℹ️ No new transactions imported. {duplicate_count} duplicates were skipped."
 
-            # Build prediction info
-            prediction_info = ""
+            # Build components
+            upload_result = create_upload_result_alert(
+                success_msg, file.filename, len(transactions), new_count, duplicate_count
+            )
+
+            prediction_component = ""
             if predictions_made > 0:
-                prediction_info = f"""
-                    <div class="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6">
-                        <h3 class="text-lg font-semibold text-purple-800 mb-2">🤖 ML Predictions Made</h3>
-                        <p class="text-purple-700">{predictions_made} transactions received automatic category predictions</p>
-                    </div>
-                """
+                prediction_component = str(create_purple_alert(
+                    "🤖 ML Predictions Made",
+                    f"{predictions_made} transactions received automatic category predictions"
+                ))
             elif new_count > 0:
-                prediction_info = """
-                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-                        <h3 class="text-lg font-semibold text-blue-800 mb-2">ℹ️ No ML Predictions</h3>
-                        <p class="text-blue-700">No trained model available. <a href="/settings" class="underline hover:text-blue-600">Train a model</a> to get automatic predictions for future uploads.</p>
-                    </div>
-                """
+                prediction_component = str(create_info_alert(
+                    "ℹ️ No ML Predictions",
+                    "No trained model available",
+                    "Train a model",
+                    "/settings"
+                ))
+
+            # Create action buttons
+            import_button = create_action_button("Import Another File", "/import", "blue")
+            review_button = create_action_button("Review Transactions", "/review", "green")
+            buttons = create_button_group(import_button, review_button)
 
             content = f"""
             <div class="container mx-auto px-4 py-8">
                 <h1 class="text-2xl font-bold mb-6">Upload Results</h1>
-
-                <div class="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
-                    <h2 class="text-lg font-semibold text-green-800 mb-2">{success_msg}</h2>
-                    <div class="text-green-700">
-                        <p><strong>File:</strong> {file.filename}</p>
-                        <p><strong>Rows processed:</strong> {len(transactions)}</p>
-                        <p><strong>New transactions:</strong> {new_count}</p>
-                        <p><strong>Duplicates skipped:</strong> {duplicate_count}</p>
-                    </div>
-                </div>
-                
-                {prediction_info}
-
-                <div class="flex gap-4">
-                    <a href="/import" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
-                        Import Another File
-                    </a>
-                    <a href="/review" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
-                        Review Transactions
-                    </a>
-                </div>
+                {upload_result}
+                {prediction_component}
+                {buttons}
             </div>
             """
 

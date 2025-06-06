@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from api.dependencies import get_db_session
 from api.models import BulkCategorizeRequest, TransactionResponse, TransactionUpdate
 from api.services import CategoryService, TransactionService
+from web.components.pagination import create_full_pagination
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -227,74 +228,10 @@ def _generate_transaction_table_htmx(transactions, categories, pagination_info=N
     if pagination_info:
         page = pagination_info["page"]
         total_pages = pagination_info["total_pages"]
-        has_prev = pagination_info["has_prev"]
-        has_next = pagination_info["has_next"]
         total_count = pagination_info["total_count"]
 
-        pagination_html = f"""
-        <div class="bg-white px-4 py-3 border-t border-gray-200 sm:px-6">
-            <div class="flex items-center justify-between">
-                <div class="flex-1 flex justify-between sm:hidden">
-                    <button {"disabled" if not has_prev else ""}
-                            hx-get="/api/transactions/table?page={page - 1 if has_prev else 1}"
-                            hx-target="#transaction-table"
-                            hx-include="[name='status']:checked, [name='confidence_lt'], [name='search']"
-                            class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 {"cursor-not-allowed opacity-50" if not has_prev else ""}">
-                        Previous
-                    </button>
-                    <button {"disabled" if not has_next else ""}
-                            hx-get="/api/transactions/table?page={page + 1 if has_next else total_pages}"
-                            hx-target="#transaction-table"
-                            hx-include="[name='status']:checked, [name='confidence_lt'], [name='search']"
-                            class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 {"cursor-not-allowed opacity-50" if not has_next else ""}">
-                        Next
-                    </button>
-                </div>
-                <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                    <div>
-                        <p class="text-sm text-gray-700">
-                            Showing <span class="font-medium">{(page - 1) * 50 + 1}</span> to <span class="font-medium">{min(page * 50, total_count)}</span> of <span class="font-medium">{total_count}</span> results
-                        </p>
-                    </div>
-                    <div>
-                        <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
-                            <button {"disabled" if not has_prev else ""}
-                                    hx-get="/api/transactions/table?page=1"
-                                    hx-target="#transaction-table"
-                                    hx-include="[name='status']:checked, [name='confidence_lt'], [name='search']"
-                                    class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 {"cursor-not-allowed opacity-50" if not has_prev else ""}">
-                                ‹‹ First
-                            </button>
-                            <button {"disabled" if not has_prev else ""}
-                                    hx-get="/api/transactions/table?page={page - 1 if has_prev else 1}"
-                                    hx-target="#transaction-table"
-                                    hx-include="[name='status']:checked, [name='confidence_lt'], [name='search']"
-                                    class="relative inline-flex items-center px-2 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 {"cursor-not-allowed opacity-50" if not has_prev else ""}">
-                                ‹ Prev
-                            </button>
-                            <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">
-                                Page {page} of {total_pages}
-                            </span>
-                            <button {"disabled" if not has_next else ""}
-                                    hx-get="/api/transactions/table?page={page + 1 if has_next else total_pages}"
-                                    hx-target="#transaction-table"
-                                    hx-include="[name='status']:checked, [name='confidence_lt'], [name='search']"
-                                    class="relative inline-flex items-center px-2 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 {"cursor-not-allowed opacity-50" if not has_next else ""}">
-                                Next ›
-                            </button>
-                            <button {"disabled" if not has_next else ""}
-                                    hx-get="/api/transactions/table?page={total_pages}"
-                                    hx-target="#transaction-table"
-                                    hx-include="[name='status']:checked, [name='confidence_lt'], [name='search']"
-                                    class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 {"cursor-not-allowed opacity-50" if not has_next else ""}">
-                                Last ››
-                            </button>
-                        </nav>
-                    </div>
-                </div>
-            </div>
-        </div>
-        """
+        pagination_component = create_full_pagination(page, total_pages, total_count)
+        pagination_html = str(pagination_component)
 
     return f"""
     <div id="transaction-table" class="bg-white rounded-lg shadow overflow-hidden">

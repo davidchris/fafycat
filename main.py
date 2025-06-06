@@ -1,5 +1,6 @@
 """FastAPI + FastHTML application entry point."""
 
+import logging
 import time
 
 import uvicorn
@@ -40,9 +41,9 @@ def create_app() -> FastAPI:
 
         # Log slow requests
         if process_time > 0.1:  # Log requests taking more than 100ms
-            print(f"⏱️  SLOW REQUEST: {request.method} {request.url.path} took {process_time:.3f}s")
+            logging.warning("SLOW REQUEST: %s %s took %.3fs", request.method, request.url.path, process_time)
         elif process_time > 0.05:  # Log requests taking more than 50ms
-            print(f"⏱️  {request.method} {request.url.path} took {process_time:.3f}s")
+            logging.info("Request %s %s took %.3fs", request.method, request.url.path, process_time)
 
         return response
 

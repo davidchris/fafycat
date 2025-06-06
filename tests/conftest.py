@@ -61,7 +61,7 @@ def test_client(temp_db, db_session):
     """Create a test client with temporary database."""
     # Create temporary model directory
     temp_model_dir = tempfile.mkdtemp()
-    
+
     # Set test environment variables
     os.environ["FAFYCAT_DB_URL"] = f"sqlite:///{temp_db.url.database}"
     os.environ["FAFYCAT_ENV"] = "testing"
@@ -77,7 +77,7 @@ def test_client(temp_db, db_session):
         return db_session
 
     app.dependency_overrides[get_db_session] = override_get_db_session
-    
+
     # Clear any cached categorizer instances
     import api.ml
     api.ml._categorizer = None
@@ -89,5 +89,4 @@ def test_client(temp_db, db_session):
 
     # Cleanup
     app.dependency_overrides.clear()
-    import shutil
     shutil.rmtree(temp_model_dir)

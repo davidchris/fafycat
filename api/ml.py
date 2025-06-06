@@ -163,7 +163,6 @@ async def get_ml_status(
     db: Session = Depends(get_db_session),
 ) -> dict:
     """Get ML model status and training readiness information."""
-    start_time = time.time()
     try:
         from src.fafycat.core.database import TransactionORM
 
