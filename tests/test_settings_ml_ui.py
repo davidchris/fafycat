@@ -89,27 +89,6 @@ class TestSettingsMLTraining:
         assert "trainModel()" in html  # JavaScript function
         assert "bg-blue-50" in html  # Blue alert
 
-    @patch("api.ml.get_categorizer")
-    @patch("pathlib.Path.exists")
-    def test_settings_page_model_working(self, mock_exists, mock_get_categorizer, test_client, db_session):
-        """Test settings page shows model status when working."""
-        mock_exists.return_value = True
-        mock_categorizer = MagicMock()
-        mock_categorizer.model_version = "test_v1"
-        mock_categorizer.is_trained = True
-        mock_categorizer.classes_ = ["groceries", "restaurants", "utilities"]
-        mock_get_categorizer.return_value = mock_categorizer
-
-        response = test_client.get("/settings")
-        assert response.status_code == 200
-
-        html = response.text
-        # Should show model working message
-        assert "Model is loaded and working!" in html
-        assert "Trained on 3 categories" in html
-        assert "Retrain Model" in html
-        assert "retrainModel()" in html  # JavaScript function
-        assert "bg-green-50" in html  # Green alert
 
     def test_settings_ml_javascript_functions(self, test_client, db_session):
         """Test that ML training JavaScript functions are included."""

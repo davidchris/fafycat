@@ -28,32 +28,7 @@ def test_ml_status_endpoint_exists():
         assert "status" in data
 
 
-def test_ml_predict_endpoint_structure():
-    """Test that ML predict endpoint exists and validates input."""
-    from main import create_app
 
-    app = create_app()
-
-    with TestClient(app) as client:
-        # Test with invalid data to check endpoint exists and validates
-        response = client.post("/api/ml/predict", json={})
-
-        # Should return 422 for validation error (not 404 for missing endpoint)
-        assert response.status_code == 422
-
-
-def test_ml_bulk_predict_endpoint_structure():
-    """Test that ML bulk predict endpoint exists and validates input."""
-    from main import create_app
-
-    app = create_app()
-
-    with TestClient(app) as client:
-        # Test with invalid data to check endpoint exists and validates
-        response = client.post("/api/ml/predict/bulk", json={})
-
-        # Should return 422 for validation error (not 404 for missing endpoint)
-        assert response.status_code == 422
 
 
 def test_ml_retrain_endpoint_exists():

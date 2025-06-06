@@ -103,7 +103,7 @@ class TestMLStatusAlerts:
         db_session.query(TransactionORM).delete()
         db_session.commit()
 
-        response = test_client.get("/")
+        response = test_client.get("/import")
         assert response.status_code == 200
 
         html = response.text
@@ -116,6 +116,12 @@ class TestMLStatusAlerts:
         """Test import page shows correct alert when ready to train."""
         # Create sufficient training data
         db_session.query(TransactionORM).delete()
+        db_session.query(CategoryORM).delete()
+        db_session.commit()
+
+        # Create the groceries category first
+        category = CategoryORM(name="groceries", type="spending")
+        db_session.add(category)
         db_session.commit()
 
         processor = CSVProcessor(db_session)
@@ -132,7 +138,7 @@ class TestMLStatusAlerts:
 
         processor.save_transactions(transactions, "test_ready_to_train")
 
-        response = test_client.get("/")
+        response = test_client.get("/import")
         assert response.status_code == 200
 
         html = response.text
@@ -152,7 +158,7 @@ class TestMLStatusAlerts:
         mock_categorizer.classes_ = ["groceries"]
         mock_get_categorizer.return_value = mock_categorizer
 
-        response = test_client.get("/")
+        response = test_client.get("/import")
         assert response.status_code == 200
 
         html = response.text
@@ -164,6 +170,12 @@ class TestMLStatusAlerts:
         """Test review page shows correct alert when ready to train."""
         # Create sufficient training data
         db_session.query(TransactionORM).delete()
+        db_session.query(CategoryORM).delete()
+        db_session.commit()
+
+        # Create the groceries category first
+        category = CategoryORM(name="groceries", type="spending")
+        db_session.add(category)
         db_session.commit()
 
         processor = CSVProcessor(db_session)
@@ -197,6 +209,12 @@ class TestMLStatusIntegration:
         """Test that ML status API responds quickly even with many transactions."""
         # Create many transactions
         db_session.query(TransactionORM).delete()
+        db_session.query(CategoryORM).delete()
+        db_session.commit()
+
+        # Create the groceries category first
+        category = CategoryORM(name="groceries", type="spending")
+        db_session.add(category)
         db_session.commit()
 
         processor = CSVProcessor(db_session)
