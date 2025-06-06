@@ -72,6 +72,12 @@ class TransactionORM(Base):
         Index("idx_transactions_date", "date"),
         Index("idx_transactions_category", "category_id"),
         Index("idx_transactions_reviewed", "is_reviewed"),
+        Index("idx_transactions_confidence", "confidence_score"),
+        Index("idx_transactions_amount", "amount"),
+        Index("idx_transactions_name", "name"),
+        # Compound indexes for common filtering combinations
+        Index("idx_transactions_reviewed_date", "is_reviewed", "date"),
+        Index("idx_transactions_reviewed_confidence", "is_reviewed", "confidence_score"),
     )
 
     category = relationship("CategoryORM", foreign_keys=[category_id], overlaps="transactions")

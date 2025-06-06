@@ -1,5 +1,8 @@
 """Service layer for database operations."""
 
+import math
+
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
@@ -21,8 +24,7 @@ class TransactionService:
     ) -> list[TransactionResponse]:
         """Get transactions with filtering."""
         query = session.query(TransactionORM).options(
-            joinedload(TransactionORM.category),
-            joinedload(TransactionORM.predicted_category)
+            joinedload(TransactionORM.category), joinedload(TransactionORM.predicted_category)
         )
 
         # Apply filters
@@ -34,7 +36,10 @@ class TransactionService:
             query = query.filter(TransactionORM.is_reviewed == is_reviewed)
 
         if confidence_lt is not None:
-            query = query.filter(TransactionORM.confidence_score < confidence_lt)
+            # Include transactions with null confidence (treat as needing review) OR confidence below threshold
+            query = query.filter(
+                (TransactionORM.confidence_score.is_(None)) | (TransactionORM.confidence_score < confidence_lt)
+            )
 
         # Apply pagination
         query = query.order_by(TransactionORM.date.desc())
@@ -61,9 +66,101 @@ class TransactionService:
         ]
 
     @staticmethod
-    def get_pending_transactions(session: Session, limit: int = 50) -> list[TransactionResponse]:
+    def get_pending_transactions(
+        session: Session, limit: int = 50, confidence_lt: float | None = None
+    ) -> list[TransactionResponse]:
         """Get transactions that need review."""
-        return TransactionService.get_transactions(session=session, limit=limit, is_reviewed=False)
+        return TransactionService.get_transactions(
+            session=session, limit=limit, is_reviewed=False, confidence_lt=confidence_lt
+        )
+
+    @staticmethod
+    def get_transactions_with_pagination(
+        session: Session,
+        skip: int = 0,
+        limit: int = 50,
+        is_reviewed: bool | None = None,
+        confidence_lt: float | None = None,
+        sort_by: str = "date",
+        sort_order: str = "desc",
+        search: str = "",
+    ) -> dict:
+        """Get transactions with pagination and enhanced filtering."""
+        # Build base query
+        query = session.query(TransactionORM).options(
+            joinedload(TransactionORM.category), joinedload(TransactionORM.predicted_category)
+        )
+
+        # Apply filters
+        if is_reviewed is not None:
+            query = query.filter(TransactionORM.is_reviewed == is_reviewed)
+
+        if confidence_lt is not None:
+            # Include transactions with null confidence (treat as needing review) OR confidence below threshold
+            query = query.filter(
+                (TransactionORM.confidence_score.is_(None)) | (TransactionORM.confidence_score < confidence_lt)
+            )
+
+        if search.strip():
+            # Search in transaction name, purpose, and description fields
+            search_term = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    TransactionORM.name.ilike(search_term),
+                    TransactionORM.purpose.ilike(search_term),
+                    # Also search in the concatenated description
+                    func.concat(TransactionORM.name, " - ", func.coalesce(TransactionORM.purpose, "")).ilike(
+                        search_term
+                    ),
+                )
+            )
+
+        # Get total count before applying pagination
+        total_count = query.count()
+
+        # Apply sorting
+        sort_column = getattr(TransactionORM, sort_by, TransactionORM.date)
+        query = query.order_by(sort_column.asc()) if sort_order.lower() == "asc" else query.order_by(sort_column.desc())
+
+        # Apply pagination
+        query = query.offset(skip).limit(limit)
+        transactions = query.all()
+
+        # Calculate pagination info
+        page = (skip // limit) + 1
+        total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
+        has_prev = page > 1
+        has_next = page < total_pages
+
+        # Convert to response models
+        transaction_responses = [
+            TransactionResponse(
+                id=t.id,
+                date=t.date,
+                description=(f"{t.name} - {t.purpose}".rstrip(" -") if t.purpose else t.name),
+                amount=t.amount,
+                account="",  # Will be added when we migrate account info
+                predicted_category=t.predicted_category.name if t.predicted_category else None,
+                actual_category=t.category.name if t.category else None,
+                confidence=t.confidence_score,
+                is_reviewed=t.is_reviewed,
+                created_at=t.imported_at,
+                updated_at=t.imported_at,  # Will update when we add updated_at to TransactionORM
+            )
+            for t in transactions
+        ]
+
+        return {
+            "transactions": transaction_responses,
+            "pagination_info": {
+                "page": page,
+                "total_pages": total_pages,
+                "total_count": total_count,
+                "has_prev": has_prev,
+                "has_next": has_next,
+                "page_size": limit,
+            },
+        }
 
     @staticmethod
     def update_transaction_category(

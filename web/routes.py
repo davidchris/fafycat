@@ -94,11 +94,35 @@ async def upload_csv_web(request: Request, file: UploadFile):
             # Save transactions to database
             new_count, duplicate_count = processor.save_transactions(transactions)
 
+            # Auto-predict categories for new transactions if model is available
+            predictions_made = 0
+            if new_count > 0:
+                from api.upload import _predict_transaction_categories
+
+                predictions_made = _predict_transaction_categories(db_session, transactions, new_count)
+
             # Create success page with results
             if new_count > 0:
                 success_msg = f"✅ Successfully imported {new_count} new transactions!"
             else:
                 success_msg = f"ℹ️ No new transactions imported. {duplicate_count} duplicates were skipped."
+
+            # Build prediction info
+            prediction_info = ""
+            if predictions_made > 0:
+                prediction_info = f"""
+                    <div class="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6">
+                        <h3 class="text-lg font-semibold text-purple-800 mb-2">🤖 ML Predictions Made</h3>
+                        <p class="text-purple-700">{predictions_made} transactions received automatic category predictions</p>
+                    </div>
+                """
+            elif new_count > 0:
+                prediction_info = """
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                        <h3 class="text-lg font-semibold text-blue-800 mb-2">ℹ️ No ML Predictions</h3>
+                        <p class="text-blue-700">No trained model available. <a href="/settings" class="underline hover:text-blue-600">Train a model</a> to get automatic predictions for future uploads.</p>
+                    </div>
+                """
 
             content = f"""
             <div class="container mx-auto px-4 py-8">
@@ -113,6 +137,8 @@ async def upload_csv_web(request: Request, file: UploadFile):
                         <p><strong>Duplicates skipped:</strong> {duplicate_count}</p>
                     </div>
                 </div>
+                
+                {prediction_info}
 
                 <div class="flex gap-4">
                     <a href="/import" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">

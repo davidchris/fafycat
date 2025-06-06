@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_db_session
@@ -68,7 +69,14 @@ def _predict_transaction_categories(db: Session, transactions: list, new_count: 
             # Don't fail upload if ML prediction fails, just log it
             import logging
 
-            logging.warning("ML prediction failed during upload: %s", e)
+            # Check if this is expected "no model" case vs actual error
+            error_msg = str(e)
+            if "No trained ML model found" in error_msg:
+                logging.info(
+                    "No ML model available for predictions during upload - this is expected for new installations"
+                )
+            else:
+                logging.warning("ML prediction failed during upload: %s", e)
 
     return predictions_made
 
@@ -200,3 +208,148 @@ async def confirm_upload(upload_id: str, db: Session = Depends(get_db_session)) 
             "predictions_made": session_data.get("predictions_made", 0),
         },
     }
+
+
+@router.post("/csv-htmx", response_class=HTMLResponse)
+async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(get_db_session)) -> str:
+    """Upload and process a CSV file, returning HTML results for HTMX."""
+    try:
+        # Validate file type
+        if not file.filename or not file.filename.endswith(".csv"):
+            return _render_upload_error("Only CSV files are allowed")
+
+        # Validate file size (limit to 10MB)
+        if file.size and file.size > 10 * 1024 * 1024:
+            return _render_upload_error("File too large (max 10MB)")
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv", delete=False) as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = Path(temp_file.name)
+
+        # Process CSV
+        processor = CSVProcessor(db)
+        transactions, errors = processor.import_csv(temp_file_path)
+
+        # Clean up temp file
+        temp_file_path.unlink()
+
+        if errors:
+            return _render_upload_error(f"CSV processing errors: {'; '.join(errors[:3])}")
+
+        if not transactions:
+            return _render_upload_error("No valid transactions found in CSV")
+
+        # Save transactions to database
+        new_count, duplicate_count = processor.save_transactions(transactions)
+
+        # Auto-predict categories for new transactions if model is available
+        predictions_made = _predict_transaction_categories(db, transactions, new_count)
+
+        # Return success HTML
+        return _render_upload_success(
+            filename=file.filename,
+            rows_processed=len(transactions),
+            new_count=new_count,
+            duplicate_count=duplicate_count,
+            predictions_made=predictions_made,
+        )
+
+    except Exception as e:
+        return _render_upload_error(f"Upload processing failed: {str(e)}")
+
+
+def _render_upload_success(
+    filename: str, rows_processed: int, new_count: int, duplicate_count: int, predictions_made: int
+) -> str:
+    """Render success message HTML for HTMX response."""
+    # Determine the primary message and style
+    if new_count > 0:
+        primary_msg = f"✅ Successfully imported {new_count} new transactions!"
+        bg_color = "bg-green-50"
+        border_color = "border-green-200"
+        text_color = "text-green-800"
+        icon_color = "text-green-400"
+        secondary_color = "text-green-700"
+    else:
+        primary_msg = f"ℹ️ No new transactions imported. {duplicate_count} duplicates were skipped."
+        bg_color = "bg-blue-50"
+        border_color = "border-blue-200"
+        text_color = "text-blue-800"
+        icon_color = "text-blue-400"
+        secondary_color = "text-blue-700"
+
+    # Build prediction info
+    prediction_info = ""
+    if predictions_made > 0:
+        prediction_info = f"""
+            <div class="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
+                <p class="text-sm font-medium text-purple-800">🤖 ML Predictions Made</p>
+                <p class="text-sm text-purple-700">{predictions_made} transactions got automatic predictions</p>
+            </div>
+        """
+    elif new_count > 0:
+        # Show info about no predictions when transactions were imported but no model available
+        prediction_info = """
+            <div class="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
+                <p class="text-sm font-medium text-blue-800">ℹ️ No ML Predictions</p>
+                <p class="text-sm text-blue-700">No trained model available. <a href="/settings" class="underline hover:text-blue-600">Train a model</a> to get automatic predictions.</p>
+            </div>
+        """
+
+    return f"""
+        <div class="{bg_color} {border_color} border rounded-lg p-6">
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <svg class="h-6 w-6 {icon_color}" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3 flex-1">
+                    <h3 class="text-lg font-semibold {text_color} mb-2">{primary_msg}</h3>
+                    <div class="space-y-1 {secondary_color}">
+                        <p><strong>File:</strong> {filename}</p>
+                        <p><strong>Rows processed:</strong> {rows_processed}</p>
+                        <p><strong>New transactions:</strong> {new_count}</p>
+                        <p><strong>Duplicates skipped:</strong> {duplicate_count}</p>
+                    </div>
+                    {prediction_info}
+                    <div class="mt-4 flex gap-3">
+                        <a href="/review" class="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">
+                            Review Transactions
+                        </a>
+                        <button onclick="document.getElementById('uploadResults').innerHTML = ''"
+                                class="inline-flex items-center px-3 py-2 text-sm font-medium {text_color} bg-transparent border border-current rounded-md hover:bg-current hover:bg-opacity-10">
+                            Upload Another File
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    """
+
+
+def _render_upload_error(error_message: str) -> str:
+    """Render error message HTML for HTMX response."""
+    return f"""
+        <div class="bg-red-50 border border-red-200 rounded-lg p-6">
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <svg class="h-6 w-6 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3 flex-1">
+                    <h3 class="text-lg font-semibold text-red-800 mb-2">❌ Upload Failed</h3>
+                    <p class="text-red-700">{error_message}</p>
+                    <div class="mt-4">
+                        <button onclick="document.getElementById('uploadResults').innerHTML = ''"
+                                class="inline-flex items-center px-3 py-2 text-sm font-medium text-red-800 bg-transparent border border-red-300 rounded-md hover:bg-red-50">
+                            Try Again
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    """

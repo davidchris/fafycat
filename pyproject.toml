@@ -16,6 +16,7 @@ dependencies = [
     "python-dateutil>=2.9.0.post0",
     "python-fasthtml>=0.12.19",
     "python-multipart>=0.0.20",
+    "requests>=2.32.3",
     "scikit-learn>=1.6.1",
     "sqlalchemy>=2.0.41",
     "uvicorn>=0.34.3",
@@ -56,10 +57,14 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "api/*.py" = ["B008"]
+"api/upload.py" = ["E501", "W291"]  # Allow long lines and whitespace for HTML content in upload responses
 "run_*.py" = ["T201"]  # Allow print statements in runner scripts
 "scripts/*.py" = ["T201", "C901"]  # Allow print statements and complex functions in scripts
 "src/fafycat/ml/*.py" = ["T201"]  # Allow print statements in ML modules for training feedback
 "src/fafycat/data/*.py" = ["C901", "B007"]  # Allow complex functions and unused loop vars in data processing
+"web/pages/*.py" = ["E501", "W291", "W293"]  # Allow long lines and whitespace for HTML/SVG content
+"tests/*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for tests
+"test_*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for test files
 
 [tool.mypy]
 disallow_untyped_defs = true

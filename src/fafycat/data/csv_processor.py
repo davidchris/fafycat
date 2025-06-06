@@ -208,6 +208,9 @@ class CSVProcessor:
                 duplicate_count += 1
                 continue
 
+            # Determine if transaction is already reviewed (has category assigned)
+            is_reviewed = bool(txn.category and txn.category.strip())
+
             # Create new transaction
             db_txn = TransactionORM(
                 id=txn_id,
@@ -219,13 +222,14 @@ class CSVProcessor:
                 currency=txn.currency,
                 imported_at=datetime.utcnow(),
                 import_batch=import_batch,
+                is_reviewed=is_reviewed,
             )
 
             # Try to match existing category if provided
             if txn.category:
                 # Normalize category name to match database storage
                 normalized_category = txn.category.strip().lower()
-                
+
                 # Find matching category (categories are stored normalized)
                 category = self.session.query(CategoryORM).filter(CategoryORM.name == normalized_category).first()
 

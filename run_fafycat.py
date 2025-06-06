@@ -16,7 +16,10 @@ def main():
     print("-" * 50)
 
     try:
-        subprocess.run([sys.executable, "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"], cwd=app_dir)
+        subprocess.run(
+            [sys.executable, "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+            cwd=app_dir,
+        )
     except KeyboardInterrupt:
         print("\n👋 FafyCat app stopped.")
 

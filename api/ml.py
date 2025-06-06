@@ -162,17 +162,35 @@ async def predict_transactions_bulk(
 async def get_ml_status(
     db: Session = Depends(get_db_session),
 ) -> dict:
-    """Get ML model status and information."""
+    """Get ML model status and training readiness information."""
+    start_time = time.time()
     try:
+        from src.fafycat.core.database import TransactionORM
+
         config = AppConfig()
         model_path = config.ml.model_dir / "categorizer.pkl"
+
+        # Check training data readiness
+        reviewed_count = (
+            db.query(TransactionORM).filter(TransactionORM.is_reviewed, TransactionORM.category_id.is_not(None)).count()
+        )
+
+        min_training_samples = 50  # Match train_model.py default
+        training_ready = reviewed_count >= min_training_samples
+
+        # Check unpredicted transactions
+        unpredicted_count = db.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None)).count()
 
         if not model_path.exists():
             return {
                 "model_loaded": False,
                 "model_path": str(model_path),
-                "status": "No model found - please train first",
+                "status": "No model found - ready to train" if training_ready else "Not enough training data",
                 "can_predict": False,
+                "training_ready": training_ready,
+                "reviewed_transactions": reviewed_count,
+                "min_training_samples": min_training_samples,
+                "unpredicted_transactions": unpredicted_count,
             }
 
         # Try to get categorizer
@@ -186,6 +204,10 @@ async def get_ml_status(
                 "status": "Model loaded and ready",
                 "can_predict": True,
                 "classes_count": len(categorizer.classes_) if categorizer.classes_ is not None else 0,
+                "training_ready": training_ready,
+                "reviewed_transactions": reviewed_count,
+                "min_training_samples": min_training_samples,
+                "unpredicted_transactions": unpredicted_count,
             }
         except HTTPException:
             return {
@@ -193,6 +215,10 @@ async def get_ml_status(
                 "model_path": str(model_path),
                 "status": "Model file exists but failed to load",
                 "can_predict": False,
+                "training_ready": training_ready,
+                "reviewed_transactions": reviewed_count,
+                "min_training_samples": min_training_samples,
+                "unpredicted_transactions": unpredicted_count,
             }
 
     except Exception as e:
@@ -200,6 +226,10 @@ async def get_ml_status(
             "model_loaded": False,
             "status": f"Error checking model status: {str(e)}",
             "can_predict": False,
+            "training_ready": False,
+            "reviewed_transactions": 0,
+            "min_training_samples": 50,
+            "unpredicted_transactions": 0,
         }
 
 

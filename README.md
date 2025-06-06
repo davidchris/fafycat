@@ -82,11 +82,20 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## 📊 User Flow
 
-1. **Import CSV** → FastAPI upload endpoints with validation and flexible column detection
-2. **ML Prediction** → Automatic categorization with confidence scores via ML API
-3. **Review UI** → FastHTML web interface sorted by uncertainty for efficient review
-4. **Manual Corrections** → Real-time category updates with active learning feedback
-5. **Export** → Analysis-ready data via API with predictions and confidence scores
+### Complete Workflow (After Reset/Import)
+1. **Import Labeled Data** → `uv run scripts/reset_and_import.py` discovers categories from your transaction history
+2. **Train ML Model** → Web UI "Train Model Now" button or `uv run scripts/train_model.py`
+3. **Import New Transactions** → FastAPI upload with automatic ML predictions for categorized transactions
+4. **Review & Correct** → FastHTML web interface sorted by confidence for efficient manual review
+5. **Re-train Periodically** → Settings page "Retrain Model" as you add more labeled data
+6. **Export Analysis** → API endpoints for analysis-ready data with predictions and confidence scores
+
+### Daily Usage (After Initial Setup)
+1. **Upload CSV** → Drag & drop transaction files via web interface
+2. **Auto-Categorization** → ML predictions applied automatically during upload (if model exists)
+3. **Review Low-Confidence** → Smart prioritization shows uncertain predictions first
+4. **One-Click Training** → Settings page shows ML status and provides train/retrain buttons
+5. **Batch Prediction** → Settings page "Predict X Transactions" for retroactive categorization
 
 ## 🔧 How It Works
 
@@ -201,7 +210,11 @@ uv run scripts/import_synthetic.py  # Adds test data
 
 ### 3. Train Your First Model
 ```bash
-# Train the ML model with your imported data
+# Option A: Train via web interface (RECOMMENDED)
+uv run python run_prod.py
+# Then go to Settings page → Click "Train ML Model Now"
+
+# Option B: Train via command line
 uv run scripts/train_model.py
 ```
 
@@ -214,11 +227,11 @@ uv run python run_dev.py   # For development/testing
 # OR launch FastAPI directly
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
-# Open your browser to http://localhost:8000 (FastAPI) or http://localhost:8501 (legacy)
-# 1. Go to "Settings" page to review discovered categories and set budgets (optional)
-# 2. Go to "Import" page to add new CSV files
-# 3. Use "Review" page to check and correct predictions
-# 4. Re-train model periodically as you add more labeled data
+# Open your browser to http://localhost:8000
+# 1. Check "Settings" page for ML model status and training options
+# 2. Use "Import" page to add new CSV files (with automatic predictions)
+# 3. Use "Review" page to check and correct ML predictions
+# 4. Re-train model via Settings page as you add more labeled data
 ```
 
 ### 📝 Expected CSV Format
@@ -333,11 +346,12 @@ The FastAPI + FastHTML migration is **functionally complete** and addresses the 
 
 ### 🟡 Medium Priority
 
-#### 4. **Enhanced UX with HTMX**
-- Add live progress updates for CSV uploads
-- Implement auto-save for category changes
-- Real-time validation feedback on forms
-- **Dependencies**: Add HTMX to frontend stack
+#### 4. **Enhanced UX with HTMX** ✅ **PHASE 1-2 COMPLETED**
+- ~~Add HTMX for seamless transaction categorization~~ → **Implemented with inline forms and confidence filtering**
+- ~~Implement ML model training UI~~ → **Complete with Settings page train/retrain buttons**
+- ~~Real-time confidence threshold filtering~~ → **Live slider updates without page reloads**
+- **Status**: Core HTMX functionality implemented for transaction review and ML training workflows
+- **Remaining**: Upload progress indicators, auto-save for budget changes, batch operations
 
 #### 5. **Export Functionality**
 - Complete export API endpoints (`/api/export/*`)
@@ -404,12 +418,13 @@ uv run streamlit run streamlit_app.py --server.port 8501
 
 ### 🎯 Immediate Next Task
 
-**Continue with Task #4 (Enhanced UX with HTMX)** and **Task #5 (Export Functionality)** as the core category management is now complete. The system now has:
+**Continue with Task #5 (Export Functionality)** as the core HTMX and ML training UI is now complete. The system now has:
 
-1. ✅ **Complete ML pipeline** with automatic predictions
-2. ✅ **Full transaction review** workflow with manual corrections  
+1. ✅ **Complete ML pipeline** with automatic predictions and web UI training
+2. ✅ **Full transaction review** workflow with HTMX-enhanced interactions  
 3. ✅ **Data-first category management** with discovery from labeled data
+4. ✅ **ML Training Interface** with status detection and one-click training
 
 Next priorities:
 1. **Export Functionality**: Implement data export workflows for analysis-ready data
-2. **Enhanced UX**: Add HTMX for better user interactions and real-time updates
+2. **Enhanced UX Phase 3**: Auto-predict after training, upload progress, batch operations

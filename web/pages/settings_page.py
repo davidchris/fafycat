@@ -7,6 +7,67 @@ from src.fafycat.core.database import get_categories
 from web.components.layout import create_page_layout
 
 
+def _get_ml_model_status():
+    """Get ML model status for settings page."""
+    try:
+        from src.fafycat.core.config import AppConfig
+        from src.fafycat.core.database import DatabaseManager, TransactionORM
+
+        config = AppConfig()
+        db_manager = DatabaseManager(config)
+
+        with db_manager.get_session() as db_session:
+            model_path = config.ml.model_dir / "categorizer.pkl"
+
+            # Check training data readiness
+            reviewed_count = (
+                db_session.query(TransactionORM)
+                .filter(TransactionORM.is_reviewed, TransactionORM.category_id.is_not(None))
+                .count()
+            )
+
+            min_training_samples = 50
+            training_ready = reviewed_count >= min_training_samples
+
+            # Check unpredicted transactions
+            unpredicted_count = (
+                db_session.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None)).count()
+            )
+
+            if not model_path.exists():
+                return {
+                    "model_loaded": False,
+                    "can_predict": False,
+                    "training_ready": training_ready,
+                    "reviewed_transactions": reviewed_count,
+                    "min_training_samples": min_training_samples,
+                    "unpredicted_transactions": unpredicted_count,
+                    "status": "No model found - ready to train" if training_ready else "Not enough training data",
+                }
+
+            # If model exists, assume it's working (avoiding model loading here for speed)
+            return {
+                "model_loaded": True,
+                "can_predict": True,
+                "training_ready": training_ready,
+                "reviewed_transactions": reviewed_count,
+                "min_training_samples": min_training_samples,
+                "unpredicted_transactions": unpredicted_count,
+                "status": "Model loaded and ready",
+            }
+
+    except Exception:
+        return {
+            "model_loaded": False,
+            "can_predict": False,
+            "training_ready": False,
+            "reviewed_transactions": 0,
+            "min_training_samples": 50,
+            "unpredicted_transactions": 0,
+            "status": "Unable to check model status",
+        }
+
+
 def render_settings_page(request: Request, db: Session):
     """Render the settings and categories page."""
 
@@ -25,21 +86,26 @@ def render_settings_page(request: Request, db: Session):
     # Check if we have any categories at all
     has_categories = len(active_categories) > 0
 
+    # Get ML model status
+    ml_status = _get_ml_model_status()
+
     if not has_categories:
         # Empty state - no categories exist
-        content = render_empty_categories_state()
+        content = render_empty_categories_state(ml_status)
     else:
         # Normal state - show category management
-        content = render_categories_management(category_groups, inactive_categories)
+        content = render_categories_management(category_groups, inactive_categories, ml_status)
 
     return create_page_layout("Settings & Categories - FafyCat", content)
 
 
-def render_empty_categories_state():
+def render_empty_categories_state(ml_status):
     """Render empty state when no categories exist."""
-    return """
+    return f"""
     <div class="container mx-auto px-4 py-8">
         <h1 class="text-2xl font-bold mb-6">Settings & Categories</h1>
+        
+        {render_ml_training_section(ml_status)}
 
         <div class="bg-white p-8 rounded-lg shadow text-center">
             <div class="mb-6">
@@ -80,14 +146,106 @@ def render_empty_categories_state():
     </div>
 
     <script>
-        function showCreateCategoryModal() {
+        function showCreateCategoryModal() {{
             alert('Create category functionality will be implemented here');
-        }
+        }}
+
+        function trainModel() {{
+            const trainButton = document.getElementById('trainButton');
+            if (trainButton) {{
+                trainButton.disabled = true;
+                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Training...';
+            }}
+
+            fetch('/api/ml/retrain', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }}
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                if (data.status === 'success') {{
+                    const accuracy = (data.accuracy * 100).toFixed(1);
+                    const samples = data.training_samples;
+                    
+                    // Update button to show prediction phase
+                    if (trainButton) {{
+                        trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Auto-predicting...';
+                    }}
+                    
+                    // Automatically predict unpredicted transactions
+                    return fetch('/api/ml/predict/batch-unpredicted', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }}
+                    }})
+                    .then(response => response.json())
+                    .then(predictData => {{
+                        if (predictData.status === 'success') {{
+                            const predicted = predictData.predictions_made;
+                            const message = predicted > 0 
+                                ? `🎉 Training and prediction completed!\\n\\n📊 Model Performance:\\n• Accuracy: ${{accuracy}}%\\n• Training samples: ${{samples}}\\n\\n⚡ Auto-Prediction Results:\\n• ${{predicted}} transactions now have predictions\\n• Ready for review on the Review page!`
+                                : `🎉 Model training completed!\\n\\n📊 Model Performance:\\n• Accuracy: ${{accuracy}}%\\n• Training samples: ${{samples}}\\n\\n✨ All transactions already have predictions!`;
+                            alert(message);
+                        }} else {{
+                            // Training succeeded but prediction failed - still show success
+                            alert(`🎉 Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}\\n\\n⚠️ Auto-prediction failed, but you can predict manually from this page.`);
+                        }}
+                        location.reload();
+                    }})
+                    .catch(error => {{
+                        // Training succeeded but prediction failed - still show success
+                        console.error('Auto-prediction failed:', error);
+                        alert(`🎉 Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}\\n\\n⚠️ Auto-prediction failed, but you can predict manually from this page.`);
+                        location.reload();
+                    }});
+                }} else {{
+                    throw new Error(data.detail || 'Training failed');
+                }}
+            }})
+            .catch(error => {{
+                alert('Training failed: ' + error.message);
+                if (trainButton) {{
+                    trainButton.disabled = false;
+                    trainButton.innerHTML = '<svg class="mr-2 h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" /></svg>🚀 Train ML Model Now';
+                }}
+            }});
+        }}
+
+        function retrainModel() {{
+            if (confirm('Retrain the ML model with current data? This will replace the existing model and automatically predict unpredicted transactions.')) {{
+                trainModel();
+            }}
+        }}
+
+        function predictUnpredicted() {{
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Predicting...';
+
+            fetch('/api/ml/predict/batch-unpredicted', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }}
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                if (data.status === 'success') {{
+                    alert(`✅ Predicted ${{data.predictions_made}} transactions!\\n\\nYou can now review the predictions on the Review page.`);
+                    location.reload();
+                }} else {{
+                    throw new Error(data.detail || 'Prediction failed');
+                }}
+            }})
+            .catch(error => {{
+                alert('Prediction failed: ' + error.message);
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }});
+        }}
     </script>
     """
 
 
-def render_categories_management(category_groups, inactive_categories):
+def render_categories_management(category_groups, inactive_categories, ml_status):
     """Render category management interface."""
 
     # Count categories with and without budgets
@@ -97,6 +255,8 @@ def render_categories_management(category_groups, inactive_categories):
     content = f"""
     <div class="container mx-auto px-4 py-8">
         <h1 class="text-2xl font-bold mb-6">Settings & Categories</h1>
+        
+        {render_ml_training_section(ml_status)}
 
         <!-- Summary Stats -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -278,6 +438,67 @@ def render_categories_management(category_groups, inactive_categories):
                 }
             }
         }
+
+        function trainModel() {
+            const trainButton = document.getElementById('trainButton');
+            if (trainButton) {
+                trainButton.disabled = true;
+                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Training...';
+            }
+
+            fetch('/api/ml/retrain', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert(`🎉 Model training completed!\\n\\nAccuracy: ${(data.accuracy * 100).toFixed(1)}%\\nTraining samples: ${data.training_samples}\\n\\nYour model is now ready to predict transactions!`);
+                    location.reload();
+                } else {
+                    throw new Error(data.detail || 'Training failed');
+                }
+            })
+            .catch(error => {
+                alert('Training failed: ' + error.message);
+                if (trainButton) {
+                    trainButton.disabled = false;
+                    trainButton.innerHTML = '<svg class="mr-2 h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" /></svg>🚀 Train ML Model Now';
+                }
+            });
+        }
+
+        function retrainModel() {
+            if (confirm('Retrain the ML model with current data? This will replace the existing model.')) {
+                trainModel();
+            }
+        }
+
+        function predictUnpredicted() {
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Predicting...';
+
+            fetch('/api/ml/predict/batch-unpredicted', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert(`✅ Predicted ${data.predictions_made} transactions!\\n\\nYou can now review the predictions on the Review page.`);
+                    location.reload();
+                } else {
+                    throw new Error(data.detail || 'Prediction failed');
+                }
+            })
+            .catch(error => {
+                alert('Prediction failed: ' + error.message);
+                button.disabled = false;
+                button.innerHTML = originalText;
+            });
+        }
     </script>
     """
 
@@ -313,3 +534,118 @@ def render_budget_reminder(categories_with_budgets, total_active):
         """
 
     return ""
+
+
+def render_ml_training_section(ml_status):
+    """Render ML model training section based on current status."""
+    model_loaded = ml_status.get("model_loaded", False)
+    can_predict = ml_status.get("can_predict", False)
+    training_ready = ml_status.get("training_ready", False)
+    reviewed_count = ml_status.get("reviewed_transactions", 0)
+    min_required = ml_status.get("min_training_samples", 50)
+    unpredicted_count = ml_status.get("unpredicted_transactions", 0)
+
+    # Determine alert type and content based on status
+    if model_loaded and can_predict:
+        # Model is working - show success status
+        classes_count = ml_status.get("classes_count", 0)
+        return f"""
+        <div class="mb-8 bg-green-50 border border-green-200 rounded-lg p-6">
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <svg class="h-6 w-6 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3 flex-1">
+                    <h3 class="text-lg font-semibold text-green-800">🤖 ML Model Status</h3>
+                    <div class="mt-2 text-sm text-green-700">
+                        <p class="font-medium">✅ Model is loaded and working!</p>
+                        <p class="mt-1">Trained on {classes_count} categories • {
+            unpredicted_count
+        } transactions need predictions</p>
+                    </div>
+                    <div class="mt-4 flex gap-3">
+                        <button 
+                            onclick="retrainModel()"
+                            class="inline-flex items-center px-3 py-2 text-sm font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200"
+                        >
+                            🔄 Retrain Model
+                        </button>
+                        {
+            f'''
+                        <button 
+                            onclick="predictUnpredicted()"
+                            class="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200"
+                        >
+                            ⚡ Predict {unpredicted_count} Transactions
+                        </button>
+                        '''
+            if unpredicted_count > 0
+            else ""
+        }
+                    </div>
+                </div>
+            </div>
+        </div>
+        """
+
+    if training_ready:
+        # Ready to train - show action button
+        return f"""
+        <div class="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <svg class="h-6 w-6 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3 flex-1">
+                    <h3 class="text-lg font-semibold text-blue-800">🤖 ML Model Training</h3>
+                    <div class="mt-2 text-sm text-blue-700">
+                        <p class="font-medium">Ready to train your first ML model!</p>
+                        <p class="mt-1">You have {reviewed_count} reviewed transactions (requires {min_required}+)</p>
+                        <p class="mt-1 text-xs text-blue-600">Training will analyze your categorization patterns to predict future transactions.</p>
+                    </div>
+                    <div class="mt-4">
+                        <button 
+                            onclick="trainModel()"
+                            id="trainButton"
+                            class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <svg class="mr-2 h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
+                            </svg>
+                            🚀 Train ML Model Now
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """
+
+    # Not enough data - show requirements
+    return f"""
+        <div class="mb-8 bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <svg class="h-6 w-6 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3 flex-1">
+                    <h3 class="text-lg font-semibold text-yellow-800">🤖 ML Model Training</h3>
+                    <div class="mt-2 text-sm text-yellow-700">
+                        <p class="font-medium">Need more training data</p>
+                        <p class="mt-1">You have {reviewed_count} reviewed transactions, need at least {min_required}</p>
+                        <p class="mt-1 text-xs text-yellow-600">Import and manually categorize more transactions to enable ML training.</p>
+                    </div>
+                    <div class="mt-4">
+                        <a href="/" class="inline-flex items-center px-3 py-2 text-sm font-medium text-yellow-700 bg-yellow-100 rounded-md hover:bg-yellow-200">
+                            📊 Go to Import Page
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """

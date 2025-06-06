@@ -7,6 +7,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add any global event listeners or initialization code here
     initializeFormHandlers();
     initializeNavigation();
+    initializeHTMX();
+    
+    // Page-specific initialization
+    if (window.location.pathname === '/review') {
+        initializeReviewPage();
+    }
 });
 
 // Form handling
@@ -36,6 +42,66 @@ function initializeNavigation() {
             link.classList.add('active', 'bg-blue-500', 'text-white');
         }
     });
+}
+
+// HTMX initialization and event handlers
+function initializeHTMX() {
+    // Only initialize if HTMX is available
+    if (typeof htmx === 'undefined') {
+        console.log('HTMX not loaded, skipping HTMX initialization');
+        return;
+    }
+    
+    console.log('Initializing HTMX event handlers');
+    
+    // Configure HTMX
+    htmx.config.globalViewTransitions = true;
+    htmx.config.responseHandling = [
+        {code:".*", swap: true},
+        {code:"4[0-9][0-9]", error: true},
+        {code:"5[0-9][0-9]", error: true}
+    ];
+    
+    // Success feedback
+    document.addEventListener('htmx:afterSwap', function(event) {
+        if (event.detail.xhr.status === 200) {
+            showNotification('Updated successfully', 'success');
+        }
+    });
+    
+    // Error handling
+    document.addEventListener('htmx:responseError', function(event) {
+        const message = event.detail.xhr.statusText || 'Request failed';
+        showNotification('Error: ' + message, 'error');
+    });
+    
+    // Loading states
+    document.addEventListener('htmx:beforeRequest', function(event) {
+        event.target.classList.add('htmx-loading');
+    });
+    
+    document.addEventListener('htmx:afterRequest', function(event) {
+        event.target.classList.remove('htmx-loading');
+    });
+    
+    // Network error handling
+    document.addEventListener('htmx:sendError', function(event) {
+        showNotification('Network error - please check your connection', 'error');
+    });
+}
+
+// Review page specific functionality
+function initializeReviewPage() {
+    // Update confidence threshold display
+    const thresholdSlider = document.querySelector('input[name="confidence_threshold"]');
+    const thresholdDisplay = document.getElementById('threshold-display');
+    
+    if (thresholdSlider && thresholdDisplay) {
+        thresholdSlider.addEventListener('input', function() {
+            const value = Math.round(parseFloat(this.value) * 100);
+            thresholdDisplay.textContent = `Show transactions with confidence below ${value}%`;
+        });
+    }
 }
 
 // Utility functions

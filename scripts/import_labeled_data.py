@@ -55,9 +55,9 @@ def parse_labeled_csv(file_path: Path) -> list[TransactionInput]:
             # Parse date
             date_col = col_mapping.get("Date")
             if not date_col:
-                print(f"    ⚠️  Error parsing row: No date column found")
+                print("    ⚠️  Error parsing row: No date column found")
                 continue
-            
+
             date_str = str(row[date_col]).strip()
             txn_date = pd.to_datetime(date_str, dayfirst=True).date()
 
@@ -206,14 +206,14 @@ def check_categories(data_path: Path = None):
     for csv_file in csv_files:
         try:
             df = pd.read_csv(csv_file)
-            
+
             # Find category column (could be "Cat", "category", or similar)
             cat_col = None
             for col in df.columns:
                 if col.lower() in ["cat", "category"]:
                     cat_col = col
                     break
-            
+
             if cat_col:
                 categories = df[cat_col].dropna().unique()
                 all_categories.update(categories)
@@ -230,16 +230,12 @@ def check_categories(data_path: Path = None):
 def main():
     """Main import function."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Import labeled transaction data")
-    parser.add_argument(
-        "--data-path",
-        type=Path,
-        help="Path to directory containing labeled CSV files"
-    )
-    
+    parser.add_argument("--data-path", type=Path, help="Path to directory containing labeled CSV files")
+
     args = parser.parse_args()
-    
+
     print("🐱 FafyCat Labeled Data Importer")
     print("=" * 50)
 

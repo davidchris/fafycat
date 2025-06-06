@@ -1,7 +1,9 @@
 """FastAPI + FastHTML application entry point."""
 
+import time
+
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -27,6 +29,22 @@ def create_app() -> FastAPI:
     # Store in app state
     app.state.config = config
     app.state.db_manager = db_manager
+
+    # Add performance monitoring middleware
+    @app.middleware("http")
+    async def add_process_time_header(request: Request, call_next):
+        start_time = time.time()
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        response.headers["X-Process-Time"] = str(process_time)
+
+        # Log slow requests
+        if process_time > 0.1:  # Log requests taking more than 100ms
+            print(f"⏱️  SLOW REQUEST: {request.method} {request.url.path} took {process_time:.3f}s")
+        elif process_time > 0.05:  # Log requests taking more than 50ms
+            print(f"⏱️  {request.method} {request.url.path} took {process_time:.3f}s")
+
+        return response
 
     # Mount static files
     app.mount("/static", StaticFiles(directory="static"), name="static")

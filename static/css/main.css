@@ -22,6 +22,50 @@
     pointer-events: none;
 }
 
+/* HTMX Loading States */
+.htmx-indicator {
+    display: none;
+}
+
+.htmx-request .htmx-indicator {
+    display: inline;
+}
+
+.htmx-request.htmx-indicator {
+    display: inline;
+}
+
+.htmx-loading {
+    opacity: 0.7;
+    pointer-events: none;
+    position: relative;
+}
+
+.htmx-loading::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+/* HTMX Transitions */
+.htmx-swapping {
+    opacity: 0;
+    transition: opacity 100ms ease-out;
+}
+
+.htmx-settling {
+    opacity: 1;
+    transition: opacity 100ms ease-in;
+}
+
 /* Animation for smooth transitions */
 .transition-smooth {
     transition: all 0.2s ease-in-out;
