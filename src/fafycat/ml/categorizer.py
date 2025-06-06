@@ -119,10 +119,15 @@ class TransactionCategorizer:
         y_encoded = self.label_encoder.fit_transform(y)
         self.classes_ = self.label_encoder.classes_
 
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_df, y_encoded, test_size=test_size, stratify=y_encoded, random_state=42
-        )
+        # Split data or use all data if test_size is 0
+        if test_size == 0.0:
+            # Use all data for training (no test split)
+            X_train, X_test = X_df, X_df
+            y_train, y_test = y_encoded, y_encoded
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X_df, y_encoded, test_size=test_size, stratify=y_encoded, random_state=42
+            )
 
         # Prepare features
         X_train_prepared = self._prepare_features(X_train, fit=True)

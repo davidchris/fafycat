@@ -16,15 +16,16 @@ from src.fafycat.core.config import AppConfig
 from src.fafycat.core.database import CategoryORM
 from src.fafycat.core.models import TransactionInput
 from src.fafycat.ml.categorizer import TransactionCategorizer
+from src.fafycat.ml.ensemble_categorizer import EnsembleCategorizer
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 
 # Global categorizer instance (lazy-loaded)
-_categorizer: TransactionCategorizer | None = None
+_categorizer: TransactionCategorizer | EnsembleCategorizer | None = None
 _config: AppConfig | None = None
 
 
-def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategorizer:
+def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategorizer | EnsembleCategorizer:
     """Get or create the ML categorizer instance."""
     global _categorizer, _config
 
@@ -32,10 +33,15 @@ def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategor
         _config = AppConfig()
         _config.ensure_dirs()
 
-        _categorizer = TransactionCategorizer(db, _config.ml)
+        # Choose between ensemble and single model based on config
+        if _config.ml.use_ensemble:
+            _categorizer = EnsembleCategorizer(db, _config.ml)
+            model_path = _config.ml.model_dir / "ensemble_categorizer.pkl"
+        else:
+            _categorizer = TransactionCategorizer(db, _config.ml)
+            model_path = _config.ml.model_dir / "categorizer.pkl"
 
         # Try to load saved model
-        model_path = _config.ml.model_dir / "categorizer.pkl"
         if model_path.exists():
             try:
                 _categorizer.load_model(model_path)
@@ -48,9 +54,10 @@ def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategor
                     ),
                 ) from e
         else:
+            model_type = "ensemble" if _config.ml.use_ensemble else "single"
             raise HTTPException(
                 status_code=503,
-                detail="No trained ML model found. Please train a model first using 'uv run scripts/train_model.py'",
+                detail=f"No trained {model_type} ML model found. Please train a model first using 'uv run scripts/train_model.py'",
             )
 
     return _categorizer

@@ -17,6 +17,11 @@ class DatabaseConfig(BaseModel):
 class MLConfig(BaseModel):
     """Machine learning configuration."""
 
+    # Ensemble settings
+    use_ensemble: bool = True
+    ensemble_cv_folds: int = 5
+
+    # LightGBM parameters
     lgbm_params: dict[str, Any] = Field(
         default_factory=lambda: {
             "n_estimators": 200,
@@ -33,6 +38,7 @@ class MLConfig(BaseModel):
         }
     )
 
+    # TF-IDF parameters for LightGBM
     tfidf_params: dict[str, Any] = Field(
         default_factory=lambda: {
             "max_features": 500,
@@ -42,6 +48,11 @@ class MLConfig(BaseModel):
             "max_df": 0.95,
         }
     )
+
+    # Naive Bayes parameters
+    nb_alpha: float = 1.0
+    nb_use_complement: bool = True
+    nb_max_features: int = 2000
 
     confidence_thresholds: dict[str, float] = Field(default_factory=lambda: {"high": 0.9, "medium": 0.7, "low": 0.5})
 
