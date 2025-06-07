@@ -64,6 +64,7 @@ class TransactionORM(Base):
     predicted_category_id = Column(Integer, ForeignKey("categories.id"))
     confidence_score = Column(Float)
     is_reviewed = Column(Boolean, default=False)
+    review_priority = Column(String(20), default="standard")  # standard, high, quality_check
     imported_at = Column(DateTime, default=datetime.utcnow)
     import_batch = Column(String, nullable=False)
 

@@ -57,7 +57,7 @@ def _predict_transaction_categories(db: Session, transactions: list, new_count: 
                 # Get predictions
                 predictions = categorizer.predict_with_confidence(txn_inputs)
 
-                # Use active learning to select transactions for review
+                # Use hybrid approach: confidence-first with active learning prioritization
                 from src.fafycat.ml.active_learning import ActiveLearningSelector
 
                 al_selector = ActiveLearningSelector(db)
@@ -74,19 +74,43 @@ def _predict_transaction_categories(db: Session, transactions: list, new_count: 
                     )
                     al_predictions.append(al_pred)
 
-                # Select transactions for review using active learning
-                max_review_items = min(20, len(al_predictions))  # Limit to 20 items for review
-                review_transaction_ids = set(
+                # Get active learning strategic selections from ALL predictions
+                max_review_items = min(20, len(al_predictions))  # Limit to 20 strategic selections
+                strategic_selections = set(
                     al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
                 )
 
-                # Update transactions with predictions and active learning selections
+                # Hybrid categorization: confidence + active learning priority
+                auto_accepted = 0
+                high_priority_review = 0
+                standard_review = 0
+                confidence_threshold = 0.95  # Conservative threshold for auto-acceptance
+
                 for txn, prediction in zip(new_txns, predictions, strict=True):
                     txn.predicted_category_id = prediction.predicted_category_id
                     txn.confidence_score = prediction.confidence_score
 
-                    # Mark for review based on active learning selection
-                    txn.is_reviewed = txn.id not in review_transaction_ids
+                    if prediction.confidence_score >= confidence_threshold:
+                        # High confidence - check if active learning flagged it for quality validation
+                        if txn.id in strategic_selections:
+                            # High confidence but flagged for quality check
+                            txn.is_reviewed = False
+                            txn.review_priority = "quality_check"
+                            high_priority_review += 1
+                        else:
+                            # High confidence and not flagged - auto accept
+                            txn.is_reviewed = True
+                            txn.review_priority = "auto_accepted"
+                            auto_accepted += 1
+                    else:
+                        # Lower confidence - definitely needs review
+                        txn.is_reviewed = False
+                        if txn.id in strategic_selections:
+                            txn.review_priority = "high"
+                            high_priority_review += 1
+                        else:
+                            txn.review_priority = "standard"
+                            standard_review += 1
 
                     predictions_made += 1
 
@@ -312,8 +336,8 @@ def _render_upload_success(
     if predictions_made > 0:
         prediction_info = f"""
             <div class="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
-                <p class="text-sm font-medium text-purple-800">🤖 ML Predictions & Active Learning</p>
-                <p class="text-sm text-purple-700">{predictions_made} transactions got automatic predictions. Smart selection chose the most important ones for review.</p>
+                <p class="text-sm font-medium text-purple-800">🤖 ML Predictions & Smart Review</p>
+                <p class="text-sm text-purple-700">{predictions_made} transactions got automatic predictions. High-confidence predictions were auto-accepted, while uncertain ones are prioritized for review.</p>
             </div>
         """
     elif new_count > 0:

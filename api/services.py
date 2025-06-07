@@ -81,6 +81,7 @@ class TransactionService:
         limit: int = 50,
         is_reviewed: bool | None = None,
         confidence_lt: float | None = None,
+        review_priority: str | None = None,
         sort_by: str = "date",
         sort_order: str = "desc",
         search: str = "",
@@ -100,6 +101,13 @@ class TransactionService:
             query = query.filter(
                 (TransactionORM.confidence_score.is_(None)) | (TransactionORM.confidence_score < confidence_lt)
             )
+
+        if review_priority is not None:
+            if review_priority == "high_priority":
+                # Show both high priority and quality check transactions
+                query = query.filter(TransactionORM.review_priority.in_(["high", "quality_check"]))
+            else:
+                query = query.filter(TransactionORM.review_priority == review_priority)
 
         if search.strip():
             # Search in transaction name, purpose, and description fields

@@ -226,12 +226,13 @@ def render_review_page(request: Request):
 
     try:
         with db_manager.get_session() as session:
-            # Use the new paginated service to get initial transaction data
+            # Use the new paginated service to get initial transaction data (default to high priority)
             result = TransactionService.get_transactions_with_pagination(
                 session=session,
                 skip=0,
                 limit=50,
                 is_reviewed=False,  # Default to pending
+                review_priority="high_priority",  # Default to high priority transactions
                 confidence_lt=0.8,  # Default confidence threshold
                 sort_by="date",
                 sort_order="desc",
@@ -268,8 +269,8 @@ def render_review_page(request: Request):
         {model_alert}
 
         <div class="mb-8">
-            <h2 class="text-lg font-semibold mb-4">Smart Review Queue ({transaction_count} transactions)</h2>
-            <p class="text-gray-600 mb-4">Active learning selected these transactions for review based on uncertainty, value, and merchant novelty. High-confidence predictions are auto-accepted.</p>
+            <h2 class="text-lg font-semibold mb-4">Priority Review Queue ({transaction_count} transactions)</h2>
+            <p class="text-gray-600 mb-4">Showing high-priority transactions selected by active learning, plus quality check samples from high-confidence predictions. Only transactions above 95% confidence are auto-accepted.</p>
             {transactions_html}
         </div>
 
@@ -278,16 +279,25 @@ def render_review_page(request: Request):
             <div class="bg-gray-50 p-4 rounded space-y-4">
                 <!-- Status Filter -->
                 <div>
-                    <label class="block text-sm font-medium mb-2">Status:</label>
-                    <div class="flex gap-4">
+                    <label class="block text-sm font-medium mb-2">Queue:</label>
+                    <div class="flex gap-4 flex-wrap">
                         <label class="flex items-center">
-                            <input type="radio" name="status" value="pending" checked
+                            <input type="radio" name="status" value="high_priority" checked
                                    hx-get="/api/transactions/table"
                                    hx-trigger="change"
                                    hx-target="#transaction-table"
                                    hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order']"
                                    class="mr-2">
-                            Pending
+                            Priority Review
+                        </label>
+                        <label class="flex items-center">
+                            <input type="radio" name="status" value="pending"
+                                   hx-get="/api/transactions/table"
+                                   hx-trigger="change"
+                                   hx-target="#transaction-table"
+                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order']"
+                                   class="mr-2">
+                            All Pending
                         </label>
                         <label class="flex items-center">
                             <input type="radio" name="status" value="reviewed"
@@ -296,7 +306,7 @@ def render_review_page(request: Request):
                                    hx-target="#transaction-table"
                                    hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order']"
                                    class="mr-2">
-                            Reviewed
+                            Auto-Accepted
                         </label>
                         <label class="flex items-center">
                             <input type="radio" name="status" value="all"
@@ -305,7 +315,7 @@ def render_review_page(request: Request):
                                    hx-target="#transaction-table"
                                    hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order']"
                                    class="mr-2">
-                            All
+                            All Transactions
                         </label>
                     </div>
                 </div>

@@ -121,7 +121,7 @@ async def categorize_transaction_htmx(
 async def get_transactions_table(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    status: str = Query("pending"),  # pending, reviewed, all
+    status: str = Query("high_priority"),  # high_priority, pending, reviewed, all
     confidence_lt: float = Query(0.8, ge=0, le=1),
     sort_by: str = Query("date"),  # date, confidence, amount, description, category
     sort_order: str = Query("desc"),  # asc, desc
@@ -129,13 +129,18 @@ async def get_transactions_table(
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
     """Get transactions table fragment for HTMX filtering with pagination."""
-    # Convert status parameter to is_reviewed filter
+    # Convert status parameter to filters
     is_reviewed = None
-    if status == "pending":
+    review_priority = None
+
+    if status == "high_priority":
+        is_reviewed = False
+        review_priority = "high_priority"  # Special value for high + quality_check
+    elif status == "pending":
         is_reviewed = False
     elif status == "reviewed":
         is_reviewed = True
-    # status == "all" means is_reviewed = None (no filter)
+    # status == "all" means no filters
 
     # Calculate skip for pagination
     skip = (page - 1) * page_size
@@ -146,7 +151,8 @@ async def get_transactions_table(
         skip=skip,
         limit=page_size,
         is_reviewed=is_reviewed,
-        confidence_lt=confidence_lt if status == "pending" else None,
+        confidence_lt=confidence_lt if status in ["pending", "high_priority"] else None,
+        review_priority=review_priority,
         sort_by=sort_by,
         sort_order=sort_order,
         search=search,
