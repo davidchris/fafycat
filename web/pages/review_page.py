@@ -268,8 +268,8 @@ def render_review_page(request: Request):
         {model_alert}
 
         <div class="mb-8">
-            <h2 class="text-lg font-semibold mb-4">Pending Review ({transaction_count} transactions)</h2>
-            <p class="text-gray-600 mb-4">Transactions requiring manual review and categorization.</p>
+            <h2 class="text-lg font-semibold mb-4">Smart Review Queue ({transaction_count} transactions)</h2>
+            <p class="text-gray-600 mb-4">Active learning selected these transactions for review based on uncertainty, value, and merchant novelty. High-confidence predictions are auto-accepted.</p>
             {transactions_html}
         </div>
 

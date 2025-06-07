@@ -13,6 +13,7 @@ def create_sidebar():
             <ul class="space-y-1">
                 <li><a href="/import" class="block py-2 px-3 rounded hover:bg-gray-100">Import Transactions</a></li>
                 <li><a href="/review" class="block py-2 px-3 rounded hover:bg-gray-100">Review & Categorize</a></li>
+                <li><a href="/export" class="block py-2 px-3 rounded hover:bg-gray-100">Export Data</a></li>
                 <li><a href="/settings" class="block py-2 px-3 rounded hover:bg-gray-100">Settings & Categories</a></li>
             </ul>
         </nav>

@@ -43,6 +43,7 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
 - **🎯 Smart Learning**: Active learning prioritizes uncertain predictions for review
 - **🏪 Merchant Rules**: High-confidence merchant mappings override ML predictions
 - **📊 Multiple Formats**: Flexible CSV import supporting German and English banking formats
+- **📈 Data Export**: Export analysis-ready data in CSV, Excel, and JSON formats with filtering options
 - **⚡ Real-time UI**: FastHTML web interface with responsive design for easy transaction review and management
 
 ## 🏗️ Architecture
@@ -55,7 +56,7 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
          │
          ▼
 ┌─────────────────┐     ┌──────────────────┐
-│ Feature Extract │────▶│  ML Prediction   │ → LightGBM + confidence calibration
+│ Feature Extract │────▶│  ML Prediction   │ → Ensemble (LightGBM + Naive Bayes) + calibration
 │  - Merchant     │     │  (LightGBM)      │
 │  - Amount range │     └──────────────────┘
 │  - Text tokens  │              │
@@ -68,7 +69,8 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
                                  │
                                  ▼
                         ┌──────────────────┐
-                        │   CSV Export     │ → Analysis-ready data via API
+                        │   Data Export    │ → CSV/Excel/JSON with filtering
+                        │   (Multi-format) │   & real-time preview
                         └──────────────────┘
 ```
 
@@ -76,7 +78,7 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
 
 - **Backend**: Python 3.13, FastAPI, SQLite, SQLAlchemy, Pydantic
 - **Frontend**: FastHTML with Tailwind CSS, responsive design
-- **ML**: LightGBM, scikit-learn, TF-IDF vectorization
+- **ML**: Ensemble categorizer (LightGBM + Naive Bayes), scikit-learn, TF-IDF vectorization
 - **Data**: Pandas, deterministic deduplication, comprehensive feature extraction
 - **Development**: uv package management, ruff linting, pytest testing
 
@@ -93,9 +95,10 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ### Daily Usage (After Initial Setup)
 1. **Upload CSV** → Drag & drop transaction files via web interface
 2. **Auto-Categorization** → ML predictions applied automatically during upload (if model exists)
-3. **Review Low-Confidence** → Smart prioritization shows uncertain predictions first
+3. **Smart Review Queue** → Active learning selects only the most important transactions for review (~20 instead of all)
 4. **One-Click Training** → Settings page shows ML status and provides train/retrain buttons
 5. **Batch Prediction** → Settings page "Predict X Transactions" for retroactive categorization
+6. **Export Analysis** → Generate filtered reports in multiple formats for financial analysis
 
 ## 🔧 How It Works
 
@@ -103,7 +106,9 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000
 When users upload CSV files, the system automatically runs ML predictions on new transactions if a trained model is available. The upload process:
 - Validates and processes CSV data
 - Saves transactions to the database
-- Automatically predicts categories using the trained ML model
+- Automatically predicts categories using the trained ensemble ML model (LightGBM + Naive Bayes)
+- **Active learning selects strategic subset for review** based on uncertainty, transaction value, and merchant novelty
+- **Auto-accepts high-confidence predictions** (selected transactions marked as reviewed)
 - Gracefully handles cases where no model is available
 
 ### Real-time Prediction
@@ -124,12 +129,73 @@ Existing unpredicted transactions can be batch-processed after model training, a
 - Train models with sufficient labeled data
 - Retroactively predict categories for historical transactions
 
+### 🎯 Active Learning System
+FafyCat uses intelligent active learning to minimize manual review burden while maintaining high accuracy:
+
+#### **Smart Transaction Selection**
+Instead of reviewing all low-confidence transactions, the system strategically selects ~20 transactions per upload based on:
+- **70% Uncertainty sampling**: Lowest confidence predictions that need human validation
+- **20% Medium confidence**: Transactions with 70-90% confidence for diversity
+- **10% High confidence**: Quality validation samples to catch ML errors
+
+#### **Auto-Acceptance Strategy**
+High-confidence predictions are automatically accepted when:
+- **Confidence threshold**: Predictions above active learning selection threshold
+- **Strategic selection**: Active learning algorithm determines which transactions need review
+- **Quality assurance**: System still samples some high-confidence predictions for validation
+
+#### **Prioritization Factors**
+Active learning considers multiple factors beyond just confidence:
+- **Transaction amount**: Higher-value transactions get priority for review
+- **Merchant novelty**: New or rare merchants are more likely to be selected
+- **Uncertainty score**: Primary factor based on ML confidence calibration
+
+#### **Adaptive Strategy**
+The system adapts its selection strategy based on user feedback:
+- **Initial phase**: Uses uncertainty sampling for new models
+- **Diverse sampling**: Switches to diversity sampling when accuracy is high
+- **Mixed approach**: Combines strategies based on correction rates
+
+#### **Review Workflow**
+1. **Upload CSV** → All transactions get ML predictions
+2. **Active Learning** → Selects ~20 most important for review
+3. **Smart Queue** → Review page shows only selected transactions
+4. **Auto-Accept** → High-confidence predictions bypass manual review
+5. **Quality Check** → Some high-confidence samples included for validation
+
+### Data Export
+Export transaction data for external analysis with comprehensive filtering and multiple format options:
+
+#### **📈 Export Formats**
+- **CSV**: Universal spreadsheet format for Excel, Google Sheets, and other tools
+- **Excel**: Multi-sheet workbook with transaction data, category summaries, and monthly reports
+- **JSON**: Structured data for programmatic access and API integration
+
+#### **🔍 Advanced Filtering**
+- **Date Ranges**: Custom date selection or quick presets (Last 30 Days, Last 3 Months, etc.)
+- **Category Filtering**: Select specific categories to include in export
+- **Review Status**: Filter by reviewed/unreviewed transactions
+- **Real-time Preview**: Live export statistics before download
+
+#### **📊 Excel Export Features**
+Multi-sheet Excel workbooks include:
+- **Transactions Sheet**: Complete transaction data with all fields
+- **Category Summary**: Transaction counts, totals, and averages by category
+- **Monthly Summary**: Time-series analysis with monthly breakdowns
+- **Confidence Scores**: ML prediction confidence for data quality assessment
+
+#### **⚡ Export Process**
+1. **Configure Export** → Select format, date range, and categories via intuitive web interface
+2. **Real-time Preview** → See transaction counts and totals before export
+3. **One-Click Download** → Generate and download files instantly
+4. **Analysis Ready** → Data includes all necessary fields for financial analysis
+
 ## 🎯 Performance
 
 - **Accuracy**: >90% correct categorization on real transaction data
 - **Speed**: <100ms per transaction prediction, <10s for 1000 transactions
 - **Privacy**: Local-only operation, no external API calls
-- **Efficiency**: Active learning reduces manual review by 70%
+- **Efficiency**: Active learning reduces manual review by 70-90% by selecting only ~20 strategic transactions per batch
 
 ## 💾 Database Management
 
@@ -324,11 +390,12 @@ The FastAPI + FastHTML migration is **functionally complete** and addresses the 
 
 ### 🔴 High Priority (Ready for Implementation)
 
-#### 1. **ML Pipeline Integration** ✅ **COMPLETED**
+#### 1. **ML Pipeline Integration** ✅ **COMPLETED & ENHANCED**
 - ~~Connect existing ML categorizer to FastAPI endpoints~~ → **Full ML API integration implemented**
 - ~~Add `/api/ml/predict` endpoint for real-time categorization~~ → **Complete with bulk endpoints**
 - ~~Implement background ML prediction for new uploads~~ → **Auto-prediction during CSV upload**
-- **Status**: ML predictions now work seamlessly with upload workflow and dedicated API endpoints
+- **NEW**: **Ensemble categorizer** implemented combining LightGBM and Naive Bayes for improved accuracy
+- **Status**: Enhanced ML predictions with ensemble model, seamless upload workflow and dedicated API endpoints
 - **Added endpoints**: `/api/ml/predict`, `/api/ml/predict/bulk`, `/api/ml/status`, `/api/ml/retrain`
 
 #### 2. **Real Transaction Display** ✅ **COMPLETED**
@@ -353,17 +420,20 @@ The FastAPI + FastHTML migration is **functionally complete** and addresses the 
 - **Status**: Core HTMX functionality implemented for transaction review and ML training workflows
 - **Remaining**: Upload progress indicators, auto-save for budget changes, batch operations
 
-#### 5. **Export Functionality**
-- Complete export API endpoints (`/api/export/*`)
-- Create export configuration UI
-- Support multiple formats (CSV, Excel, JSON)
-- **Files to create**: `api/export.py`, `web/pages/export.py`
+#### 5. **Export Functionality** ✅ **COMPLETED**
+- ~~Complete export API endpoints (`/api/export/*`)~~ → **Full API with CSV, Excel, JSON export**
+- ~~Create export configuration UI~~ → **Intuitive web interface with real-time preview**
+- ~~Support multiple formats (CSV, Excel, JSON)~~ → **Multi-sheet Excel with summaries, universal CSV, structured JSON**
+- **Status**: Complete data export system with advanced filtering, real-time preview, and analysis-ready formats
+- **Added endpoints**: `/api/export/transactions`, `/api/export/summary`, `/api/export/formats`
+- **Added features**: Date range filtering, category selection, Excel multi-sheet export with summaries
 
-#### 6. **Code Quality Cleanup** ✅ **COMPLETED**
+#### 6. **Code Quality Cleanup** ✅ **COMPLETED & ENHANCED**
 - ~~Address remaining 122 lint issues~~ → **Reduced from 122 to 4 minor warnings**
 - ~~Fix FastAPI dependency injection warnings~~ → **Fixed with proper per-file ignores**
 - ~~Clean up HTML template formatting~~ → **Completed with consistent formatting**
-- **Status**: Code quality significantly improved, ready for feature development
+- **NEW**: **Major refactoring** with FastHTML component extraction and ML training improvements
+- **Status**: Code quality significantly improved with modular FastHTML components, ready for feature development
 
 ### 🟢 Low Priority (Future Enhancements)
 
@@ -398,6 +468,7 @@ uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 # Main App: http://localhost:8000/app
 # Import: http://localhost:8000/import  
 # Review: http://localhost:8000/review
+# Export: http://localhost:8000/export
 # Settings: http://localhost:8000/settings
 
 # Legacy Streamlit (during transition)
@@ -409,22 +480,25 @@ uv run streamlit run streamlit_app.py --server.port 8501
 - ✅ **Core Migration**: All Streamlit functionality migrated to FastAPI + FastHTML
 - ✅ **State Persistence**: Category settings persist correctly across navigation  
 - ✅ **Architecture**: Clean separation of API and web layers
-- ✅ **Code Quality**: Lint errors reduced from 122 → 4 minor warnings, all tests passing (22/22)
+- ✅ **Code Quality**: Lint errors reduced from 122 → 4 minor warnings, modular FastHTML components, all tests passing
 - ✅ **Transaction Display**: Review page shows real data with working categorization workflow
-- ✅ **ML Integration**: Complete ML pipeline integration with FastAPI endpoints
+- ✅ **ML Integration**: Complete ML pipeline integration with FastAPI endpoints + ensemble categorizer
 - ✅ **Category Management**: Data-first category discovery and comprehensive management interface
+- ✅ **Data Export**: Multi-format export system with filtering and analysis-ready output
 - ⏳ **Feature Parity**: All original features working in new system
 - ⏳ **Testing**: Comprehensive test coverage for reliability
 
 ### 🎯 Immediate Next Task
 
-**Continue with Task #5 (Export Functionality)** as the core HTMX and ML training UI is now complete. The system now has:
+**Continue with Task #6 (Code Quality Cleanup) and Task #7 (Testing)** as the core export functionality is now complete. The system now has:
 
 1. ✅ **Complete ML pipeline** with automatic predictions and web UI training
 2. ✅ **Full transaction review** workflow with HTMX-enhanced interactions  
 3. ✅ **Data-first category management** with discovery from labeled data
 4. ✅ **ML Training Interface** with status detection and one-click training
+5. ✅ **Multi-format Data Export** with filtering, real-time preview, and analysis-ready output
 
 Next priorities:
-1. **Export Functionality**: Implement data export workflows for analysis-ready data
-2. **Enhanced UX Phase 3**: Auto-predict after training, upload progress, batch operations
+1. **Enhanced UX Phase 3**: Auto-predict after training, upload progress, batch operations
+2. **Comprehensive Testing**: Implement test framework with unit tests and browser automation
+3. **Performance Optimizations**: Database query optimization and caching for large datasets

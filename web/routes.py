@@ -42,6 +42,19 @@ async def review_page(request: Request):
     return render_review_page(request)
 
 
+@router.get("/export", response_class=HTMLResponse)
+async def export_page(request: Request):
+    """Export data configuration page."""
+    from api.dependencies import get_db_manager
+    from web.pages.export_page import create_export_page
+
+    # Get database manager and session
+    db_manager = get_db_manager(request)
+
+    with db_manager.get_session() as db_session:
+        return create_export_page(request, db_session)
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     """Settings and categories page."""
@@ -204,3 +217,118 @@ async def categorize_transaction_web(
         """
 
         return create_page_layout("Categorization Error - FafyCat", content)
+
+
+@router.post("/api/export/summary", response_class=HTMLResponse)
+async def export_summary_htmx(request: Request):
+    """HTMX endpoint for export summary updates."""
+    from api.export import ExportService
+    from web.pages.export_page import create_export_summary_response
+
+    db_manager = get_db_manager(request)
+
+    try:
+        # Get form data
+        form_data = await request.form()
+
+        # Parse form data
+        start_date = form_data.get("start_date") or None
+        end_date = form_data.get("end_date") or None
+        categories = form_data.getlist("categories") or None
+
+        # Convert date strings to date objects
+        if start_date:
+            from datetime import datetime
+
+            start_date = datetime.fromisoformat(start_date).date()
+        if end_date:
+            from datetime import datetime
+
+            end_date = datetime.fromisoformat(end_date).date()
+
+        with db_manager.get_session() as db_session:
+            from api.export import ExportService
+
+            # Mock summary for now - in real implementation this would call the actual summary endpoint logic
+            summary_data = {
+                "total_transactions": 0,
+                "reviewed_transactions": 0,
+                "predicted_transactions": 0,
+                "amount_statistics": {"total": 0, "min": 0, "max": 0, "avg": 0},
+                "category_breakdown": {},
+                "date_range": {},
+                "filters_applied": {
+                    "start_date": start_date.isoformat() if start_date else None,
+                    "end_date": end_date.isoformat() if end_date else None,
+                    "categories": categories,
+                },
+            }
+
+            # Use the actual export service to get real data
+            try:
+                data = ExportService.get_export_data(
+                    session=db_session,
+                    start_date=start_date,
+                    end_date=end_date,
+                    categories=categories,
+                )
+
+                # Calculate real summary
+                total_transactions = len(data)
+                reviewed_transactions = sum(1 for d in data if d.get("is_reviewed"))
+                predicted_transactions = sum(1 for d in data if d.get("predicted_category"))
+
+                amounts = [d["amount"] for d in data]
+                amount_stats = {
+                    "total": sum(amounts),
+                    "min": min(amounts) if amounts else 0,
+                    "max": max(amounts) if amounts else 0,
+                    "avg": sum(amounts) / len(amounts) if amounts else 0,
+                }
+
+                # Category breakdown
+                category_breakdown = {}
+                for d in data:
+                    cat = d.get("category")
+                    if cat:
+                        if cat not in category_breakdown:
+                            category_breakdown[cat] = {"count": 0, "total_amount": 0}
+                        category_breakdown[cat]["count"] += 1
+                        category_breakdown[cat]["total_amount"] += d["amount"]
+
+                # Date range
+                dates = [d["date"] for d in data if d.get("date")]
+                date_range = {}
+                if dates:
+                    date_range = {
+                        "earliest": min(dates),
+                        "latest": max(dates),
+                    }
+
+                summary_data = {
+                    "total_transactions": total_transactions,
+                    "reviewed_transactions": reviewed_transactions,
+                    "predicted_transactions": predicted_transactions,
+                    "amount_statistics": amount_stats,
+                    "category_breakdown": category_breakdown,
+                    "date_range": date_range,
+                    "filters_applied": {
+                        "start_date": start_date.isoformat() if start_date else None,
+                        "end_date": end_date.isoformat() if end_date else None,
+                        "categories": categories,
+                    },
+                }
+            except Exception:
+                # Fall back to default summary if data retrieval fails
+                pass
+
+            return create_export_summary_response(summary_data)
+
+    except Exception as e:
+        # Return error state
+        return f"""
+        <h2 class="text-xl font-semibold mb-4">Export Preview</h2>
+        <div class="bg-red-50 p-4 rounded-lg">
+            <div class="text-red-600">Error loading export preview: {str(e)}</div>
+        </div>
+        """

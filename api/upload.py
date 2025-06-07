@@ -19,7 +19,7 @@ upload_sessions = {}
 
 
 def _predict_transaction_categories(db: Session, transactions: list, new_count: int) -> int:
-    """Predict categories for newly uploaded transactions."""
+    """Predict categories for newly uploaded transactions with active learning selection."""
     predictions_made = 0
     if new_count > 0:
         try:
@@ -57,10 +57,37 @@ def _predict_transaction_categories(db: Session, transactions: list, new_count: 
                 # Get predictions
                 predictions = categorizer.predict_with_confidence(txn_inputs)
 
-                # Update transactions with predictions
+                # Use active learning to select transactions for review
+                from src.fafycat.ml.active_learning import ActiveLearningSelector
+
+                al_selector = ActiveLearningSelector(db)
+
+                # Convert predictions to TransactionPrediction format for active learning
+                from src.fafycat.core.models import TransactionPrediction
+
+                al_predictions = []
+                for txn, prediction in zip(new_txns, predictions, strict=True):
+                    al_pred = TransactionPrediction(
+                        transaction_id=txn.id,
+                        predicted_category_id=prediction.predicted_category_id,
+                        confidence_score=prediction.confidence_score,
+                    )
+                    al_predictions.append(al_pred)
+
+                # Select transactions for review using active learning
+                max_review_items = min(20, len(al_predictions))  # Limit to 20 items for review
+                review_transaction_ids = set(
+                    al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
+                )
+
+                # Update transactions with predictions and active learning selections
                 for txn, prediction in zip(new_txns, predictions, strict=True):
                     txn.predicted_category_id = prediction.predicted_category_id
                     txn.confidence_score = prediction.confidence_score
+
+                    # Mark for review based on active learning selection
+                    txn.is_reviewed = txn.id not in review_transaction_ids
+
                     predictions_made += 1
 
                 db.commit()
@@ -285,8 +312,8 @@ def _render_upload_success(
     if predictions_made > 0:
         prediction_info = f"""
             <div class="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
-                <p class="text-sm font-medium text-purple-800">🤖 ML Predictions Made</p>
-                <p class="text-sm text-purple-700">{predictions_made} transactions got automatic predictions</p>
+                <p class="text-sm font-medium text-purple-800">🤖 ML Predictions & Active Learning</p>
+                <p class="text-sm text-purple-700">{predictions_made} transactions got automatic predictions. Smart selection chose the most important ones for review.</p>
             </div>
         """
     elif new_count > 0:
