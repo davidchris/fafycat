@@ -139,10 +139,10 @@ Instead of reviewing all low-confidence transactions, the system strategically s
 - **10% High confidence**: Quality validation samples to catch ML errors
 
 #### **Auto-Acceptance Strategy**
-High-confidence predictions are automatically accepted when:
-- **Confidence threshold**: Predictions above active learning selection threshold
-- **Strategic selection**: Active learning algorithm determines which transactions need review
-- **Quality assurance**: System still samples some high-confidence predictions for validation
+High-confidence predictions are automatically accepted with a conservative approach:
+- **Confidence threshold**: Only predictions above 95% confidence are auto-accepted
+- **Quality validation**: High-confidence predictions can still be selected for review by active learning
+- **Correctness first**: Never auto-accepts unreliable predictions, preserving accuracy over efficiency
 
 #### **Prioritization Factors**
 Active learning considers multiple factors beyond just confidence:
@@ -158,10 +158,10 @@ The system adapts its selection strategy based on user feedback:
 
 #### **Review Workflow**
 1. **Upload CSV** → All transactions get ML predictions
-2. **Active Learning** → Selects ~20 most important for review
-3. **Smart Queue** → Review page shows only selected transactions
-4. **Auto-Accept** → High-confidence predictions bypass manual review
-5. **Quality Check** → Some high-confidence samples included for validation
+2. **Confidence Filter** → Only 95%+ confidence predictions are auto-accepted
+3. **Active Learning** → Selects ~20 strategic transactions from remaining for priority review
+4. **Priority Queue** → Review page defaults to high-priority transactions
+5. **Quality Check** → High-confidence samples included for validation when selected by active learning
 
 ### Data Export
 Export transaction data for external analysis with comprehensive filtering and multiple format options:
@@ -304,7 +304,7 @@ uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 Your transaction CSV should include columns for:
 - Date (various formats supported)
-- Amount (positive for income, negative for expenses)  
+- Amount (positive for income, negative for expenses)
 - Description/Merchant name
 - Optional: Account, Reference, etc.
 
@@ -382,82 +382,7 @@ uvx ruff check
 
 # Type check
 uv run mypy src/
-```
 
-## 🚀 Next Steps (Post-Migration)
-
-The FastAPI + FastHTML migration is **functionally complete** and addresses the original state persistence issues. The following tasks are prioritized for continued development:
-
-### 🔴 High Priority (Ready for Implementation)
-
-#### 1. **ML Pipeline Integration** ✅ **COMPLETED & ENHANCED**
-- ~~Connect existing ML categorizer to FastAPI endpoints~~ → **Full ML API integration implemented**
-- ~~Add `/api/ml/predict` endpoint for real-time categorization~~ → **Complete with bulk endpoints**
-- ~~Implement background ML prediction for new uploads~~ → **Auto-prediction during CSV upload**
-- **NEW**: **Ensemble categorizer** implemented combining LightGBM and Naive Bayes for improved accuracy
-- **Status**: Enhanced ML predictions with ensemble model, seamless upload workflow and dedicated API endpoints
-- **Added endpoints**: `/api/ml/predict`, `/api/ml/predict/bulk`, `/api/ml/status`, `/api/ml/retrain`
-
-#### 2. **Real Transaction Display** ✅ **COMPLETED**
-- ~~Update Review page to show actual transactions from database~~ → **Implemented with dynamic data fetching**
-- ~~Implement transaction table component with category editing~~ → **Full categorization workflow working**
-- **Status**: Review page now displays real transactions with working category dropdowns and save functionality
-- **Remaining**: Add pagination, filtering, and sorting controls (Phase 2 enhancement)
-
-#### 3. **Category Management Interface** ✅ **COMPLETED**
-- ~~Complete Settings page with working category CRUD operations~~ → **Full category management implemented**
-- ~~Add budget management and category activation controls~~ → **Budget editing and deactivation working**
-- ~~Connect to existing category API endpoints~~ → **Complete with data-first category discovery**
-- **Status**: Data-first category discovery system implemented with comprehensive management interface
-- **Added features**: Empty state UI, category discovery from labeled data, budget management, deactivation
-
-### 🟡 Medium Priority
-
-#### 4. **Enhanced UX with HTMX** ✅ **PHASE 1-2 COMPLETED**
-- ~~Add HTMX for seamless transaction categorization~~ → **Implemented with inline forms and confidence filtering**
-- ~~Implement ML model training UI~~ → **Complete with Settings page train/retrain buttons**
-- ~~Real-time confidence threshold filtering~~ → **Live slider updates without page reloads**
-- **Status**: Core HTMX functionality implemented for transaction review and ML training workflows
-- **Remaining**: Upload progress indicators, auto-save for budget changes, batch operations
-
-#### 5. **Export Functionality** ✅ **COMPLETED**
-- ~~Complete export API endpoints (`/api/export/*`)~~ → **Full API with CSV, Excel, JSON export**
-- ~~Create export configuration UI~~ → **Intuitive web interface with real-time preview**
-- ~~Support multiple formats (CSV, Excel, JSON)~~ → **Multi-sheet Excel with summaries, universal CSV, structured JSON**
-- **Status**: Complete data export system with advanced filtering, real-time preview, and analysis-ready formats
-- **Added endpoints**: `/api/export/transactions`, `/api/export/summary`, `/api/export/formats`
-- **Added features**: Date range filtering, category selection, Excel multi-sheet export with summaries
-
-#### 6. **Code Quality Cleanup** ✅ **COMPLETED & ENHANCED**
-- ~~Address remaining 122 lint issues~~ → **Reduced from 122 to 4 minor warnings**
-- ~~Fix FastAPI dependency injection warnings~~ → **Fixed with proper per-file ignores**
-- ~~Clean up HTML template formatting~~ → **Completed with consistent formatting**
-- **NEW**: **Major refactoring** with FastHTML component extraction and ML training improvements
-- **Status**: Code quality significantly improved with modular FastHTML components, ready for feature development
-
-### 🟢 Low Priority (Future Enhancements)
-
-#### 7. **Comprehensive Testing**
-- Implement test framework from `test_plan.md`
-- Add unit tests for API endpoints
-- Browser automation testing with Puppeteer tools
-- **Files to create**: `tests/` directory structure
-
-#### 8. **Performance Optimizations**
-- Database query optimization for large datasets
-- Caching for ML predictions
-- Background task processing for uploads
-- Lazy loading for transaction tables
-
-#### 9. **Advanced Features**
-- Merchant mapping interface
-- Keyboard shortcuts and accessibility
-- Mobile responsiveness improvements
-- Dark mode support
-
-### 🛠️ Development Commands (Updated)
-
-```bash
 # FastAPI Development Server
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
@@ -466,39 +391,38 @@ uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 # Application URLs
 # Main App: http://localhost:8000/app
-# Import: http://localhost:8000/import  
+# Import: http://localhost:8000/import
 # Review: http://localhost:8000/review
 # Export: http://localhost:8000/export
 # Settings: http://localhost:8000/settings
-
-# Legacy Streamlit (during transition)
-uv run streamlit run streamlit_app.py --server.port 8501
 ```
 
-### 📋 Success Metrics
+## 🚀 Next Steps
 
-- ✅ **Core Migration**: All Streamlit functionality migrated to FastAPI + FastHTML
-- ✅ **State Persistence**: Category settings persist correctly across navigation  
-- ✅ **Architecture**: Clean separation of API and web layers
-- ✅ **Code Quality**: Lint errors reduced from 122 → 4 minor warnings, modular FastHTML components, all tests passing
-- ✅ **Transaction Display**: Review page shows real data with working categorization workflow
-- ✅ **ML Integration**: Complete ML pipeline integration with FastAPI endpoints + ensemble categorizer
-- ✅ **Category Management**: Data-first category discovery and comprehensive management interface
-- ✅ **Data Export**: Multi-format export system with filtering and analysis-ready output
-- ⏳ **Feature Parity**: All original features working in new system
-- ⏳ **Testing**: Comprehensive test coverage for reliability
+The FastAPI + FastHTML migration is **functionally complete** with all core features implemented. The following tasks are prioritized for continued development:
 
-### 🎯 Immediate Next Task
+### 🟢 Current Priority (Future Enhancements)
 
-**Continue with Task #6 (Code Quality Cleanup) and Task #7 (Testing)** as the core export functionality is now complete. The system now has:
+#### 1. **Comprehensive Testing**
+- Implement test framework from `test_plan.md`
+- Add unit tests for API endpoints
+- Browser automation testing with Puppeteer tools
+- **Files to create**: `tests/` directory structure
 
-1. ✅ **Complete ML pipeline** with automatic predictions and web UI training
-2. ✅ **Full transaction review** workflow with HTMX-enhanced interactions  
-3. ✅ **Data-first category management** with discovery from labeled data
-4. ✅ **ML Training Interface** with status detection and one-click training
-5. ✅ **Multi-format Data Export** with filtering, real-time preview, and analysis-ready output
+#### 2. **Performance Optimizations**
+- Database query optimization for large datasets
+- Caching for ML predictions
+- Background task processing for uploads
+- Lazy loading for transaction tables
 
-Next priorities:
-1. **Enhanced UX Phase 3**: Auto-predict after training, upload progress, batch operations
-2. **Comprehensive Testing**: Implement test framework with unit tests and browser automation
-3. **Performance Optimizations**: Database query optimization and caching for large datasets
+#### 3. **Enhanced UX Phase 3**
+- Upload progress indicators with HTMX
+- Auto-save for budget changes
+- Batch operations for transaction management
+- Auto-predict after training completion
+
+#### 4. **Advanced Features**
+- Merchant mapping interface
+- Keyboard shortcuts and accessibility
+- Mobile responsiveness improvements
+- Dark mode support

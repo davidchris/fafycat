@@ -16,7 +16,6 @@ def quick_test():
         response = requests.get(url, timeout=10)
         time.time() - start
 
-
         # Check headers for our performance middleware
         process_time = response.headers.get("X-Process-Time")
         if process_time:
