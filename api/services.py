@@ -1,6 +1,8 @@
 """Service layer for database operations."""
 
 import math
+from datetime import date
+from typing import Any
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
@@ -8,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
 from src.fafycat.core.database import CategoryORM, TransactionORM
 from src.fafycat.core.database import get_categories as db_get_categories
+from src.fafycat.core.models import CategoryType
 
 
 class TransactionService:
@@ -278,3 +281,272 @@ class CategoryService:
             created_at=category.created_at,
             updated_at=category.updated_at,
         )
+
+
+class AnalyticsService:
+    """Service for analytics operations."""
+
+    @staticmethod
+    def get_budget_variance(
+        session: Session, start_date: date | None = None, end_date: date | None = None
+    ) -> dict[str, Any]:
+        """Get budget vs actual spending variance by category."""
+        # Default to current month if no dates provided
+        if not start_date:
+            today = date.today()
+            start_date = today.replace(day=1)
+        if not end_date:
+            end_date = date.today()
+
+        # Query spending categories with their budgets and actual spending
+        query = (
+            session.query(
+                CategoryORM.id,
+                CategoryORM.name,
+                CategoryORM.budget,
+                func.coalesce(func.sum(TransactionORM.amount), 0).label("actual_amount"),
+            )
+            .outerjoin(TransactionORM, CategoryORM.id == TransactionORM.category_id)
+            .filter(CategoryORM.type == CategoryType.SPENDING)
+            .filter(CategoryORM.is_active)
+        )
+
+        # Apply date filters if transactions exist
+        if start_date and end_date:
+            query = query.filter(
+                or_(
+                    TransactionORM.date.is_(None),  # Include categories with no transactions
+                    TransactionORM.date.between(start_date, end_date),
+                )
+            )
+
+        query = query.group_by(CategoryORM.id, CategoryORM.name, CategoryORM.budget)
+
+        results = query.all()
+
+        variances = []
+        total_budget = 0
+        total_actual = 0
+
+        for result in results:
+            budget = float(result.budget)
+            actual = float(result.actual_amount)
+            variance = budget - actual
+            variance_pct = (variance / budget * 100) if budget > 0 else 0
+
+            variances.append(
+                {
+                    "category_id": result.id,
+                    "category_name": result.name,
+                    "budget": budget,
+                    "actual": actual,
+                    "variance": variance,
+                    "variance_percentage": variance_pct,
+                    "is_overspent": variance < 0,
+                }
+            )
+
+            total_budget += budget
+            total_actual += actual
+
+        # Sort by absolute variance (largest deviations first)
+        variances.sort(key=lambda x: abs(x["variance"]), reverse=True)
+
+        return {
+            "variances": variances,
+            "summary": {
+                "total_budget": total_budget,
+                "total_actual": total_actual,
+                "total_variance": total_budget - total_actual,
+                "total_variance_percentage": ((total_budget - total_actual) / total_budget * 100)
+                if total_budget > 0
+                else 0,
+            },
+            "date_range": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+        }
+
+    @staticmethod
+    def get_monthly_summary(session: Session, year: int | None = None) -> dict[str, Any]:
+        """Get monthly income/spending/saving breakdown."""
+        if not year:
+            year = date.today().year
+
+        # Query for monthly aggregations by category type
+        query = (
+            session.query(
+                func.strftime("%m", TransactionORM.date).label("month"),
+                CategoryORM.type,
+                func.sum(TransactionORM.amount).label("total_amount"),
+            )
+            .join(CategoryORM, TransactionORM.category_id == CategoryORM.id)
+            .filter(func.strftime("%Y", TransactionORM.date) == str(year))
+            .group_by(func.strftime("%m", TransactionORM.date), CategoryORM.type)
+            .order_by(func.strftime("%m", TransactionORM.date))
+        )
+
+        results = query.all()
+
+        # Initialize monthly data structure
+        monthly_data = {}
+        for month in range(1, 13):
+            month_str = f"{month:02d}"
+            monthly_data[month_str] = {
+                "month": month_str,
+                "income": 0.0,
+                "spending": 0.0,
+                "saving": 0.0,
+                "profit_loss": 0.0,  # income - spending (excluding savings)
+            }
+
+        # Populate with actual data
+        for result in results:
+            month = result.month
+            category_type = result.type
+            amount = float(result.total_amount)
+
+            if month in monthly_data:
+                if category_type == CategoryType.INCOME:
+                    monthly_data[month]["income"] = amount
+                elif category_type == CategoryType.SPENDING:
+                    monthly_data[month]["spending"] = amount
+                elif category_type == CategoryType.SAVING:
+                    monthly_data[month]["saving"] = amount
+
+        # Calculate profit/loss for each month
+        for month_data in monthly_data.values():
+            month_data["profit_loss"] = month_data["income"] - month_data["spending"]
+
+        # Calculate cumulative profit/loss
+        cumulative_profit_loss = 0
+        for month_data in monthly_data.values():
+            cumulative_profit_loss += month_data["profit_loss"]
+            month_data["cumulative_profit_loss"] = cumulative_profit_loss
+
+        return {
+            "year": year,
+            "monthly_data": list(monthly_data.values()),
+            "yearly_totals": {
+                "income": sum(m["income"] for m in monthly_data.values()),
+                "spending": sum(m["spending"] for m in monthly_data.values()),
+                "saving": sum(m["saving"] for m in monthly_data.values()),
+                "profit_loss": sum(m["profit_loss"] for m in monthly_data.values()),
+            },
+        }
+
+    @staticmethod
+    def get_category_breakdown(
+        session: Session, start_date: date | None = None, end_date: date | None = None, category_type: str | None = None
+    ) -> dict[str, Any]:
+        """Get category-wise spending analysis."""
+        # Default to current month if no dates provided
+        if not start_date:
+            today = date.today()
+            start_date = today.replace(day=1)
+        if not end_date:
+            end_date = date.today()
+
+        # Build query
+        query = (
+            session.query(
+                CategoryORM.id,
+                CategoryORM.name,
+                CategoryORM.type,
+                CategoryORM.budget,
+                func.count(TransactionORM.id).label("transaction_count"),
+                func.sum(TransactionORM.amount).label("total_amount"),
+            )
+            .join(TransactionORM, CategoryORM.id == TransactionORM.category_id)
+            .filter(TransactionORM.date.between(start_date, end_date))
+            .filter(CategoryORM.is_active)
+        )
+
+        # Apply category type filter if provided
+        if category_type:
+            query = query.filter(CategoryORM.type == category_type)
+
+        query = query.group_by(CategoryORM.id, CategoryORM.name, CategoryORM.type, CategoryORM.budget)
+        query = query.order_by(func.sum(TransactionORM.amount).desc())
+
+        results = query.all()
+
+        categories = []
+        total_amount = 0
+
+        for result in results:
+            amount = float(result.total_amount) if result.total_amount else 0
+            budget = float(result.budget)
+
+            categories.append(
+                {
+                    "category_id": result.id,
+                    "category_name": result.name,
+                    "category_type": result.type,
+                    "budget": budget,
+                    "amount": amount,
+                    "transaction_count": result.transaction_count,
+                    "budget_variance": budget - amount if result.type == CategoryType.SPENDING else None,
+                }
+            )
+
+            total_amount += amount
+
+        # Calculate percentages
+        for category in categories:
+            category["percentage"] = (category["amount"] / total_amount * 100) if total_amount > 0 else 0
+
+        return {
+            "categories": categories,
+            "summary": {"total_amount": total_amount, "total_categories": len(categories)},
+            "date_range": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+        }
+
+    @staticmethod
+    def get_savings_tracking(session: Session, year: int | None = None) -> dict[str, Any]:
+        """Get savings analysis with monthly and cumulative tracking."""
+        if not year:
+            year = date.today().year
+
+        # Query for monthly savings data
+        query = (
+            session.query(
+                func.strftime("%m", TransactionORM.date).label("month"),
+                func.sum(TransactionORM.amount).label("savings_amount"),
+            )
+            .join(CategoryORM, TransactionORM.category_id == CategoryORM.id)
+            .filter(CategoryORM.type == CategoryType.SAVING)
+            .filter(func.strftime("%Y", TransactionORM.date) == str(year))
+            .group_by(func.strftime("%m", TransactionORM.date))
+            .order_by(func.strftime("%m", TransactionORM.date))
+        )
+
+        results = query.all()
+
+        # Initialize monthly savings data
+        monthly_savings = {}
+        for month in range(1, 13):
+            month_str = f"{month:02d}"
+            monthly_savings[month_str] = {"month": month_str, "amount": 0.0}
+
+        # Populate with actual data
+        for result in results:
+            month = result.month
+            amount = float(result.savings_amount) if result.savings_amount else 0
+            monthly_savings[month]["amount"] = amount
+
+        # Calculate cumulative savings
+        cumulative_savings = 0
+        for month_data in monthly_savings.values():
+            cumulative_savings += month_data["amount"]
+            month_data["cumulative_amount"] = cumulative_savings
+
+        # Calculate statistics
+        amounts = [m["amount"] for m in monthly_savings.values() if m["amount"] > 0]
+
+        stats = {
+            "total_savings": cumulative_savings,
+            "average_monthly": sum(amounts) / len(amounts) if amounts else 0,
+            "median_monthly": sorted(amounts)[len(amounts) // 2] if amounts else 0,
+            "months_with_savings": len(amounts),
+        }
+
+        return {"year": year, "monthly_savings": list(monthly_savings.values()), "statistics": stats}

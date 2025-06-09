@@ -2,7 +2,7 @@
 
 from collections.abc import Generator
 
-from fastapi import Depends, Request
+from fastapi import Request
 
 from src.fafycat.core.config import AppConfig
 from src.fafycat.core.database import DatabaseManager
@@ -18,10 +18,8 @@ def get_db_manager(request: Request) -> DatabaseManager:
     return request.app.state.db_manager
 
 
-def get_db_session(db_manager: DatabaseManager = Depends(get_db_manager)) -> Generator:
+def get_db_session(request: Request) -> Generator:
     """Get database session."""
-    session = db_manager.get_session()
-    try:
+    db_manager = get_db_manager(request)
+    with db_manager.get_session() as session:
         yield session
-    finally:
-        session.close()

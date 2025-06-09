@@ -68,6 +68,19 @@ async def settings_page(request: Request):
         return render_settings_page(request, db_session)
 
 
+@router.get("/analytics", response_class=HTMLResponse)
+async def analytics_page(request: Request):
+    """Analytics and financial insights page."""
+    from api.dependencies import get_db_manager
+    from web.pages.analytics_page import render_analytics_page
+
+    # Get database manager and session
+    db_manager = get_db_manager(request)
+
+    with db_manager.get_session() as db_session:
+        return render_analytics_page(request, db_session)
+
+
 @router.post("/upload-csv", response_class=HTMLResponse)
 async def upload_csv_web(request: Request, file: UploadFile):
     """Handle CSV upload and return HTML response with preview."""

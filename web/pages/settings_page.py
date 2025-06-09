@@ -276,6 +276,9 @@ def render_categories_management(category_groups, inactive_categories, ml_status
 
         <!-- Budget Reminder -->
         {render_budget_reminder(categories_with_budgets, total_active)}
+        
+        <!-- Budget Variance Analytics -->
+        {render_budget_variance_section()}
 
         <!-- Category Groups -->
         <div class="space-y-8">
@@ -534,6 +537,185 @@ def render_budget_reminder(categories_with_budgets, total_active):
         """
 
     return ""
+
+
+def render_budget_variance_section():
+    """Render budget variance analytics section for settings page."""
+    return """
+    <div class="bg-white p-6 rounded-lg shadow mb-8">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">📊 Budget Performance</h2>
+            <a href="/analytics" class="text-blue-600 hover:text-blue-800 text-sm">
+                View Full Analytics →
+            </a>
+        </div>
+        
+        <div id="budget-variance-summary">
+            <div class="text-center py-8 text-gray-500">
+                Loading budget analysis...
+            </div>
+        </div>
+        
+        <div class="mt-4">
+            <canvas id="budget-variance-mini-chart" width="400" height="150"></canvas>
+        </div>
+        
+        <div class="mt-4 text-xs text-gray-500">
+            Showing current month budget vs actual spending. Set budgets above to see analysis.
+        </div>
+    </div>
+    
+    <script>
+        // Load budget variance data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('/api/analytics/budget-variance')
+                .then(response => response.json())
+                .then(data => {
+                    updateBudgetVarianceSummary(data);
+                    updateBudgetVarianceMiniChart(data);
+                })
+                .catch(error => {
+                    document.getElementById('budget-variance-summary').innerHTML = 
+                        '<div class="text-red-500 text-sm">Error loading budget data</div>';
+                });
+        });
+        
+        function updateBudgetVarianceSummary(data) {
+            const container = document.getElementById('budget-variance-summary');
+            const variances = data.variances || [];
+            const summary = data.summary || {};
+            
+            if (variances.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-4">
+                        <p class="text-gray-600">💡 No budget data available</p>
+                        <p class="text-sm text-gray-500 mt-2">Set budgets for your spending categories to see variance analysis</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Find top 3 overspending categories
+            const overspending = variances.filter(v => v.is_overspent).slice(0, 3);
+            
+            let html = `
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div class="text-center p-3 bg-gray-50 rounded-lg">
+                        <div class="text-lg font-bold text-gray-700">€${summary.total_budget?.toFixed(0) || 0}</div>
+                        <div class="text-sm text-gray-500">Total Budget</div>
+                    </div>
+                    <div class="text-center p-3 bg-gray-50 rounded-lg">
+                        <div class="text-lg font-bold text-gray-700">€${summary.total_actual?.toFixed(0) || 0}</div>
+                        <div class="text-sm text-gray-500">Total Spent</div>
+                    </div>
+                    <div class="text-center p-3 bg-gray-50 rounded-lg">
+                        <div class="text-lg font-bold ${summary.total_variance < 0 ? 'text-red-600' : 'text-green-600'}">
+                            €${summary.total_variance?.toFixed(0) || 0}
+                        </div>
+                        <div class="text-sm text-gray-500">Variance</div>
+                    </div>
+                </div>
+            `;
+            
+            if (overspending.length > 0) {
+                html += `
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                        <h3 class="font-medium text-red-800 mb-2">🚨 Budget Alerts</h3>
+                        <div class="space-y-2">
+                `;
+                
+                overspending.forEach(category => {
+                    const overspent = Math.abs(category.variance);
+                    html += `
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-red-700">${category.category_name}</span>
+                            <span class="text-red-600 font-medium">€${overspent.toFixed(0)} over</span>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                        <p class="text-green-700 text-sm">✅ All categories are within budget this month!</p>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        function updateBudgetVarianceMiniChart(data) {
+            const ctx = document.getElementById('budget-variance-mini-chart');
+            if (!ctx || !data.variances) return;
+            
+            const variances = data.variances.slice(0, 5); // Show top 5 categories
+            
+            // Destroy existing chart if exists
+            if (window.budgetVarianceMiniChart) {
+                window.budgetVarianceMiniChart.destroy();
+            }
+            
+            const labels = variances.map(v => v.category_name);
+            const budgetData = variances.map(v => v.budget);
+            const actualData = variances.map(v => v.actual);
+            
+            window.budgetVarianceMiniChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Budget',
+                            data: budgetData,
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                            borderColor: 'rgb(59, 130, 246)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Actual',
+                            data: actualData,
+                            backgroundColor: variances.map(v => 
+                                v.is_overspent ? 'rgba(239, 68, 68, 0.7)' : 'rgba(34, 197, 94, 0.7)'
+                            ),
+                            borderColor: variances.map(v => 
+                                v.is_overspent ? 'rgb(239, 68, 68)' : 'rgb(34, 197, 94)'
+                            ),
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '€' + value;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+    
+    <!-- Chart.js for budget variance chart -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    """
 
 
 def render_ml_training_section(ml_status):
