@@ -46,6 +46,30 @@ class CategoryORM(Base):
     transactions = relationship("TransactionORM", foreign_keys="TransactionORM.category_id")
     predictions = relationship("TransactionORM", foreign_keys="TransactionORM.predicted_category_id")
     merchant_mappings = relationship("MerchantMappingORM", back_populates="category")
+    budget_plans = relationship("BudgetPlanORM", back_populates="category", cascade="all, delete-orphan")
+
+
+class BudgetPlanORM(Base):
+    """Budget plan table for year-specific budgets."""
+
+    __tablename__ = "budget_plans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    year = Column(Integer, nullable=False)
+    monthly_budget = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("category_id", "year", name="uq_budget_plan_category_year"),
+        CheckConstraint("year >= 2020 AND year <= 2030", name="check_budget_year_range"),
+        CheckConstraint("monthly_budget >= 0", name="check_budget_positive"),
+        Index("idx_budget_plans_year", "year"),
+        Index("idx_budget_plans_category", "category_id"),
+    )
+
+    category = relationship("CategoryORM", back_populates="budget_plans")
 
 
 class TransactionORM(Base):
@@ -122,7 +146,16 @@ class DatabaseManager:
 
     def __init__(self, config: AppConfig):
         self.config = config
-        self.engine = create_engine(config.database.url, echo=config.database.echo)
+
+        # Configure SQLite connection with timeout for long operations
+        connect_args = {}
+        if config.database.url.startswith("sqlite"):
+            connect_args = {
+                "timeout": 300,  # 5 minutes timeout for SQLite operations
+                "check_same_thread": False,
+            }
+
+        self.engine = create_engine(config.database.url, echo=config.database.echo, connect_args=connect_args)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
     def create_tables(self) -> None:

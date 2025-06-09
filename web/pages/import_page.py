@@ -19,7 +19,11 @@ def _get_ml_status_sync():
         db_manager = DatabaseManager(config)
 
         with db_manager.get_session() as db_session:
-            model_path = config.ml.model_dir / "categorizer.pkl"
+            # Check for the correct model based on config (same logic as ML API)
+            if config.ml.use_ensemble:
+                model_path = config.ml.model_dir / "ensemble_categorizer.pkl"
+            else:
+                model_path = config.ml.model_dir / "categorizer.pkl"
 
             # Check training data readiness
             reviewed_count = (

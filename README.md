@@ -397,6 +397,45 @@ uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 # Settings: http://localhost:8000/settings
 ```
 
+## 🚨 Troubleshooting
+
+### Database Lock Error
+If you encounter "database is locked" errors (especially when restarting production), run these commands to unlock:
+
+```bash
+# Step 1: Kill any stale processes
+pkill -f "python.*fafycat" && pkill -f uvicorn
+
+# Step 2: Check for remaining processes and force kill if needed
+ps aux | grep -E "(sqlite|fafycat|uvicorn)" | grep -v grep
+# If you see any processes, note the PID and run: kill -9 <PID>
+
+# Step 3: Remove SQLite lock files if they exist
+rm -f data/fafycat_prod.db-journal data/fafycat_prod.db-wal data/fafycat_prod.db-shm
+
+# Step 4: Test database unlock
+sqlite3 data/fafycat_prod.db "BEGIN IMMEDIATE; ROLLBACK;"
+```
+
+**What this does:**
+- `pkill` commands stop any running FafyCat processes that might have stale database connections
+- `kill -9` force-kills any processes that didn't respond to the initial pkill
+- `rm` removes SQLite journal/WAL files that can cause persistent locks
+- `sqlite3` command verifies the database is now accessible
+
+**When to use:**
+- Getting "database is locked" errors during app startup
+- Training fails with SQLite operational errors  
+- After force-quitting the application
+- When switching between development and production modes
+- When the basic `pkill` command alone doesn't resolve the lock
+
+**⚠️ Important: ML Training Best Practices**
+- **Web UI training works fine normally** - use the Settings page "Train Model" button
+- **Database locks only occur after running `reset_and_import.py`** due to subprocess conflicts
+- **If you get locks after reset script**: Use command line → `uv run scripts/train_model.py` 
+- **For fresh setups**: Use `uv run scripts/reset_and_import.py --train-model` (handles everything cleanly)
+
 ## 🚀 Next Steps
 
 The FastAPI + FastHTML migration is **functionally complete** with all core features implemented. The following tasks are prioritized for continued development:

@@ -8,8 +8,30 @@ let charts = {
     budgetVariance: null,
     monthlyOverview: null,
     categoryBreakdown: null,
-    savingsTracking: null
+    savingsTracking: null,
+    topTransactions: null
 };
+
+/**
+ * Helper function to format date range for chart titles
+ */
+function formatDateRange(startDate, endDate, year) {
+    if (year && !startDate && !endDate) {
+        return year.toString();
+    }
+    
+    if (startDate && endDate) {
+        const start = new Date(startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const end = new Date(endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        return `${start} - ${end}`;
+    }
+    
+    if (year) {
+        return year.toString();
+    }
+    
+    return new Date().getFullYear().toString();
+}
 
 /**
  * Initialize or update budget variance chart
@@ -24,6 +46,7 @@ function updateBudgetVarianceChart(data) {
     }
 
     const variances = data.variances || [];
+    const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
     
     // Prepare chart data
     const labels = variances.map(v => v.category_name);
@@ -60,10 +83,34 @@ function updateBudgetVarianceChart(data) {
             plugins: {
                 title: {
                     display: true,
-                    text: 'Budget vs Actual Spending by Category'
+                    text: `Budget vs Actual Spending by Category (${dateRange})`
                 },
                 legend: {
                     display: true
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const category = variances[context.dataIndex];
+                            const value = context.parsed.y;
+                            const datasetLabel = context.dataset.label;
+                            
+                            if (datasetLabel === 'Budget') {
+                                return `${datasetLabel}: €${value.toLocaleString()}`;
+                            } else {
+                                // For Actual spending, show additional info
+                                const variance = category.variance;
+                                const varianceText = variance < 0 ? 
+                                    `€${Math.abs(variance).toFixed(0)} over budget` : 
+                                    `€${variance.toFixed(0)} under budget`;
+                                
+                                return [
+                                    `${datasetLabel}: €${value.toLocaleString()}`,
+                                    `Variance: ${varianceText}`
+                                ];
+                            }
+                        }
+                    }
                 }
             },
             scales: {
@@ -93,6 +140,7 @@ function updateMonthlyOverviewChart(data) {
     }
 
     const monthlyData = data.monthly_data || [];
+    const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
     
     // Prepare chart data
     const labels = monthlyData.map(m => {
@@ -169,7 +217,7 @@ function updateMonthlyOverviewChart(data) {
             plugins: {
                 title: {
                     display: true,
-                    text: `Monthly Financial Overview - ${data.year}`,
+                    text: `Monthly Financial Overview (${dateRange})`,
                     font: {
                         size: 16
                     }
@@ -237,11 +285,14 @@ function updateMonthlySummaryStats(data) {
     const yearlyTotals = data.yearly_totals || {};
     const monthlyData = data.monthly_data || [];
     
-    // Calculate additional metrics
-    const avgMonthlyIncome = monthlyData.length > 0 ? 
-        yearlyTotals.income / monthlyData.filter(m => m.income > 0).length : 0;
-    const avgMonthlySpending = monthlyData.length > 0 ? 
-        yearlyTotals.spending / monthlyData.filter(m => m.spending > 0).length : 0;
+    // Calculate additional metrics with proper division by zero protection
+    const monthsWithIncome = monthlyData.filter(m => m.income > 0).length;
+    const monthsWithSpending = monthlyData.filter(m => m.spending < 0).length; // spending is negative
+    
+    const avgMonthlyIncome = (monthlyData.length > 0 && monthsWithIncome > 0) ? 
+        yearlyTotals.income / monthsWithIncome : 0;
+    const avgMonthlySpending = (monthlyData.length > 0 && monthsWithSpending > 0) ? 
+        yearlyTotals.spending / monthsWithSpending : 0;
     const savingsRate = yearlyTotals.income > 0 ? 
         (yearlyTotals.saving / yearlyTotals.income * 100) : 0;
     
@@ -249,21 +300,21 @@ function updateMonthlySummaryStats(data) {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 p-4 bg-gray-50 rounded-lg">
             <div class="text-center">
                 <div class="text-lg font-bold text-green-600">€${avgMonthlyIncome.toLocaleString()}</div>
-                <div class="text-sm text-gray-600">Avg Monthly Income</div>
+                <div class="text-sm text-gray-600" title="Average monthly income across months with income transactions">Avg Monthly Income</div>
             </div>
             <div class="text-center">
                 <div class="text-lg font-bold text-red-600">€${avgMonthlySpending.toLocaleString()}</div>
-                <div class="text-sm text-gray-600">Avg Monthly Spending</div>
+                <div class="text-sm text-gray-600" title="Average monthly spending across months with spending transactions">Avg Monthly Spending</div>
             </div>
             <div class="text-center">
                 <div class="text-lg font-bold text-blue-600">${savingsRate.toFixed(1)}%</div>
-                <div class="text-sm text-gray-600">Savings Rate</div>
+                <div class="text-sm text-gray-600" title="Percentage of income that was saved (savings / income × 100)">Savings Rate</div>
             </div>
             <div class="text-center">
                 <div class="text-lg font-bold ${yearlyTotals.profit_loss >= 0 ? 'text-green-600' : 'text-red-600'}">
                     €${yearlyTotals.profit_loss?.toLocaleString() || 0}
                 </div>
-                <div class="text-sm text-gray-600">Net Profit/Loss</div>
+                <div class="text-sm text-gray-600" title="Total income minus total spending (income - spending)">Net Profit/Loss</div>
             </div>
         </div>
     `;
@@ -292,6 +343,7 @@ function updateCategoryBreakdownChart(data) {
     }
 
     const categories = data.categories || [];
+    const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
     
     // Separate spending categories and show top 8 for readability
     const spendingCategories = categories.filter(c => c.category_type === 'spending').slice(0, 8);
@@ -336,7 +388,7 @@ function updateCategoryBreakdownChart(data) {
                 plugins: {
                     title: {
                         display: true,
-                        text: 'Top Spending Categories',
+                        text: `Top Spending Categories (${dateRange})`,
                         font: { size: 14 }
                     },
                     legend: {
@@ -411,7 +463,7 @@ function updateCategoryBreakdownChart(data) {
                 plugins: {
                     title: {
                         display: true,
-                        text: 'Category Breakdown (All Types)',
+                        text: `Category Breakdown (${dateRange})`,
                         font: { size: 14 }
                     },
                     legend: {
@@ -481,19 +533,19 @@ function updateCategorySummary(data) {
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 p-4 bg-gray-50 rounded-lg">
             <div class="text-center">
                 <div class="text-lg font-bold text-blue-600">${categories.length}</div>
-                <div class="text-sm text-gray-600">Active Categories</div>
+                <div class="text-sm text-gray-600" title="Number of categories with transactions in the selected period">Active Categories</div>
             </div>
             <div class="text-center">
                 <div class="text-lg font-bold ${overBudgetCount > 0 ? 'text-red-600' : 'text-green-600'}">
                     ${overBudgetCount}
                 </div>
-                <div class="text-sm text-gray-600">Over Budget</div>
+                <div class="text-sm text-gray-600" title="Number of spending categories that exceeded their budget">Over Budget</div>
             </div>
             <div class="text-center">
                 <div class="text-lg font-bold text-gray-700">
                     ${topSpendingCategory ? topSpendingCategory.category_name : 'N/A'}
                 </div>
-                <div class="text-sm text-gray-600">Top Spending</div>
+                <div class="text-sm text-gray-600" title="Category with the highest total spending amount">Top Spending</div>
             </div>
         </div>
     `;
@@ -523,6 +575,7 @@ function updateSavingsTrackingChart(data) {
 
     const monthlySavings = data.monthly_savings || [];
     const statistics = data.statistics || {};
+    const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
     
     // Prepare chart data
     const labels = monthlySavings.map(m => {
@@ -588,7 +641,7 @@ function updateSavingsTrackingChart(data) {
             plugins: {
                 title: {
                     display: true,
-                    text: `Savings Tracking - ${data.year}`,
+                    text: `Savings Tracking (${dateRange})`,
                     font: { size: 16 }
                 },
                 legend: {
@@ -684,21 +737,21 @@ function updateSavingsStatistics(data) {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 p-4 bg-gray-50 rounded-lg">
             <div class="text-center">
                 <div class="text-lg font-bold text-blue-600">€${statistics.total_savings?.toLocaleString() || 0}</div>
-                <div class="text-sm text-gray-600">Total Saved</div>
+                <div class="text-sm text-gray-600" title="Total amount saved across all months">Total Saved</div>
             </div>
             <div class="text-center">
                 <div class="text-lg font-bold text-green-600">€${statistics.median_monthly?.toLocaleString() || 0}</div>
-                <div class="text-sm text-gray-600">Median Monthly</div>
+                <div class="text-sm text-gray-600" title="Middle value of monthly savings amounts (50th percentile)">Median Monthly</div>
             </div>
             <div class="text-center">
                 <div class="text-lg font-bold text-purple-600">${statistics.months_with_savings || 0}</div>
-                <div class="text-sm text-gray-600">Active Months</div>
+                <div class="text-sm text-gray-600" title="Number of months that had savings transactions">Active Months</div>
             </div>
             <div class="text-center">
                 <div class="text-lg font-bold ${onTrackPercentage >= 100 ? 'text-green-600' : onTrackPercentage >= 80 ? 'text-yellow-600' : 'text-red-600'}">
                     ${onTrackPercentage.toFixed(0)}%
                 </div>
-                <div class="text-sm text-gray-600">On Track</div>
+                <div class="text-sm text-gray-600" title="How well you're staying on track with your typical savings pace">On Track</div>
             </div>
         </div>
         
@@ -769,3 +822,106 @@ document.addEventListener('DOMContentLoaded', function() {
         yearSelector.value = today.getFullYear().toString();
     }
 });
+
+/**
+ * Initialize or update top transactions chart
+ */
+function updateTopTransactionsChart(data) {
+    const ctx = document.getElementById('top-transactions-chart');
+    if (!ctx) return;
+
+    // Destroy existing chart
+    if (charts.topTransactions) {
+        charts.topTransactions.destroy();
+    }
+
+    const transactions = data.top_transactions || [];
+    
+    if (transactions.length === 0) {
+        ctx.style.display = 'none';
+        return;
+    }
+    
+    ctx.style.display = 'block';
+    
+    // Prepare chart data
+    const labels = transactions.map(t => t.description.length > 30 ? t.description.substring(0, 30) + '...' : t.description);
+    const amounts = transactions.map(t => t.amount);
+    const percentages = transactions.map(t => t.percentage_of_total);
+    
+    // Generate colors
+    const colors = [
+        'rgba(239, 68, 68, 0.8)',   // Red
+        'rgba(245, 158, 11, 0.8)',  // Amber
+        'rgba(34, 197, 94, 0.8)',   // Green
+        'rgba(59, 130, 246, 0.8)',  // Blue
+        'rgba(147, 51, 234, 0.8)'   // Purple
+    ];
+    
+    charts.topTransactions = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Amount (€)',
+                data: amounts,
+                backgroundColor: colors.slice(0, transactions.length),
+                borderColor: colors.slice(0, transactions.length).map(color => color.replace('0.8', '1')),
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: `Top ${transactions.length} Spending Transactions - ${data.month_name} ${data.year}`,
+                    font: { size: 16 }
+                },
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const transaction = transactions[context.dataIndex];
+                            return [
+                                `Amount: €${transaction.amount.toLocaleString()}`,
+                                `Category: ${transaction.category}`,
+                                `${transaction.percentage_of_total.toFixed(1)}% of total spending`
+                            ];
+                        },
+                        title: function(context) {
+                            const transaction = transactions[context[0].dataIndex];
+                            return transaction.description;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Amount (€)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return '€' + value.toLocaleString();
+                        }
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Transactions'
+                    },
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 0
+                    }
+                }
+            }
+        }
+    });
+}

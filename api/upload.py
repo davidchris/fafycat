@@ -71,6 +71,7 @@ def _predict_transaction_categories(db: Session, transactions: list, new_count: 
                         transaction_id=txn.id,
                         predicted_category_id=prediction.predicted_category_id,
                         confidence_score=prediction.confidence_score,
+                        feature_contributions=prediction.feature_contributions,
                     )
                     al_predictions.append(al_pred)
 
@@ -99,6 +100,7 @@ def _predict_transaction_categories(db: Session, transactions: list, new_count: 
                             high_priority_review += 1
                         else:
                             # High confidence and not flagged - auto accept
+                            txn.category_id = prediction.predicted_category_id  # Copy predicted to actual category
                             txn.is_reviewed = True
                             txn.review_priority = "auto_accepted"
                             auto_accepted += 1

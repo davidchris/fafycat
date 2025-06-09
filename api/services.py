@@ -1,14 +1,14 @@
 """Service layer for database operations."""
 
 import math
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
-from src.fafycat.core.database import CategoryORM, TransactionORM
+from src.fafycat.core.database import BudgetPlanORM, CategoryORM, TransactionORM
 from src.fafycat.core.database import get_categories as db_get_categories
 from src.fafycat.core.models import CategoryType
 
@@ -85,6 +85,7 @@ class TransactionService:
         is_reviewed: bool | None = None,
         confidence_lt: float | None = None,
         review_priority: str | None = None,
+        category: str | None = None,
         sort_by: str = "date",
         sort_order: str = "desc",
         search: str = "",
@@ -111,6 +112,31 @@ class TransactionService:
                 query = query.filter(TransactionORM.review_priority.in_(["high", "quality_check"]))
             else:
                 query = query.filter(TransactionORM.review_priority == review_priority)
+
+        if category:
+            if category == "uncategorized":
+                # Filter for transactions with no category (neither actual nor predicted)
+                query = query.filter(
+                    and_(TransactionORM.category_id.is_(None), TransactionORM.predicted_category_id.is_(None))
+                )
+            else:
+                # Filter by effective/final category: actual_category takes precedence over predicted_category
+                # This means: if actual_category exists, use it; otherwise use predicted_category
+                query = query.filter(
+                    or_(
+                        # Case 1: Has actual category and it matches
+                        and_(
+                            TransactionORM.category_id.is_not(None),
+                            TransactionORM.category.has(CategoryORM.name == category),
+                        ),
+                        # Case 2: No actual category, but predicted category matches
+                        and_(
+                            TransactionORM.category_id.is_(None),
+                            TransactionORM.predicted_category_id.is_not(None),
+                            TransactionORM.predicted_category.has(CategoryORM.name == category),
+                        ),
+                    )
+                )
 
         if search.strip():
             # Search in transaction name, purpose, and description fields
@@ -290,7 +316,7 @@ class AnalyticsService:
     def get_budget_variance(
         session: Session, start_date: date | None = None, end_date: date | None = None
     ) -> dict[str, Any]:
-        """Get budget vs actual spending variance by category."""
+        """Get budget vs actual spending variance by category with year-specific budgets."""
         # Default to current month if no dates provided
         if not start_date:
             today = date.today()
@@ -298,51 +324,142 @@ class AnalyticsService:
         if not end_date:
             end_date = date.today()
 
-        # Query spending categories with their budgets and actual spending
+        # Group transactions by year and category to handle cross-year periods
+        # Use COALESCE to get effective category (actual takes precedence over predicted)
         query = (
             session.query(
                 CategoryORM.id,
                 CategoryORM.name,
-                CategoryORM.budget,
+                CategoryORM.type,
+                func.strftime("%Y", TransactionORM.date).label("year"),
                 func.coalesce(func.sum(TransactionORM.amount), 0).label("actual_amount"),
             )
-            .outerjoin(TransactionORM, CategoryORM.id == TransactionORM.category_id)
+            .join(
+                CategoryORM,
+                CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
+            )
             .filter(CategoryORM.type == CategoryType.SPENDING)
             .filter(CategoryORM.is_active)
+            .filter(TransactionORM.date.between(start_date, end_date))
+            .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
+            .group_by(CategoryORM.id, CategoryORM.name, CategoryORM.type, func.strftime("%Y", TransactionORM.date))
         )
-
-        # Apply date filters if transactions exist
-        if start_date and end_date:
-            query = query.filter(
-                or_(
-                    TransactionORM.date.is_(None),  # Include categories with no transactions
-                    TransactionORM.date.between(start_date, end_date),
-                )
-            )
-
-        query = query.group_by(CategoryORM.id, CategoryORM.name, CategoryORM.budget)
 
         results = query.all()
 
+        # Group results by category and calculate year-specific budgets
+        category_data = {}
+
+        for result in results:
+            category_id = result.id
+            category_name = result.name
+            year = int(result.year)
+
+            # Use actual transaction amounts as-is for budget comparison
+            # Budgets represent the expected money flow for each category
+            # - Spending budget: positive value (e.g., 500€), compared against net spending (negative amounts)
+            # - Income budget: positive value (e.g., 3000€), compared against net income (positive amounts)
+            # - A refund (+50) in spending category reduces net spending by 50
+            # - An expense (-50) in income category reduces net income by 50
+            actual_amount = float(result.actual_amount)
+
+            if category_id not in category_data:
+                category_data[category_id] = {
+                    "category_name": category_name,
+                    "yearly_data": {},
+                    "total_actual": 0,
+                    "total_budget": 0,
+                }
+
+            # Get year-specific budget for this category and year
+            year_budget = BudgetService.get_budget_for_category_year(session, category_id, year)
+
+            # Calculate monthly budget for the period within this year
+            year_start = max(start_date, date(year, 1, 1))
+            year_end = min(end_date, date(year, 12, 31))
+
+            # Calculate number of months in this year for the period
+            months_in_year = (year_end.year - year_start.year) * 12 + year_end.month - year_start.month + 1
+            period_budget = year_budget * months_in_year
+
+            category_data[category_id]["yearly_data"][year] = {
+                "budget": period_budget,
+                "actual": actual_amount,
+                "months": months_in_year,
+            }
+
+            category_data[category_id]["total_actual"] += actual_amount
+            category_data[category_id]["total_budget"] += period_budget
+
+        # Also include categories with budgets but no transactions
+        spending_categories = (
+            session.query(CategoryORM)
+            .filter(CategoryORM.type == CategoryType.SPENDING, CategoryORM.is_active)
+            .all()
+        )
+
+        for category in spending_categories:
+            if category.id not in category_data:
+                # Calculate budget for this category across the date range
+                total_budget = 0
+
+                # Handle cross-year periods
+                current_date = start_date
+                while current_date <= end_date:
+                    year = current_date.year
+                    year_budget = BudgetService.get_budget_for_category_year(session, category.id, year)
+
+                    # Calculate months in this year for the period
+                    year_start = max(start_date, date(year, 1, 1))
+                    year_end = min(end_date, date(year, 12, 31))
+                    months_in_year = (year_end.year - year_start.year) * 12 + year_end.month - year_start.month + 1
+
+                    total_budget += year_budget * months_in_year
+
+                    # Move to next year
+                    current_date = date(year + 1, 1, 1)
+                    if current_date > end_date:
+                        break
+
+                if total_budget > 0:  # Only include if there's a budget set
+                    category_data[category.id] = {
+                        "category_name": category.name,
+                        "yearly_data": {},
+                        "total_actual": 0,
+                        "total_budget": total_budget,
+                    }
+
+        # Build final variance data
         variances = []
         total_budget = 0
         total_actual = 0
 
-        for result in results:
-            budget = float(result.budget)
-            actual = float(result.actual_amount)
-            variance = budget - actual
-            variance_pct = (variance / budget * 100) if budget > 0 else 0
+        for category_id, data in category_data.items():
+            budget = data["total_budget"]
+            actual = data["total_actual"]
+
+            # Adjust variance calculation to handle spending categories properly
+            # For spending categories: convert negative net spending to positive amount for comparison
+            # This way: budget=500€, actual=-300€ becomes budget=500€, displayed_actual=300€, variance=200€
+            if budget > 0 and actual <= 0:  # Likely a spending category
+                displayed_actual = abs(actual)  # Show as positive spending amount
+                variance = budget - displayed_actual  # Positive = under budget, Negative = over budget
+                variance_pct = (variance / budget * 100) if budget > 0 else 0
+            else:  # Income/saving categories with positive actuals
+                displayed_actual = actual
+                variance = budget - actual
+                variance_pct = (variance / budget * 100) if budget > 0 else 0
 
             variances.append(
                 {
-                    "category_id": result.id,
-                    "category_name": result.name,
+                    "category_id": category_id,
+                    "category_name": data["category_name"],
                     "budget": budget,
-                    "actual": actual,
+                    "actual": displayed_actual,  # Use the display-friendly actual amount
                     "variance": variance,
                     "variance_percentage": variance_pct,
                     "is_overspent": variance < 0,
+                    "yearly_breakdown": data["yearly_data"],
                 }
             )
 
@@ -366,30 +483,49 @@ class AnalyticsService:
         }
 
     @staticmethod
-    def get_monthly_summary(session: Session, year: int | None = None) -> dict[str, Any]:
+    def get_monthly_summary(
+        session: Session, year: int | None = None, start_date: date | None = None, end_date: date | None = None
+    ) -> dict[str, Any]:
         """Get monthly income/spending/saving breakdown."""
-        if not year:
+        if not year and not start_date:
             year = date.today().year
 
+        # If only year is provided, set date range
+        if year and not start_date:
+            start_date = date(year, 1, 1)
+            end_date = date(year, 12, 31)
+        elif not end_date:
+            end_date = date.today()
+
         # Query for monthly aggregations by category type
+        # Use COALESCE to get effective category (actual takes precedence over predicted)
         query = (
             session.query(
                 func.strftime("%m", TransactionORM.date).label("month"),
                 CategoryORM.type,
                 func.sum(TransactionORM.amount).label("total_amount"),
             )
-            .join(CategoryORM, TransactionORM.category_id == CategoryORM.id)
-            .filter(func.strftime("%Y", TransactionORM.date) == str(year))
+            .join(
+                CategoryORM,
+                CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
+            )
+            .filter(TransactionORM.date.between(start_date, end_date))
+            .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
             .group_by(func.strftime("%m", TransactionORM.date), CategoryORM.type)
             .order_by(func.strftime("%m", TransactionORM.date))
         )
 
         results = query.all()
 
-        # Initialize monthly data structure
+        # Initialize monthly data structure for the specified date range only
         monthly_data = {}
-        for month in range(1, 13):
-            month_str = f"{month:02d}"
+
+        # Generate months only within the specified date range
+        current_date = start_date.replace(day=1)  # Start from first day of start month
+        end_month = end_date.replace(day=1)
+
+        while current_date <= end_month:
+            month_str = f"{current_date.month:02d}"
             monthly_data[month_str] = {
                 "month": month_str,
                 "income": 0.0,
@@ -397,6 +533,11 @@ class AnalyticsService:
                 "saving": 0.0,
                 "profit_loss": 0.0,  # income - spending (excluding savings)
             }
+            # Move to next month
+            if current_date.month == 12:
+                current_date = current_date.replace(year=current_date.year + 1, month=1)
+            else:
+                current_date = current_date.replace(month=current_date.month + 1)
 
         # Populate with actual data
         for result in results:
@@ -414,7 +555,9 @@ class AnalyticsService:
 
         # Calculate profit/loss for each month
         for month_data in monthly_data.values():
-            month_data["profit_loss"] = month_data["income"] - month_data["spending"]
+            # Since spending is stored as negative amounts, we need to add it (or subtract abs value)
+            # income - abs(spending) = income + spending (since spending is negative)
+            month_data["profit_loss"] = month_data["income"] + month_data["spending"]
 
         # Calculate cumulative profit/loss
         cumulative_profit_loss = 0
@@ -446,6 +589,7 @@ class AnalyticsService:
             end_date = date.today()
 
         # Build query
+        # Use COALESCE to get effective category (actual takes precedence over predicted)
         query = (
             session.query(
                 CategoryORM.id,
@@ -455,9 +599,13 @@ class AnalyticsService:
                 func.count(TransactionORM.id).label("transaction_count"),
                 func.sum(TransactionORM.amount).label("total_amount"),
             )
-            .join(TransactionORM, CategoryORM.id == TransactionORM.category_id)
+            .join(
+                CategoryORM,
+                CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
+            )
             .filter(TransactionORM.date.between(start_date, end_date))
             .filter(CategoryORM.is_active)
+            .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
         )
 
         # Apply category type filter if provided
@@ -501,31 +649,55 @@ class AnalyticsService:
         }
 
     @staticmethod
-    def get_savings_tracking(session: Session, year: int | None = None) -> dict[str, Any]:
+    def get_savings_tracking(
+        session: Session, year: int | None = None, start_date: date | None = None, end_date: date | None = None
+    ) -> dict[str, Any]:
         """Get savings analysis with monthly and cumulative tracking."""
-        if not year:
+        if not year and not start_date:
             year = date.today().year
 
+        # If only year is provided, set date range
+        if year and not start_date:
+            start_date = date(year, 1, 1)
+            end_date = date(year, 12, 31)
+        elif not end_date:
+            end_date = date.today()
+
         # Query for monthly savings data
+        # Use COALESCE to get effective category (actual takes precedence over predicted)
         query = (
             session.query(
                 func.strftime("%m", TransactionORM.date).label("month"),
                 func.sum(TransactionORM.amount).label("savings_amount"),
             )
-            .join(CategoryORM, TransactionORM.category_id == CategoryORM.id)
+            .join(
+                CategoryORM,
+                CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
+            )
             .filter(CategoryORM.type == CategoryType.SAVING)
-            .filter(func.strftime("%Y", TransactionORM.date) == str(year))
+            .filter(TransactionORM.date.between(start_date, end_date))
+            .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
             .group_by(func.strftime("%m", TransactionORM.date))
             .order_by(func.strftime("%m", TransactionORM.date))
         )
 
         results = query.all()
 
-        # Initialize monthly savings data
+        # Initialize monthly savings data for the specified date range only
         monthly_savings = {}
-        for month in range(1, 13):
-            month_str = f"{month:02d}"
+
+        # Generate months only within the specified date range
+        current_date = start_date.replace(day=1)  # Start from first day of start month
+        end_month = end_date.replace(day=1)
+
+        while current_date <= end_month:
+            month_str = f"{current_date.month:02d}"
             monthly_savings[month_str] = {"month": month_str, "amount": 0.0}
+            # Move to next month
+            if current_date.month == 12:
+                current_date = current_date.replace(year=current_date.year + 1, month=1)
+            else:
+                current_date = current_date.replace(month=current_date.month + 1)
 
         # Populate with actual data
         for result in results:
@@ -550,3 +722,250 @@ class AnalyticsService:
         }
 
         return {"year": year, "monthly_savings": list(monthly_savings.values()), "statistics": stats}
+
+    @staticmethod
+    def get_top_transactions_by_month(
+        session: Session, year: int | None = None, month: int | None = None, limit: int = 5
+    ) -> dict[str, Any]:
+        """Get top spending transactions by month."""
+        if not year:
+            year = date.today().year
+        if not month:
+            month = date.today().month
+
+        # Query for spending transactions in the specified month
+        query = (
+            session.query(TransactionORM)
+            .join(
+                CategoryORM,
+                CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
+            )
+            .filter(CategoryORM.type == CategoryType.SPENDING)
+            .filter(func.strftime("%Y", TransactionORM.date) == str(year))
+            .filter(func.strftime("%m", TransactionORM.date) == f"{month:02d}")
+            .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
+            .filter(TransactionORM.amount < 0)  # Only negative amounts (spending)
+            .order_by(TransactionORM.amount.asc())  # Most negative first (largest spending)
+            .limit(limit)
+        )
+
+        transactions = query.all()
+
+        # Format transaction data
+        top_transactions = []
+        for transaction in transactions:
+            # Get effective category
+            category = transaction.category if transaction.category else transaction.predicted_category
+
+            top_transactions.append(
+                {
+                    "id": transaction.id,
+                    "date": transaction.date.isoformat(),
+                    "description": f"{transaction.name} - {transaction.purpose}".rstrip(" -")
+                    if transaction.purpose
+                    else transaction.name,
+                    "amount": abs(float(transaction.amount)),  # Show as positive for display
+                    "category": category.name if category else "Unknown",
+                    "merchant": transaction.name,
+                }
+            )
+
+        # Calculate total spending for the month
+        total_query = (
+            session.query(func.sum(TransactionORM.amount))
+            .join(
+                CategoryORM,
+                CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
+            )
+            .filter(CategoryORM.type == CategoryType.SPENDING)
+            .filter(func.strftime("%Y", TransactionORM.date) == str(year))
+            .filter(func.strftime("%m", TransactionORM.date) == f"{month:02d}")
+            .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
+        )
+
+        total_spending = float(total_query.scalar() or 0)
+
+        # Calculate percentage for each transaction
+        for transaction in top_transactions:
+            transaction["percentage_of_total"] = (
+                (transaction["amount"] / abs(total_spending) * 100) if total_spending != 0 else 0
+            )
+
+        return {
+            "year": year,
+            "month": month,
+            "month_name": date(year, month, 1).strftime("%B"),
+            "top_transactions": top_transactions,
+            "total_spending": abs(total_spending),
+            "transactions_count": len(top_transactions),
+        }
+
+
+class BudgetService:
+    """Service for yearly budget operations."""
+
+    @staticmethod
+    def get_budget_for_category_year(session: Session, category_id: int, year: int) -> float:
+        """Get budget for a specific category and year with fallback logic."""
+        # First try to get year-specific budget
+        budget_plan = (
+            session.query(BudgetPlanORM)
+            .filter(BudgetPlanORM.category_id == category_id, BudgetPlanORM.year == year)
+            .first()
+        )
+
+        if budget_plan:
+            return float(budget_plan.monthly_budget)
+
+        # Fallback to category default budget
+        category = session.query(CategoryORM).filter(CategoryORM.id == category_id).first()
+        if category:
+            return float(category.budget)
+
+        return 0.0
+
+    @staticmethod
+    def get_budgets_for_year(session: Session, year: int) -> dict[str, Any]:
+        """Get all budgets for a specific year."""
+        # Get all active categories
+        categories = session.query(CategoryORM).filter(CategoryORM.is_active).all()
+
+        budgets = []
+        for category in categories:
+            # Try to get year-specific budget
+            budget_plan = (
+                session.query(BudgetPlanORM)
+                .filter(BudgetPlanORM.category_id == category.id, BudgetPlanORM.year == year)
+                .first()
+            )
+
+            if budget_plan:
+                budget = float(budget_plan.monthly_budget)
+                has_year_specific = True
+            else:
+                budget = float(category.budget)
+                has_year_specific = False
+
+            budgets.append(
+                {
+                    "category_id": category.id,
+                    "category_name": category.name,
+                    "category_type": category.type,
+                    "monthly_budget": budget,
+                    "has_year_specific": has_year_specific,
+                    "fallback_budget": float(category.budget),
+                }
+            )
+
+        return {"year": year, "budgets": budgets, "total_categories": len(categories)}
+
+    @staticmethod
+    def set_budget_for_category_year(session: Session, category_id: int, year: int, monthly_budget: float) -> bool:
+        """Set or update budget for a specific category and year."""
+        # Check if category exists and is active
+        category = (
+            session.query(CategoryORM).filter(CategoryORM.id == category_id, CategoryORM.is_active).first()
+        )
+
+        if not category:
+            return False
+
+        # Check if budget plan already exists
+        budget_plan = (
+            session.query(BudgetPlanORM)
+            .filter(BudgetPlanORM.category_id == category_id, BudgetPlanORM.year == year)
+            .first()
+        )
+
+        if budget_plan:
+            # Update existing budget plan
+            budget_plan.monthly_budget = monthly_budget
+            budget_plan.updated_at = datetime.now()
+        else:
+            # Create new budget plan
+            budget_plan = BudgetPlanORM(category_id=category_id, year=year, monthly_budget=monthly_budget)
+            session.add(budget_plan)
+
+        session.commit()
+        return True
+
+    @staticmethod
+    def copy_budgets_from_year(session: Session, source_year: int, target_year: int) -> dict[str, Any]:
+        """Copy all budgets from source year to target year."""
+        # Get all budget plans from source year
+        source_plans = session.query(BudgetPlanORM).filter(BudgetPlanORM.year == source_year).all()
+
+        if not source_plans:
+            # If no specific plans for source year, use category default budgets
+            categories = session.query(CategoryORM).filter(CategoryORM.is_active, CategoryORM.budget > 0).all()
+
+            copied_count = 0
+            for category in categories:
+                # Check if target year budget already exists
+                existing = (
+                    session.query(BudgetPlanORM)
+                    .filter(BudgetPlanORM.category_id == category.id, BudgetPlanORM.year == target_year)
+                    .first()
+                )
+
+                if not existing:
+                    budget_plan = BudgetPlanORM(
+                        category_id=category.id, year=target_year, monthly_budget=category.budget
+                    )
+                    session.add(budget_plan)
+                    copied_count += 1
+
+            session.commit()
+            return {
+                "source_year": source_year,
+                "target_year": target_year,
+                "copied_count": copied_count,
+                "source": "category_defaults",
+            }
+
+        # Copy from specific year budget plans
+        copied_count = 0
+        for source_plan in source_plans:
+            # Check if target year budget already exists
+            existing = (
+                session.query(BudgetPlanORM)
+                .filter(BudgetPlanORM.category_id == source_plan.category_id, BudgetPlanORM.year == target_year)
+                .first()
+            )
+
+            if not existing:
+                budget_plan = BudgetPlanORM(
+                    category_id=source_plan.category_id, year=target_year, monthly_budget=source_plan.monthly_budget
+                )
+                session.add(budget_plan)
+                copied_count += 1
+
+        session.commit()
+        return {
+            "source_year": source_year,
+            "target_year": target_year,
+            "copied_count": copied_count,
+            "source": "budget_plans",
+        }
+
+    @staticmethod
+    def delete_budget_for_category_year(session: Session, category_id: int, year: int) -> bool:
+        """Delete budget plan for a specific category and year."""
+        budget_plan = (
+            session.query(BudgetPlanORM)
+            .filter(BudgetPlanORM.category_id == category_id, BudgetPlanORM.year == year)
+            .first()
+        )
+
+        if budget_plan:
+            session.delete(budget_plan)
+            session.commit()
+            return True
+
+        return False
+
+    @staticmethod
+    def get_years_with_budgets(session: Session) -> list[int]:
+        """Get all years that have budget plans defined."""
+        years = session.query(BudgetPlanORM.year).distinct().order_by(BudgetPlanORM.year.desc()).all()
+        return [year[0] for year in years]

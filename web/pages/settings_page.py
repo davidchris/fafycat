@@ -17,7 +17,11 @@ def _get_ml_model_status():
         db_manager = DatabaseManager(config)
 
         with db_manager.get_session() as db_session:
-            model_path = config.ml.model_dir / "categorizer.pkl"
+            # Check for the correct model based on config (same logic as ML API)
+            if config.ml.use_ensemble:
+                model_path = config.ml.model_dir / "ensemble_categorizer.pkl"
+            else:
+                model_path = config.ml.model_dir / "categorizer.pkl"
 
             # Check training data readiness
             reviewed_count = (
@@ -216,6 +220,22 @@ def render_empty_categories_state(ml_status):
             }}
         }}
 
+        function confirmAndPredictUnpredicted(count) {{
+            const confirmMessage = `Run ML predictions on ${{count}} transactions?\\n\\n` +
+                `This will:\\n` +
+                `• Apply ML predictions to all transactions without predictions\\n` +
+                `• Auto-accept high-confidence predictions (95%+)\\n` +
+                `• Add uncertain predictions to your Review Queue\\n` +
+                `• You may need to review some transactions manually\\n\\n` +
+                `Use this when you've imported transactions before training a model, ` +
+                `or after retraining to apply the updated model.\\n\\n` +
+                `Continue?`;
+            
+            if (confirm(confirmMessage)) {{
+                predictUnpredicted();
+            }}
+        }}
+
         function predictUnpredicted() {{
             const button = event.target;
             const originalText = button.innerHTML;
@@ -229,7 +249,18 @@ def render_empty_categories_state(ml_status):
             .then(response => response.json())
             .then(data => {{
                 if (data.status === 'success') {{
-                    alert(`✅ Predicted ${{data.predictions_made}} transactions!\\n\\nYou can now review the predictions on the Review page.`);
+                    const autoAccepted = data.auto_accepted || 0;
+                    const highPriority = data.high_priority_review || 0;
+                    const standardReview = data.standard_review || 0;
+                    
+                    let message = `✅ Predicted ${{data.predictions_made}} transactions!\\n\\n`;
+                    message += `🤖 Smart Review Assignment:\\n`;
+                    message += `• ${{autoAccepted}} auto-accepted (high confidence)\\n`;
+                    message += `• ${{highPriority}} high priority for review\\n`;
+                    message += `• ${{standardReview}} standard review needed\\n\\n`;
+                    message += `📋 Check the Review page to see transactions prioritized for your attention!`;
+                    
+                    alert(message);
                     location.reload();
                 }} else {{
                     throw new Error(data.detail || 'Prediction failed');
@@ -251,6 +282,10 @@ def render_categories_management(category_groups, inactive_categories, ml_status
     # Count categories with and without budgets
     categories_with_budgets = sum(1 for group in category_groups.values() for cat in group if cat.budget > 0)
     total_active = sum(len(group) for group in category_groups.values())
+
+    from datetime import date
+
+    current_year = date.today().year
 
     content = f"""
     <div class="container mx-auto px-4 py-8">
@@ -274,8 +309,8 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             </div>
         </div>
 
-        <!-- Budget Reminder -->
-        {render_budget_reminder(categories_with_budgets, total_active)}
+        <!-- Budget Year Selector and Management -->
+        {render_yearly_budget_management(current_year)}
         
         <!-- Budget Variance Analytics -->
         {render_budget_variance_section()}
@@ -477,6 +512,22 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             }
         }
 
+        function confirmAndPredictUnpredicted(count) {
+            const confirmMessage = `Run ML predictions on ${count} transactions?\\n\\n` +
+                `This will:\\n` +
+                `• Apply ML predictions to all transactions without predictions\\n` +
+                `• Auto-accept high-confidence predictions (95%+)\\n` +
+                `• Add uncertain predictions to your Review Queue\\n` +
+                `• You may need to review some transactions manually\\n\\n` +
+                `Use this when you've imported transactions before training a model, ` +
+                `or after retraining to apply the updated model.\\n\\n` +
+                `Continue?`;
+            
+            if (confirm(confirmMessage)) {
+                predictUnpredicted();
+            }
+        }
+
         function predictUnpredicted() {
             const button = event.target;
             const originalText = button.innerHTML;
@@ -490,7 +541,18 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
-                    alert(`✅ Predicted ${data.predictions_made} transactions!\\n\\nYou can now review the predictions on the Review page.`);
+                    const autoAccepted = data.auto_accepted || 0;
+                    const highPriority = data.high_priority_review || 0;
+                    const standardReview = data.standard_review || 0;
+                    
+                    let message = `✅ Predicted ${data.predictions_made} transactions!\\n\\n`;
+                    message += `🤖 Smart Review Assignment:\\n`;
+                    message += `• ${autoAccepted} auto-accepted (high confidence)\\n`;
+                    message += `• ${highPriority} high priority for review\\n`;
+                    message += `• ${standardReview} standard review needed\\n\\n`;
+                    message += `📋 Check the Review page to see transactions prioritized for your attention!`;
+                    
+                    alert(message);
                     location.reload();
                 } else {
                     throw new Error(data.detail || 'Prediction failed');
@@ -718,6 +780,271 @@ def render_budget_variance_section():
     """
 
 
+def render_yearly_budget_management(current_year):
+    """Render yearly budget management section."""
+    return f"""
+    <div class="bg-white p-6 rounded-lg shadow mb-8">
+        <div class="flex items-center justify-between mb-6">
+            <h2 class="text-lg font-semibold">📅 Yearly Budget Management</h2>
+            
+            <!-- Year Selector -->
+            <div class="flex items-center space-x-4">
+                <label for="budget-year-selector" class="text-sm font-medium text-gray-700">Budget Year:</label>
+                <select id="budget-year-selector" class="border border-gray-300 rounded-md px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="loadBudgetsForYear(this.value)">
+                    <option value="{current_year - 1}">{current_year - 1}</option>
+                    <option value="{current_year}" selected>{current_year}</option>
+                    <option value="{current_year + 1}">{current_year + 1}</option>
+                </select>
+                
+                <button onclick="showCopyBudgetsModal()" class="inline-flex items-center px-3 py-1 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200">
+                    📋 Copy from Previous Year
+                </button>
+            </div>
+        </div>
+        
+        <!-- Budget Status Indicator -->
+        <div id="budget-year-status" class="mb-4">
+            <div class="text-center py-4 text-gray-500">
+                Loading budget information...
+            </div>
+        </div>
+        
+        <!-- Budget List Container -->
+        <div id="yearly-budget-container">
+            <div class="text-center py-8 text-gray-500">
+                Select a year to view and edit budgets
+            </div>
+        </div>
+    </div>
+    
+    <!-- Copy Budgets Modal -->
+    <div id="copy-budgets-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <h3 class="text-lg font-bold text-gray-900 mb-4">Copy Budgets from Previous Year</h3>
+            
+            <div class="mb-4">
+                <label for="source-year" class="block text-sm font-medium text-gray-700 mb-2">Copy from year:</label>
+                <select id="source-year" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="{current_year - 2}">{current_year - 2}</option>
+                    <option value="{current_year - 1}" selected>{current_year - 1}</option>
+                </select>
+            </div>
+            
+            <div class="mb-4">
+                <label for="target-year" class="block text-sm font-medium text-gray-700 mb-2">Copy to year:</label>
+                <select id="target-year" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="{current_year}" selected>{current_year}</option>
+                    <option value="{current_year + 1}">{current_year + 1}</option>
+                </select>
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+                <button onclick="hideCopyBudgetsModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300">
+                    Cancel
+                </button>
+                <button onclick="copyBudgets()" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">
+                    Copy Budgets
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentBudgetYear = {current_year};
+        let budgetData = {{}};
+        
+        // Load budget data when page loads
+        document.addEventListener('DOMContentLoaded', function() {{
+            loadBudgetsForYear({current_year});
+        }});
+        
+        async function loadBudgetsForYear(year) {{
+            currentBudgetYear = year;
+            
+            try {{
+                // Update status
+                document.getElementById('budget-year-status').innerHTML = `
+                    <div class="text-center py-2 text-blue-600">
+                        Loading budgets for ${{year}}...
+                    </div>
+                `;
+                
+                // Fetch budget data
+                const response = await fetch(`/api/budgets/${{year}}`);
+                const data = await response.json();
+                
+                budgetData = data;
+                renderBudgetList(data);
+                updateBudgetStatus(data);
+                
+            }} catch (error) {{
+                console.error('Error loading budget data:', error);
+                document.getElementById('budget-year-status').innerHTML = `
+                    <div class="text-center py-2 text-red-600">
+                        Error loading budget data: ${{error.message}}
+                    </div>
+                `;
+            }}
+        }}
+        
+        function renderBudgetList(data) {{
+            const container = document.getElementById('yearly-budget-container');
+            const budgets = data.budgets || [];
+            
+            if (budgets.length === 0) {{
+                container.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <p>No categories found</p>
+                    </div>
+                `;
+                return;
+            }}
+            
+            let html = `
+                <div class="space-y-3">
+                    <div class="grid grid-cols-4 gap-4 text-sm font-medium text-gray-500 border-b pb-2">
+                        <div>Category</div>
+                        <div>Type</div>
+                        <div>Monthly Budget</div>
+                        <div>Actions</div>
+                    </div>
+            `;
+            
+            budgets.forEach(budget => {{
+                const statusIndicator = budget.has_year_specific 
+                    ? `<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-green-800 bg-green-100 rounded-full">${{data.year}}</span>`
+                    : `<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded-full">Default</span>`;
+                
+                html += `
+                    <div class="grid grid-cols-4 gap-4 items-center py-3 border-b border-gray-100">
+                        <div class="font-medium">${{budget.category_name}} ${{statusIndicator}}</div>
+                        <div class="text-sm text-gray-600 capitalize">${{budget.category_type}}</div>
+                        <div class="font-mono">€${{budget.monthly_budget.toFixed(2)}}</div>
+                        <div class="flex space-x-2">
+                            <button onclick="editYearlyBudget(${{budget.category_id}}, '${{budget.category_name}}', ${{budget.monthly_budget}})" 
+                                    class="text-blue-600 hover:text-blue-800 text-sm">
+                                Edit
+                            </button>
+                            ${{budget.has_year_specific ? `
+                                <button onclick="deleteYearlyBudget(${{budget.category_id}}, '${{budget.category_name}}')" 
+                                        class="text-red-600 hover:text-red-800 text-sm">
+                                    Reset
+                                </button>
+                            ` : ''}}
+                        </div>
+                    </div>
+                `;
+            }});
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }}
+        
+        function updateBudgetStatus(data) {{
+            const container = document.getElementById('budget-year-status');
+            const budgets = data.budgets || [];
+            const yearSpecific = budgets.filter(b => b.has_year_specific).length;
+            const totalBudgets = budgets.filter(b => b.monthly_budget > 0).length;
+            
+            container.innerHTML = `
+                <div class="flex justify-center space-x-6 text-sm">
+                    <div class="flex items-center">
+                        <span class="inline-block w-3 h-3 bg-green-100 border border-green-300 rounded-full mr-2"></span>
+                        <span class="text-gray-600">${{yearSpecific}} year-specific budgets</span>
+                    </div>
+                    <div class="flex items-center">
+                        <span class="inline-block w-3 h-3 bg-gray-100 border border-gray-300 rounded-full mr-2"></span>
+                        <span class="text-gray-600">${{totalBudgets - yearSpecific}} using defaults</span>
+                    </div>
+                    <div class="flex items-center">
+                        <span class="text-gray-600">Total active: ${{totalBudgets}}</span>
+                    </div>
+                </div>
+            `;
+        }}
+        
+        async function editYearlyBudget(categoryId, categoryName, currentBudget) {{
+            const newBudget = prompt(`Set monthly budget for "${{categoryName}}" in ${{currentBudgetYear}}:`, currentBudget);
+            
+            if (newBudget !== null && !isNaN(newBudget) && parseFloat(newBudget) >= 0) {{
+                try {{
+                    const response = await fetch(`/api/budgets/${{currentBudgetYear}}/${{categoryId}}?monthly_budget=${{parseFloat(newBudget)}}`, {{
+                        method: 'PUT',
+                        headers: {{ 'Content-Type': 'application/json' }}
+                    }});
+                    
+                    if (response.ok) {{
+                        // Reload budget data
+                        await loadBudgetsForYear(currentBudgetYear);
+                    }} else {{
+                        const error = await response.json();
+                        alert('Error updating budget: ' + error.detail);
+                    }}
+                }} catch (error) {{
+                    alert('Error updating budget: ' + error.message);
+                }}
+            }}
+        }}
+        
+        async function deleteYearlyBudget(categoryId, categoryName) {{
+            if (confirm(`Reset "${{categoryName}}" budget for ${{currentBudgetYear}} to default? This will remove the year-specific budget.`)) {{
+                try {{
+                    const response = await fetch(`/api/budgets/${{currentBudgetYear}}/${{categoryId}}`, {{
+                        method: 'DELETE'
+                    }});
+                    
+                    if (response.ok) {{
+                        // Reload budget data
+                        await loadBudgetsForYear(currentBudgetYear);
+                    }} else {{
+                        const error = await response.json();
+                        alert('Error deleting budget: ' + error.detail);
+                    }}
+                }} catch (error) {{
+                    alert('Error deleting budget: ' + error.message);
+                }}
+            }}
+        }}
+        
+        function showCopyBudgetsModal() {{
+            document.getElementById('copy-budgets-modal').classList.remove('hidden');
+        }}
+        
+        function hideCopyBudgetsModal() {{
+            document.getElementById('copy-budgets-modal').classList.add('hidden');
+        }}
+        
+        async function copyBudgets() {{
+            const sourceYear = document.getElementById('source-year').value;
+            const targetYear = document.getElementById('target-year').value;
+            
+            try {{
+                const response = await fetch(`/api/budgets/${{targetYear}}/copy-from/${{sourceYear}}`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }}
+                }});
+                
+                const result = await response.json();
+                
+                if (response.ok) {{
+                    alert(`Successfully copied ${{result.copied_count}} budgets from ${{sourceYear}} to ${{targetYear}}`);
+                    hideCopyBudgetsModal();
+                    
+                    // Reload if we're viewing the target year
+                    if (currentBudgetYear == targetYear) {{
+                        await loadBudgetsForYear(targetYear);
+                    }}
+                }} else {{
+                    alert('Error copying budgets: ' + result.detail);
+                }}
+            }} catch (error) {{
+                alert('Error copying budgets: ' + error.message);
+            }}
+        }}
+    </script>
+    """
+
+
 def render_ml_training_section(ml_status):
     """Render ML model training section based on current status."""
     model_loaded = ml_status.get("model_loaded", False)
@@ -745,7 +1072,7 @@ def render_ml_training_section(ml_status):
                         <p class="font-medium">✅ Model is loaded and working!</p>
                         <p class="mt-1">Trained on {classes_count} categories • {
             unpredicted_count
-        } transactions need predictions</p>
+        } transactions without predictions</p>
                     </div>
                     <div class="mt-4 flex gap-3">
                         <button 
@@ -757,12 +1084,25 @@ def render_ml_training_section(ml_status):
                         {
             f'''
                         <button 
-                            onclick="predictUnpredicted()"
+                            onclick="confirmAndPredictUnpredicted({unpredicted_count})"
                             class="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200"
+                            title="Run ML predictions on all transactions that don't have predictions yet"
                         >
                             ⚡ Predict {unpredicted_count} Transactions
                         </button>
                         '''
+            if unpredicted_count > 0
+            else ""
+        }
+                    </div>
+                    {
+            f'''
+                    <div class="mt-3 p-3 bg-blue-50 border-l-4 border-blue-400 text-sm text-blue-700">
+                        <p><strong>About Batch Prediction:</strong> This will run ML predictions on all {unpredicted_count} transactions without predictions. 
+                        Some transactions will be automatically accepted (high confidence), while others will be added to your Review Queue 
+                        for manual verification. Use this when you've imported transactions before training a model, or after retraining.</p>
+                    </div>
+                    '''
             if unpredicted_count > 0
             else ""
         }

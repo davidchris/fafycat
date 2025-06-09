@@ -349,7 +349,32 @@ class TransactionCategorizer:
     def load_model(self, model_path: Path) -> None:
         """Load trained model from disk."""
         with open(model_path, "rb") as f:
-            model_data = pickle.load(f)
+            try:
+                model_data = pickle.load(f)
+            except ModuleNotFoundError as e:
+                # Handle legacy pickle files with different module paths
+                if "fafycat" in str(e):
+                    # Create a custom unpickler that can handle the old module path
+                    import pickle as _pickle
+
+                    # Temporarily add the module mapping for old pickle files
+                    class LegacyUnpickler(_pickle.Unpickler):
+                        def find_class(self, module, name):
+                            # Map old module paths to new ones
+                            if module.startswith("fafycat."):
+                                # Remove the old 'fafycat.' prefix and use the current structure
+                                new_module = module.replace("fafycat.", "src.fafycat.")
+                                return super().find_class(new_module, name)
+                            if module == "fafycat":
+                                # Handle direct fafycat imports
+                                return super().find_class("src.fafycat", name)
+                            return super().find_class(module, name)
+
+                    f.seek(0)  # Reset file pointer
+                    unpickler = LegacyUnpickler(f)
+                    model_data = unpickler.load()
+                else:
+                    raise
 
         self.classifier = model_data["classifier"]
         self.calibrated_classifier = model_data["calibrated_classifier"]

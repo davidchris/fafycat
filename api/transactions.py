@@ -126,6 +126,7 @@ async def get_transactions_table(
     sort_by: str = Query("date"),  # date, confidence, amount, description, category
     sort_order: str = Query("desc"),  # asc, desc
     search: str = Query(""),
+    category_filter: str = Query(""),
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
     """Get transactions table fragment for HTMX filtering with pagination."""
@@ -153,6 +154,7 @@ async def get_transactions_table(
         is_reviewed=is_reviewed,
         confidence_lt=confidence_lt if status in ["pending", "high_priority"] else None,
         review_priority=review_priority,
+        category=category_filter if category_filter else None,
         sort_by=sort_by,
         sort_order=sort_order,
         search=search,

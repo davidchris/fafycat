@@ -22,7 +22,7 @@ class Category(BaseModel):
     id: int | None = None
     type: CategoryType
     name: str = Field(..., min_length=1, max_length=50)
-    budget: float = Field(ge=0.0)
+    budget: float = Field(ge=0.0)  # Default budget, fallback for years without specific budget
     is_active: bool = True
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -32,6 +32,17 @@ class Category(BaseModel):
     def validate_name(cls, v: str) -> str:
         """Normalize category name."""
         return v.strip().lower()
+
+
+class BudgetPlan(BaseModel):
+    """Year-specific budget plan for a category."""
+
+    id: int | None = None
+    category_id: int
+    year: int = Field(ge=2020, le=2030)  # Reasonable year range
+    monthly_budget: float = Field(ge=0.0)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class TransactionInput(BaseModel):

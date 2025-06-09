@@ -46,13 +46,24 @@ def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategor
             try:
                 _categorizer.load_model(model_path)
             except Exception as e:
-                raise HTTPException(
-                    status_code=503,
-                    detail=(
-                        f"Failed to load ML model: {str(e)}. "
-                        "Please train a model first using 'uv run scripts/train_model.py'"
-                    ),
-                ) from e
+                error_msg = str(e)
+                if "No module named 'fafycat'" in error_msg:
+                    detail = (
+                        "The ML model is corrupted (module path issue). "
+                        "Please retrain the model using the Settings page or 'uv run scripts/train_model.py'"
+                    )
+                elif "no such table:" in error_msg:
+                    detail = (
+                        "Database schema is incomplete. "
+                        "Please run 'uv run scripts/init_prod_db.py' and then retrain the model."
+                    )
+                else:
+                    detail = (
+                        f"Failed to load ML model: {error_msg}. "
+                        "Please retrain the model using the Settings page or 'uv run scripts/train_model.py'"
+                    )
+
+                raise HTTPException(status_code=503, detail=detail) from e
         else:
             model_type = "ensemble" if _config.ml.use_ensemble else "single"
             raise HTTPException(
@@ -213,17 +224,23 @@ async def get_ml_status(
                 "is_trained": categorizer.is_trained,
                 "status": "Model loaded and ready",
                 "can_predict": True,
-                "classes_count": len(categorizer.classes_) if categorizer.classes_ is not None else 0,
+                "classes_count": (
+                    len(categorizer.classes_)
+                    if hasattr(categorizer, "classes_") and categorizer.classes_ is not None
+                    else 0
+                ),
                 "training_ready": training_ready,
                 "reviewed_transactions": reviewed_count,
                 "min_training_samples": min_training_samples,
                 "unpredicted_transactions": unpredicted_count,
             }
-        except HTTPException:
+        except HTTPException as he:
+            # Extract the specific error message from the HTTPException
+            error_detail = he.detail if hasattr(he, "detail") else str(he)
             return {
                 "model_loaded": False,
                 "model_path": str(model_path),
-                "status": "Model file exists but failed to load",
+                "status": f"Model failed to load: {error_detail}",
                 "can_predict": False,
                 "training_ready": training_ready,
                 "reviewed_transactions": reviewed_count,
@@ -254,42 +271,49 @@ async def retrain_model(
         _config = AppConfig()
         _config.ensure_dirs()
 
-        # Choose between ensemble and single model based on config
-        if _config.ml.use_ensemble:
-            categorizer = EnsembleCategorizer(db, _config.ml)
-            model_filename = "ensemble_categorizer.pkl"
+        # Create a separate database manager and session for training
+        # This prevents the long-running training from blocking other operations
+        from src.fafycat.core.database import DatabaseManager
 
-            # Train ensemble with validation optimization
-            cv_results = categorizer.train_with_validation_optimization()
+        training_db_manager = DatabaseManager(_config)
 
-            response_data = {
-                "status": "success",
-                "message": "Ensemble model retrained successfully",
-                "accuracy": cv_results["validation_accuracy"],  # Frontend expects 'accuracy' field
-                "validation_accuracy": cv_results["validation_accuracy"],  # Keep for backwards compatibility
-                "ensemble_weights": cv_results["best_weights"],
-                "model_path": str(_config.ml.model_dir / model_filename),
-                "training_samples": cv_results["n_training_samples"],
-                "validation_samples": cv_results["n_validation_samples"],
-            }
-        else:
-            categorizer = TransactionCategorizer(db, _config.ml)
-            model_filename = "categorizer.pkl"
+        with training_db_manager.get_session() as training_session:
+            # Choose between ensemble and single model based on config
+            if _config.ml.use_ensemble:
+                categorizer = EnsembleCategorizer(training_session, _config.ml)
+                model_filename = "ensemble_categorizer.pkl"
 
-            # Train single model
-            metrics = categorizer.train()
+                # Train ensemble with validation optimization
+                cv_results = categorizer.train_with_validation_optimization()
 
-            response_data = {
-                "status": "success",
-                "message": "Model retrained successfully",
-                "accuracy": metrics.accuracy,
-                "model_path": str(_config.ml.model_dir / model_filename),
-                "training_samples": len(categorizer.prepare_training_data()[0]),
-            }
+                response_data = {
+                    "status": "success",
+                    "message": "Ensemble model retrained successfully",
+                    "accuracy": cv_results["validation_accuracy"],  # Frontend expects 'accuracy' field
+                    "validation_accuracy": cv_results["validation_accuracy"],  # Keep for backwards compatibility
+                    "ensemble_weights": cv_results["best_weights"],
+                    "model_path": str(_config.ml.model_dir / model_filename),
+                    "training_samples": cv_results["n_training_samples"],
+                    "validation_samples": cv_results["n_validation_samples"],
+                }
+            else:
+                categorizer = TransactionCategorizer(training_session, _config.ml)
+                model_filename = "categorizer.pkl"
 
-        # Save the trained model
-        model_path = _config.ml.model_dir / model_filename
-        categorizer.save_model(model_path)
+                # Train single model
+                metrics = categorizer.train()
+
+                response_data = {
+                    "status": "success",
+                    "message": "Model retrained successfully",
+                    "accuracy": metrics.accuracy,
+                    "model_path": str(_config.ml.model_dir / model_filename),
+                    "training_samples": len(categorizer.prepare_training_data()[0]),
+                }
+
+            # Save the trained model
+            model_path = _config.ml.model_dir / model_filename
+            categorizer.save_model(model_path)
 
         # Reset global categorizer to force reload
         _categorizer = None
@@ -345,11 +369,62 @@ async def predict_unpredicted_transactions(
         # Get predictions
         predictions = categorizer.predict_with_confidence(txn_inputs)
 
-        # Update transactions with predictions
+        # Use active learning to set review priorities (same logic as upload)
+        from src.fafycat.core.models import TransactionPrediction
+        from src.fafycat.ml.active_learning import ActiveLearningSelector
+
+        al_selector = ActiveLearningSelector(db)
+
+        # Convert predictions to TransactionPrediction format for active learning
+        al_predictions = []
+        for txn, prediction in zip(unpredicted_txns, predictions, strict=True):
+            al_pred = TransactionPrediction(
+                transaction_id=txn.id,
+                predicted_category_id=prediction.predicted_category_id,
+                confidence_score=prediction.confidence_score,
+                feature_contributions=prediction.feature_contributions,
+            )
+            al_predictions.append(al_pred)
+
+        # Get active learning strategic selections
+        max_review_items = min(20, len(al_predictions))  # Limit to 20 strategic selections
+        strategic_selections = set(
+            al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
+        )
+
+        # Apply hybrid categorization: confidence + active learning priority
         predictions_made = 0
+        auto_accepted = 0
+        high_priority_review = 0
+        standard_review = 0
+        confidence_threshold = 0.95  # Conservative threshold for auto-acceptance
+
         for txn, prediction in zip(unpredicted_txns, predictions, strict=True):
             txn.predicted_category_id = prediction.predicted_category_id
             txn.confidence_score = prediction.confidence_score
+
+            if prediction.confidence_score >= confidence_threshold:
+                # High confidence - check if active learning flagged it for quality validation
+                if txn.id in strategic_selections:
+                    # High confidence but flagged for quality check
+                    txn.is_reviewed = False
+                    txn.review_priority = "quality_check"
+                    high_priority_review += 1
+                else:
+                    # High confidence and not flagged - auto accept
+                    txn.is_reviewed = True
+                    txn.review_priority = "auto_accepted"
+                    auto_accepted += 1
+            else:
+                # Lower confidence - definitely needs review
+                txn.is_reviewed = False
+                if txn.id in strategic_selections:
+                    txn.review_priority = "high"
+                    high_priority_review += 1
+                else:
+                    txn.review_priority = "standard"
+                    standard_review += 1
+
             predictions_made += 1
 
         db.commit()
@@ -358,6 +433,9 @@ async def predict_unpredicted_transactions(
             "status": "success",
             "message": f"Made predictions for {predictions_made} transactions",
             "predictions_made": predictions_made,
+            "auto_accepted": auto_accepted,
+            "high_priority_review": high_priority_review,
+            "standard_review": standard_review,
             "remaining_unpredicted": max(0, len(unpredicted_txns) - limit) if len(unpredicted_txns) == limit else 0,
         }
 

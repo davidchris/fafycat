@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
 
     # Include API routes
     from api.analytics import router as analytics_router
+    from api.budgets import router as budgets_router
     from api.categories import router as categories_router
     from api.export import router as export_router
     from api.ml import router as ml_router
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(upload_router, prefix="/api")
     app.include_router(ml_router, prefix="/api")
     app.include_router(export_router, prefix="/api")
+    app.include_router(budgets_router)
     app.include_router(analytics_router)
 
     # Include web routes (FastHTML)
