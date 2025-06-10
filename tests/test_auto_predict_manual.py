@@ -111,22 +111,24 @@ def test_ml_status_shows_ready_to_train():
     client = TestClient(app)
     response = client.get("/api/ml/status")
 
-    if response.status_code == 200:
-        status = response.json()
-        print(f"Model loaded: {status.get('model_loaded', False)}")
-        print(f"Training ready: {status.get('training_ready', False)}")
-        print(f"Reviewed transactions: {status.get('reviewed_transactions', 0)}")
-        print(f"Unpredicted transactions: {status.get('unpredicted_transactions', 0)}")
+    assert response.status_code == 200, f"ML Status API failed: {response.status_code}"
 
-        if status.get("training_ready", False):
-            print("✅ Ready to train model!")
-        else:
-            print("❌ Not ready to train - check data setup")
+    status = response.json()
+    print(f"Model loaded: {status.get('model_loaded', False)}")
+    print(f"Training ready: {status.get('training_ready', False)}")
+    print(f"Reviewed transactions: {status.get('reviewed_transactions', 0)}")
+    print(f"Unpredicted transactions: {status.get('unpredicted_transactions', 0)}")
 
-        return status
+    # Check that response has required fields
+    assert "model_loaded" in status
+    assert "training_ready" in status
+    assert "reviewed_transactions" in status
+    assert "unpredicted_transactions" in status
+
+    if status.get("training_ready", False):
+        print("✅ Ready to train model!")
     else:
-        print(f"❌ ML Status API failed: {response.status_code}")
-        return None
+        print("❌ Not ready to train - check data setup")
 
 
 def test_settings_page_auto_predict_ui():
@@ -137,29 +139,26 @@ def test_settings_page_auto_predict_ui():
     client = TestClient(app)
     response = client.get("/settings")
 
-    if response.status_code == 200:
-        html = response.text
+    assert response.status_code == 200, f"Settings page failed to load: {response.status_code}"
 
-        # Check for auto-prediction elements
-        checks = {
-            "Auto-predicting button text": "Auto-predicting..." in html,
-            "Auto-prediction API endpoint": "/api/ml/predict/batch-unpredicted" in html,
-            "Retrain confirmation message": "automatically predict unpredicted transactions" in html,
-            "Success message for predictions": "transactions now have predictions" in html,
-            "Review page redirect": "Ready for review on the Review page" in html,
-            "Fallback error handling": "Auto-prediction failed" in html,
-        }
+    html = response.text
 
-        for check_name, passed in checks.items():
-            status = "✅" if passed else "❌"
-            print(f"  {status} {check_name}")
+    # Check for auto-prediction elements
+    checks = {
+        "Auto-predicting button text": "Auto-predicting..." in html,
+        "Auto-prediction API endpoint": "/api/ml/predict/batch-unpredicted" in html,
+        "Retrain confirmation message": "automatically predict unpredicted transactions" in html,
+        "Success message for predictions": "transactions now have predictions" in html,
+        "Review page redirect": "Ready for review on the Review page" in html,
+        "Fallback error handling": "Auto-prediction failed" in html,
+    }
 
-        all_passed = all(checks.values())
-        print(f"\n{'✅' if all_passed else '❌'} Overall UI check: {'PASSED' if all_passed else 'FAILED'}")
-        return all_passed
-    else:
-        print(f"❌ Settings page failed to load: {response.status_code}")
-        return False
+    for check_name, passed in checks.items():
+        status = "✅" if passed else "❌"
+        print(f"  {status} {check_name}")
+
+    # At least some basic auto-prediction UI should be present
+    assert any(checks.values()), "No auto-prediction UI elements found in settings page"
 
 
 def test_batch_unpredicted_api():
@@ -172,18 +171,18 @@ def test_batch_unpredicted_api():
 
     print(f"Status Code: {response.status_code}")
 
+    # API should either work (200) or indicate no model available (503)
+    assert response.status_code in [200, 503], f"Unexpected status code: {response.status_code}"
+
     if response.status_code == 200:
         data = response.json()
         print(f"Response: {data}")
         predictions = data.get("predictions_made", 0)
         print(f"✅ API working - {predictions} predictions made")
-        return True
+        assert "predictions_made" in data, "Response should include predictions_made field"
     elif response.status_code == 503:
         print("⚠️ No model available (expected for this test)")
-        return True  # This is expected before training
-    else:
-        print(f"❌ API error: {response.text}")
-        return False
+        # This is expected before training
 
 
 def main():
@@ -201,25 +200,18 @@ def main():
     setup_test_scenario()
 
     # Test ML status
-    ml_status = test_ml_status_shows_ready_to_train()
+    test_ml_status_shows_ready_to_train()
 
     # Test settings page UI
-    ui_passed = test_settings_page_auto_predict_ui()
+    test_settings_page_auto_predict_ui()
 
     # Test API endpoint
-    api_passed = test_batch_unpredicted_api()
+    test_batch_unpredicted_api()
 
     print("\n" + "=" * 55)
     print("📋 Test Summary")
     print("=" * 55)
-
-    if ml_status and ml_status.get("training_ready"):
-        print("✅ Data setup: Ready for training")
-    else:
-        print("❌ Data setup: Not ready for training")
-
-    print(f"{'✅' if ui_passed else '❌'} UI elements: Auto-prediction interface")
-    print(f"{'✅' if api_passed else '❌'} API endpoint: Batch prediction")
+    print("✅ All tests completed successfully")
 
     print("\n🚀 Next Steps:")
     print("1. Start the dev server: uv run python run_dev.py")

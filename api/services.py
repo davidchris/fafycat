@@ -317,15 +317,31 @@ class AnalyticsService:
         session: Session, start_date: date | None = None, end_date: date | None = None
     ) -> dict[str, Any]:
         """Get budget vs actual spending variance by category with year-specific budgets."""
-        # Default to current month if no dates provided
+        start_date, end_date = AnalyticsService._get_default_dates(start_date, end_date)
+
+        # Get transaction data grouped by category and year
+        category_data = AnalyticsService._get_transaction_category_data(session, start_date, end_date)
+
+        # Include categories with budgets but no transactions
+        AnalyticsService._add_budgeted_categories_without_transactions(session, category_data, start_date, end_date)
+
+        # Build final variance data
+        return AnalyticsService._build_variance_result(category_data, start_date, end_date)
+
+    @staticmethod
+    def _get_default_dates(start_date: date | None, end_date: date | None) -> tuple[date, date]:
+        """Get default start and end dates if not provided."""
         if not start_date:
             today = date.today()
             start_date = today.replace(day=1)
         if not end_date:
             end_date = date.today()
+        return start_date, end_date
 
+    @staticmethod
+    def _get_transaction_category_data(session: Session, start_date: date, end_date: date) -> dict[int, dict]:
+        """Get transaction data grouped by category and year."""
         # Group transactions by year and category to handle cross-year periods
-        # Use COALESCE to get effective category (actual takes precedence over predicted)
         query = (
             session.query(
                 CategoryORM.id,
@@ -346,21 +362,12 @@ class AnalyticsService:
         )
 
         results = query.all()
-
-        # Group results by category and calculate year-specific budgets
         category_data = {}
 
         for result in results:
             category_id = result.id
             category_name = result.name
             year = int(result.year)
-
-            # Use actual transaction amounts as-is for budget comparison
-            # Budgets represent the expected money flow for each category
-            # - Spending budget: positive value (e.g., 500€), compared against net spending (negative amounts)
-            # - Income budget: positive value (e.g., 3000€), compared against net income (positive amounts)
-            # - A refund (+50) in spending category reduces net spending by 50
-            # - An expense (-50) in income category reduces net income by 50
             actual_amount = float(result.actual_amount)
 
             if category_id not in category_data:
@@ -371,14 +378,10 @@ class AnalyticsService:
                     "total_budget": 0,
                 }
 
-            # Get year-specific budget for this category and year
+            # Get year-specific budget and calculate period budget
             year_budget = BudgetService.get_budget_for_category_year(session, category_id, year)
-
-            # Calculate monthly budget for the period within this year
             year_start = max(start_date, date(year, 1, 1))
             year_end = min(end_date, date(year, 12, 31))
-
-            # Calculate number of months in this year for the period
             months_in_year = (year_end.year - year_start.year) * 12 + year_end.month - year_start.month + 1
             period_budget = year_budget * months_in_year
 
@@ -391,35 +394,24 @@ class AnalyticsService:
             category_data[category_id]["total_actual"] += actual_amount
             category_data[category_id]["total_budget"] += period_budget
 
-        # Also include categories with budgets but no transactions
+        return category_data
+
+    @staticmethod
+    def _add_budgeted_categories_without_transactions(
+        session: Session, category_data: dict[int, dict], start_date: date, end_date: date
+    ) -> None:
+        """Add categories with budgets but no transactions to the data."""
         spending_categories = (
             session.query(CategoryORM).filter(CategoryORM.type == CategoryType.SPENDING, CategoryORM.is_active).all()
         )
 
         for category in spending_categories:
             if category.id not in category_data:
-                # Calculate budget for this category across the date range
-                total_budget = 0
+                total_budget = AnalyticsService._calculate_total_budget_for_period(
+                    session, category.id, start_date, end_date
+                )
 
-                # Handle cross-year periods
-                current_date = start_date
-                while current_date <= end_date:
-                    year = current_date.year
-                    year_budget = BudgetService.get_budget_for_category_year(session, category.id, year)
-
-                    # Calculate months in this year for the period
-                    year_start = max(start_date, date(year, 1, 1))
-                    year_end = min(end_date, date(year, 12, 31))
-                    months_in_year = (year_end.year - year_start.year) * 12 + year_end.month - year_start.month + 1
-
-                    total_budget += year_budget * months_in_year
-
-                    # Move to next year
-                    current_date = date(year + 1, 1, 1)
-                    if current_date > end_date:
-                        break
-
-                if total_budget > 0:  # Only include if there's a budget set
+                if total_budget > 0:
                     category_data[category.id] = {
                         "category_name": category.name,
                         "yearly_data": {},
@@ -427,7 +419,33 @@ class AnalyticsService:
                         "total_budget": total_budget,
                     }
 
-        # Build final variance data
+    @staticmethod
+    def _calculate_total_budget_for_period(
+        session: Session, category_id: int, start_date: date, end_date: date
+    ) -> float:
+        """Calculate total budget for a category across a date range."""
+        total_budget = 0
+        current_date = start_date
+
+        while current_date <= end_date:
+            year = current_date.year
+            year_budget = BudgetService.get_budget_for_category_year(session, category_id, year)
+
+            year_start = max(start_date, date(year, 1, 1))
+            year_end = min(end_date, date(year, 12, 31))
+            months_in_year = (year_end.year - year_start.year) * 12 + year_end.month - year_start.month + 1
+
+            total_budget += year_budget * months_in_year
+
+            current_date = date(year + 1, 1, 1)
+            if current_date > end_date:
+                break
+
+        return total_budget
+
+    @staticmethod
+    def _build_variance_result(category_data: dict[int, dict], start_date: date, end_date: date) -> dict[str, Any]:
+        """Build the final variance result from category data."""
         variances = []
         total_budget = 0
         total_actual = 0
@@ -436,14 +454,12 @@ class AnalyticsService:
             budget = data["total_budget"]
             actual = data["total_actual"]
 
-            # Adjust variance calculation to handle spending categories properly
-            # For spending categories: convert negative net spending to positive amount for comparison
-            # This way: budget=500€, actual=-300€ becomes budget=500€, displayed_actual=300€, variance=200€
-            if budget > 0 and actual <= 0:  # Likely a spending category
-                displayed_actual = abs(actual)  # Show as positive spending amount
-                variance = budget - displayed_actual  # Positive = under budget, Negative = over budget
+            # Calculate variance based on spending vs income categories
+            if budget > 0 and actual <= 0:  # Spending category
+                displayed_actual = abs(actual)
+                variance = budget - displayed_actual
                 variance_pct = (variance / budget * 100) if budget > 0 else 0
-            else:  # Income/saving categories with positive actuals
+            else:  # Income/saving categories
                 displayed_actual = actual
                 variance = budget - actual
                 variance_pct = (variance / budget * 100) if budget > 0 else 0
@@ -453,7 +469,7 @@ class AnalyticsService:
                     "category_id": category_id,
                     "category_name": data["category_name"],
                     "budget": budget,
-                    "actual": displayed_actual,  # Use the display-friendly actual amount
+                    "actual": displayed_actual,
                     "variance": variance,
                     "variance_percentage": variance_pct,
                     "is_overspent": variance < 0,
@@ -464,7 +480,6 @@ class AnalyticsService:
             total_budget += budget
             total_actual += actual
 
-        # Sort by absolute variance (largest deviations first)
         variances.sort(key=lambda x: abs(x["variance"]), reverse=True)
 
         return {
@@ -485,18 +500,37 @@ class AnalyticsService:
         session: Session, year: int | None = None, start_date: date | None = None, end_date: date | None = None
     ) -> dict[str, Any]:
         """Get monthly income/spending/saving breakdown."""
+        start_date, end_date, year = AnalyticsService._get_monthly_summary_dates(year, start_date, end_date)
+
+        # Query for monthly aggregations by category type
+        results = AnalyticsService._query_monthly_transactions(session, start_date, end_date)
+
+        # Initialize and populate monthly data
+        monthly_data = AnalyticsService._initialize_monthly_data(start_date, end_date)
+        AnalyticsService._populate_monthly_data(monthly_data, results)
+        AnalyticsService._calculate_profit_loss_and_cumulative(monthly_data)
+
+        return AnalyticsService._build_monthly_summary_result(monthly_data, year)
+
+    @staticmethod
+    def _get_monthly_summary_dates(
+        year: int | None, start_date: date | None, end_date: date | None
+    ) -> tuple[date, date, int | None]:
+        """Get the start and end dates for monthly summary."""
         if not year and not start_date:
             year = date.today().year
 
-        # If only year is provided, set date range
         if year and not start_date:
             start_date = date(year, 1, 1)
             end_date = date(year, 12, 31)
         elif not end_date:
             end_date = date.today()
 
-        # Query for monthly aggregations by category type
-        # Use COALESCE to get effective category (actual takes precedence over predicted)
+        return start_date, end_date, year
+
+    @staticmethod
+    def _query_monthly_transactions(session: Session, start_date: date, end_date: date):
+        """Query monthly transaction aggregations by category type."""
         query = (
             session.query(
                 func.strftime("%m", TransactionORM.date).label("month"),
@@ -512,14 +546,13 @@ class AnalyticsService:
             .group_by(func.strftime("%m", TransactionORM.date), CategoryORM.type)
             .order_by(func.strftime("%m", TransactionORM.date))
         )
+        return query.all()
 
-        results = query.all()
-
-        # Initialize monthly data structure for the specified date range only
+    @staticmethod
+    def _initialize_monthly_data(start_date: date, end_date: date) -> dict[str, dict]:
+        """Initialize monthly data structure for the specified date range."""
         monthly_data = {}
-
-        # Generate months only within the specified date range
-        current_date = start_date.replace(day=1)  # Start from first day of start month
+        current_date = start_date.replace(day=1)
         end_month = end_date.replace(day=1)
 
         while current_date <= end_month:
@@ -529,15 +562,20 @@ class AnalyticsService:
                 "income": 0.0,
                 "spending": 0.0,
                 "saving": 0.0,
-                "profit_loss": 0.0,  # income - spending (excluding savings)
+                "profit_loss": 0.0,
             }
+
             # Move to next month
             if current_date.month == 12:
                 current_date = current_date.replace(year=current_date.year + 1, month=1)
             else:
                 current_date = current_date.replace(month=current_date.month + 1)
 
-        # Populate with actual data
+        return monthly_data
+
+    @staticmethod
+    def _populate_monthly_data(monthly_data: dict[str, dict], results) -> None:
+        """Populate monthly data with transaction results."""
         for result in results:
             month = result.month
             category_type = result.type
@@ -551,18 +589,18 @@ class AnalyticsService:
                 elif category_type == CategoryType.SAVING:
                     monthly_data[month]["saving"] = amount
 
-        # Calculate profit/loss for each month
-        for month_data in monthly_data.values():
-            # Since spending is stored as negative amounts, we need to add it (or subtract abs value)
-            # income - abs(spending) = income + spending (since spending is negative)
-            month_data["profit_loss"] = month_data["income"] + month_data["spending"]
-
-        # Calculate cumulative profit/loss
+    @staticmethod
+    def _calculate_profit_loss_and_cumulative(monthly_data: dict[str, dict]) -> None:
+        """Calculate profit/loss and cumulative profit/loss for each month."""
         cumulative_profit_loss = 0
         for month_data in monthly_data.values():
+            month_data["profit_loss"] = month_data["income"] + month_data["spending"]
             cumulative_profit_loss += month_data["profit_loss"]
             month_data["cumulative_profit_loss"] = cumulative_profit_loss
 
+    @staticmethod
+    def _build_monthly_summary_result(monthly_data: dict[str, dict], year: int | None) -> dict[str, Any]:
+        """Build the final monthly summary result."""
         return {
             "year": year,
             "monthly_data": list(monthly_data.values()),

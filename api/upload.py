@@ -20,118 +20,125 @@ upload_sessions = {}
 
 def _predict_transaction_categories(db: Session, transactions: list, new_count: int) -> int:
     """Predict categories for newly uploaded transactions with active learning selection."""
+    if new_count <= 0:
+        return 0
+
+    try:
+        return _perform_predictions(db, transactions)
+    except Exception as e:
+        _handle_prediction_error(e)
+        return 0
+
+
+def _perform_predictions(db: Session, transactions: list) -> int:
+    """Perform ML predictions on transactions."""
+    from api.ml import get_categorizer
+    from src.fafycat.core.database import TransactionORM
+
+    categorizer = get_categorizer(db)
+
+    # Get newly imported transactions for prediction
+    new_transaction_ids = [t.generate_id() for t in transactions]
+    new_txns = (
+        db.query(TransactionORM)
+        .filter(TransactionORM.id.in_(new_transaction_ids))
+        .filter(TransactionORM.predicted_category_id.is_(None))
+        .all()
+    )
+
+    if not new_txns:
+        return 0
+
+    # Convert and predict
+    txn_inputs = _convert_to_transaction_inputs(new_txns)
+    predictions = categorizer.predict_with_confidence(txn_inputs)
+
+    # Apply hybrid categorization strategy
+    return _apply_hybrid_categorization_strategy(db, new_txns, predictions)
+
+
+def _convert_to_transaction_inputs(new_txns):
+    """Convert ORM transactions to TransactionInput objects."""
+    from src.fafycat.core.models import TransactionInput
+
+    txn_inputs = []
+    for txn in new_txns:
+        txn_input = TransactionInput(
+            date=txn.date,
+            value_date=txn.value_date or txn.date,
+            name=txn.name,
+            purpose=txn.purpose or "",
+            amount=txn.amount,
+            currency=txn.currency,
+        )
+        txn_inputs.append(txn_input)
+    return txn_inputs
+
+
+def _apply_hybrid_categorization_strategy(db: Session, new_txns, predictions) -> int:
+    """Apply hybrid categorization using confidence scores and active learning."""
+    from src.fafycat.core.models import TransactionPrediction
+    from src.fafycat.ml.active_learning import ActiveLearningSelector
+
+    # Get active learning strategic selections
+    al_selector = ActiveLearningSelector(db)
+    al_predictions = [
+        TransactionPrediction(
+            transaction_id=txn.id,
+            predicted_category_id=prediction.predicted_category_id,
+            confidence_score=prediction.confidence_score,
+            feature_contributions=prediction.feature_contributions,
+        )
+        for txn, prediction in zip(new_txns, predictions, strict=True)
+    ]
+
+    max_review_items = min(20, len(al_predictions))
+    strategic_selections = set(
+        al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
+    )
+
+    # Apply categorization logic
     predictions_made = 0
-    if new_count > 0:
-        try:
-            from api.ml import get_categorizer
+    confidence_threshold = 0.95
 
-            categorizer = get_categorizer(db)
+    for txn, prediction in zip(new_txns, predictions, strict=True):
+        _categorize_transaction(txn, prediction, strategic_selections, confidence_threshold)
+        predictions_made += 1
 
-            # Get newly imported transactions for prediction
-            new_transaction_ids = [t.generate_id() for t in transactions]
-            from src.fafycat.core.database import TransactionORM
-
-            new_txns = (
-                db.query(TransactionORM)
-                .filter(TransactionORM.id.in_(new_transaction_ids))
-                .filter(TransactionORM.predicted_category_id.is_(None))  # Only predict for unpredicted transactions
-                .all()
-            )
-
-            if new_txns:
-                # Convert to TransactionInput for prediction
-                txn_inputs = []
-                for txn in new_txns:
-                    from src.fafycat.core.models import TransactionInput
-
-                    txn_input = TransactionInput(
-                        date=txn.date,
-                        value_date=txn.value_date or txn.date,
-                        name=txn.name,
-                        purpose=txn.purpose or "",
-                        amount=txn.amount,
-                        currency=txn.currency,
-                    )
-                    txn_inputs.append(txn_input)
-
-                # Get predictions
-                predictions = categorizer.predict_with_confidence(txn_inputs)
-
-                # Use hybrid approach: confidence-first with active learning prioritization
-                from src.fafycat.ml.active_learning import ActiveLearningSelector
-
-                al_selector = ActiveLearningSelector(db)
-
-                # Convert predictions to TransactionPrediction format for active learning
-                from src.fafycat.core.models import TransactionPrediction
-
-                al_predictions = []
-                for txn, prediction in zip(new_txns, predictions, strict=True):
-                    al_pred = TransactionPrediction(
-                        transaction_id=txn.id,
-                        predicted_category_id=prediction.predicted_category_id,
-                        confidence_score=prediction.confidence_score,
-                        feature_contributions=prediction.feature_contributions,
-                    )
-                    al_predictions.append(al_pred)
-
-                # Get active learning strategic selections from ALL predictions
-                max_review_items = min(20, len(al_predictions))  # Limit to 20 strategic selections
-                strategic_selections = set(
-                    al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
-                )
-
-                # Hybrid categorization: confidence + active learning priority
-                auto_accepted = 0
-                high_priority_review = 0
-                standard_review = 0
-                confidence_threshold = 0.95  # Conservative threshold for auto-acceptance
-
-                for txn, prediction in zip(new_txns, predictions, strict=True):
-                    txn.predicted_category_id = prediction.predicted_category_id
-                    txn.confidence_score = prediction.confidence_score
-
-                    if prediction.confidence_score >= confidence_threshold:
-                        # High confidence - check if active learning flagged it for quality validation
-                        if txn.id in strategic_selections:
-                            # High confidence but flagged for quality check
-                            txn.is_reviewed = False
-                            txn.review_priority = "quality_check"
-                            high_priority_review += 1
-                        else:
-                            # High confidence and not flagged - auto accept
-                            txn.category_id = prediction.predicted_category_id  # Copy predicted to actual category
-                            txn.is_reviewed = True
-                            txn.review_priority = "auto_accepted"
-                            auto_accepted += 1
-                    else:
-                        # Lower confidence - definitely needs review
-                        txn.is_reviewed = False
-                        if txn.id in strategic_selections:
-                            txn.review_priority = "high"
-                            high_priority_review += 1
-                        else:
-                            txn.review_priority = "standard"
-                            standard_review += 1
-
-                    predictions_made += 1
-
-                db.commit()
-
-        except Exception as e:
-            # Don't fail upload if ML prediction fails, just log it
-            import logging
-
-            # Check if this is expected "no model" case vs actual error
-            error_msg = str(e)
-            if "No trained ML model found" in error_msg:
-                logging.info(
-                    "No ML model available for predictions during upload - this is expected for new installations"
-                )
-            else:
-                logging.warning("ML prediction failed during upload: %s", e)
-
+    db.commit()
     return predictions_made
+
+
+def _categorize_transaction(txn, prediction, strategic_selections, confidence_threshold):
+    """Categorize a single transaction based on confidence and active learning flags."""
+    txn.predicted_category_id = prediction.predicted_category_id
+    txn.confidence_score = prediction.confidence_score
+
+    if prediction.confidence_score >= confidence_threshold:
+        if txn.id in strategic_selections:
+            # High confidence but flagged for quality check
+            txn.is_reviewed = False
+            txn.review_priority = "quality_check"
+        else:
+            # High confidence and not flagged - auto accept
+            txn.category_id = prediction.predicted_category_id
+            txn.is_reviewed = True
+            txn.review_priority = "auto_accepted"
+    else:
+        # Lower confidence - needs review
+        txn.is_reviewed = False
+        txn.review_priority = "high" if txn.id in strategic_selections else "standard"
+
+
+def _handle_prediction_error(e: Exception):
+    """Handle prediction errors gracefully."""
+    import logging
+
+    error_msg = str(e)
+    if "No trained ML model found" in error_msg:
+        logging.info("No ML model available for predictions during upload - this is expected for new installations")
+    else:
+        logging.warning("ML prediction failed during upload: %s", e)
 
 
 @router.post("/csv", response_model=UploadResponse)

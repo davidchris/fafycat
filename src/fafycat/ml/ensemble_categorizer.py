@@ -16,6 +16,69 @@ from .cross_validation import StratifiedKFoldValidator
 from .naive_bayes_classifier import NaiveBayesTextClassifier
 
 
+class LightGBMWrapper:
+    """Wrapper for LightGBM that matches the scikit-learn interface expected by cross-validation."""
+
+    def __init__(self, session: Session, config: MLConfig) -> None:
+        from sklearn.preprocessing import LabelEncoder
+
+        self.categorizer = TransactionCategorizer(session, config)
+        self.label_encoder: LabelEncoder | None = None
+
+    def fit(self, transactions: list[TransactionInput], labels: np.ndarray) -> None:
+        self._fit_label_encoder(labels)
+        self.categorizer.train(test_size=0.0)
+
+    def predict_proba(self, transactions: list[TransactionInput]) -> np.ndarray:
+        self._validate_fitted()
+        predictions = self.categorizer.predict_with_confidence(transactions)
+        return self._convert_predictions_to_probabilities(predictions)
+
+    def predict(self, transactions: list[TransactionInput]) -> np.ndarray:
+        self._validate_fitted()
+        probas = self.predict_proba(transactions)
+        predictions = np.argmax(probas, axis=1)
+        return self.label_encoder.inverse_transform(predictions)
+
+    def _fit_label_encoder(self, labels: np.ndarray) -> None:
+        """Fit the label encoder with the provided labels."""
+        from sklearn.preprocessing import LabelEncoder
+
+        self.label_encoder = LabelEncoder()
+        self.label_encoder.fit_transform(labels)
+
+    def _validate_fitted(self) -> None:
+        """Validate that the model has been fitted."""
+        if self.label_encoder is None:
+            raise ValueError("Model must be fitted before making predictions")
+
+    def _convert_predictions_to_probabilities(self, predictions) -> np.ndarray:
+        """Convert predictions to probability matrix."""
+        n_classes = len(self.label_encoder.classes_)
+        probas = np.zeros((len(predictions), n_classes))
+
+        for i, pred in enumerate(predictions):
+            self._set_prediction_probabilities(probas, i, pred, n_classes)
+
+        return probas
+
+    def _set_prediction_probabilities(self, probas: np.ndarray, i: int, pred, n_classes: int) -> None:
+        """Set probabilities for a single prediction."""
+        if pred.predicted_category_id in self.label_encoder.classes_:
+            class_idx = np.where(self.label_encoder.classes_ == pred.predicted_category_id)[0][0]
+            probas[i, class_idx] = pred.confidence_score
+
+            # Distribute remaining probability equally among other classes
+            remaining_prob = 1.0 - pred.confidence_score
+            other_prob = remaining_prob / (n_classes - 1)
+            for j in range(n_classes):
+                if j != class_idx:
+                    probas[i, j] = other_prob
+        else:
+            # Uniform distribution if category not in training set
+            probas[i, :] = 1.0 / n_classes
+
+
 class EnsembleCategorizer:
     """Ensemble categorizer combining LightGBM and Naive Bayes models."""
 
@@ -218,66 +281,6 @@ class EnsembleCategorizer:
 
         return probas
 
-    def _create_lgbm_wrapper_class(self) -> type:
-        """Create a wrapper class for LightGBM that matches the interface expected by CV."""
-
-        class LightGBMWrapper:
-            def __init__(self, session: Session, config: MLConfig) -> None:
-                from sklearn.preprocessing import LabelEncoder
-
-                self.categorizer = TransactionCategorizer(session, config)
-                self.label_encoder: LabelEncoder | None = None
-
-            def fit(self, transactions: list[TransactionInput], labels: np.ndarray) -> None:
-                # Convert labels to appropriate format and store the encoder
-                from sklearn.preprocessing import LabelEncoder
-
-                self.label_encoder = LabelEncoder()
-                self.label_encoder.fit_transform(labels)
-
-                # We need to temporarily store the transactions with labels in the database
-                # This is a simplified approach - in practice you might want a more sophisticated method
-                # For now, we'll just use the existing train method
-                self.categorizer.train(test_size=0.0)
-
-            def predict_proba(self, transactions: list[TransactionInput]) -> np.ndarray:
-                if self.label_encoder is None:
-                    raise ValueError("Model must be fitted before making predictions")
-
-                predictions = self.categorizer.predict_with_confidence(transactions)
-
-                # Convert to probability matrix
-                n_classes = len(self.label_encoder.classes_)
-                probas = np.zeros((len(transactions), n_classes))
-
-                for i, pred in enumerate(predictions):
-                    # Find the class index
-                    if pred.predicted_category_id in self.label_encoder.classes_:
-                        class_idx = np.where(self.label_encoder.classes_ == pred.predicted_category_id)[0][0]
-                        # Set high probability for predicted class, low for others
-                        probas[i, class_idx] = pred.confidence_score
-                        # Distribute remaining probability equally among other classes
-                        remaining_prob = 1.0 - pred.confidence_score
-                        other_prob = remaining_prob / (n_classes - 1)
-                        for j in range(n_classes):
-                            if j != class_idx:
-                                probas[i, j] = other_prob
-                    else:
-                        # Uniform distribution if category not in training set
-                        probas[i, :] = 1.0 / n_classes
-
-                return probas
-
-            def predict(self, transactions: list[TransactionInput]) -> np.ndarray:
-                if self.label_encoder is None:
-                    raise ValueError("Model must be fitted before making predictions")
-
-                probas = self.predict_proba(transactions)
-                predictions = np.argmax(probas, axis=1)
-                return self.label_encoder.inverse_transform(predictions)
-
-        return LightGBMWrapper
-
     def predict_with_confidence(self, transactions: list[TransactionInput]) -> list[TransactionPrediction]:
         """Ensemble prediction combining LightGBM + Naive Bayes."""
         if not self.is_trained:
@@ -390,7 +393,7 @@ class EnsembleCategorizer:
         # Compare individual models vs ensemble
         models_config = {
             "lightgbm": {
-                "class": self._create_lgbm_wrapper_class(),
+                "class": LightGBMWrapper,
                 "params": {"session": self.session, "config": self.config},
             },
             "naive_bayes": {
