@@ -1,9 +1,34 @@
 [project]
 name = "fafycat"
 version = "0.1.0"
-description = "Family Finances Categorizer"
+description = "Local-first transaction categorization with ML"
 readme = "README.md"
 requires-python = ">=3.13"
+license = {text = "Apache License 2.0"}
+authors = [
+    {name = "David Wilde"},
+]
+maintainers = [
+    {name = "David Wilde"},
+]
+keywords = ["finance", "budgeting", "machine-learning", "transaction-categorization", "privacy"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Office/Business :: Financial :: Accounting",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+]
+
+[project.urls]
+Homepage = "https://github.com/davidchris/fafycat"
+Repository = "https://github.com/davidchris/fafycat"
+Issues = "https://github.com/davidchris/fafycat/issues"
+Documentation = "https://github.com/davidchris/fafycat#readme"
 dependencies = [
     "alembic>=1.16.1",
     "fastapi>=0.115.12",

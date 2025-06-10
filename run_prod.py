@@ -10,8 +10,10 @@ from pathlib import Path
 def main():
     """Run FafyCat in production mode."""
     # Set production environment
-    os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_prod.db"
-    os.environ["FAFYCAT_ENV"] = "production"
+    os.environ.setdefault("FAFYCAT_DB_URL", "sqlite:///data/fafycat_prod.db")
+    os.environ.setdefault("FAFYCAT_ENV", "production")
+    os.environ.setdefault("FAFYCAT_PROD_PORT", "8000")
+    os.environ.setdefault("FAFYCAT_HOST", "0.0.0.0")
 
     app_dir = Path(__file__).parent
 
@@ -19,14 +21,15 @@ def main():
     print(f"📊 Database: {os.environ['FAFYCAT_DB_URL']}")
     print("💰 Using real transaction data")
     print("⚠️  Make sure you have imported your real data!")
-    print("🌐 Web UI will be available at: http://localhost:8000")
-    print("📚 API docs available at: http://localhost:8000/docs")
+    port = os.environ.get("FAFYCAT_PROD_PORT", "8000")
+    print(f"🌐 Web UI will be available at: http://localhost:{port}")
+    print(f"📚 API docs available at: http://localhost:{port}/docs")
     print("-" * 50)
 
     try:
-        subprocess.run(
-            [sys.executable, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"], cwd=app_dir
-        )
+        port = os.environ.get("FAFYCAT_PROD_PORT", "8000")
+        host = os.environ.get("FAFYCAT_HOST", "0.0.0.0")
+        subprocess.run([sys.executable, "-m", "uvicorn", "main:app", "--host", host, "--port", port], cwd=app_dir)
     except KeyboardInterrupt:
         print("\n👋 FafyCat production mode stopped.")
 

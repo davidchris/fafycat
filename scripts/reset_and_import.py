@@ -117,8 +117,8 @@ def main():
     parser.add_argument(
         "--labeled-data-path",
         type=Path,
-        default=Path("/Users/david/dev/fafycat-v1/dev_data/labeld"),
-        help="Path to directory containing labeled CSV files (default: fafycat-v1 location)",
+        default=Path(os.getenv("FAFYCAT_LABELED_DATA_PATH", "data/labeled")),
+        help="Path to directory containing labeled CSV files (default: data/labeled)",
     )
     parser.add_argument("--train-model", action="store_true", help="Train ML model after importing data")
     parser.add_argument(

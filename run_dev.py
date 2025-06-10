@@ -45,8 +45,10 @@ def setup_dev_database():
 def main():
     """Run FafyCat in development mode."""
     # Set development environment
-    os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_dev.db"
-    os.environ["FAFYCAT_ENV"] = "development"
+    os.environ.setdefault("FAFYCAT_DB_URL", "sqlite:///data/fafycat_dev.db")
+    os.environ.setdefault("FAFYCAT_ENV", "development")
+    os.environ.setdefault("FAFYCAT_DEV_PORT", "8001")
+    os.environ.setdefault("FAFYCAT_HOST", "0.0.0.0")
 
     app_dir = Path(__file__).parent
 
@@ -56,13 +58,17 @@ def main():
     # Setup dev database with test data
     setup_dev_database()
 
-    print("🌐 Web UI will be available at: http://localhost:8001")
-    print("📚 API docs available at: http://localhost:8001/docs")
+    port = os.environ.get("FAFYCAT_DEV_PORT", "8001")
+    host = os.environ.get("FAFYCAT_HOST", "0.0.0.0")
+    print(f"🌐 Web UI will be available at: http://localhost:{port}")
+    print(f"📚 API docs available at: http://localhost:{port}/docs")
     print("-" * 50)
 
     try:
+        port = os.environ.get("FAFYCAT_DEV_PORT", "8001")
+        host = os.environ.get("FAFYCAT_HOST", "0.0.0.0")
         subprocess.run(
-            [sys.executable, "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8001"],
+            [sys.executable, "-m", "uvicorn", "main:app", "--reload", "--host", host, "--port", port],
             cwd=app_dir,
         )
     except KeyboardInterrupt:
