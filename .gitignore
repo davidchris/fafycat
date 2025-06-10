@@ -12,3 +12,6 @@ wheels/
 # databases
 *.db
 *.pkl
+
+.DS_Store
+data/
