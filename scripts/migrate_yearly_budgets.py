@@ -30,9 +30,7 @@ def migrate_yearly_budgets():
 
     with db_manager.get_session() as session:
         # Get all categories with budgets > 0
-        categories_with_budgets = (
-            session.query(CategoryORM).filter(CategoryORM.budget > 0, CategoryORM.is_active).all()
-        )
+        categories_with_budgets = session.query(CategoryORM).filter(CategoryORM.budget > 0, CategoryORM.is_active).all()
 
         print(f"📋 Found {len(categories_with_budgets)} categories with budgets to migrate")
 

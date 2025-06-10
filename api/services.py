@@ -393,9 +393,7 @@ class AnalyticsService:
 
         # Also include categories with budgets but no transactions
         spending_categories = (
-            session.query(CategoryORM)
-            .filter(CategoryORM.type == CategoryType.SPENDING, CategoryORM.is_active)
-            .all()
+            session.query(CategoryORM).filter(CategoryORM.type == CategoryType.SPENDING, CategoryORM.is_active).all()
         )
 
         for category in spending_categories:
@@ -863,9 +861,7 @@ class BudgetService:
     def set_budget_for_category_year(session: Session, category_id: int, year: int, monthly_budget: float) -> bool:
         """Set or update budget for a specific category and year."""
         # Check if category exists and is active
-        category = (
-            session.query(CategoryORM).filter(CategoryORM.id == category_id, CategoryORM.is_active).first()
-        )
+        category = session.query(CategoryORM).filter(CategoryORM.id == category_id, CategoryORM.is_active).first()
 
         if not category:
             return False
