@@ -16,7 +16,7 @@ from fafycat.core.config import AppConfig
 from fafycat.core.database import CategoryORM, DatabaseManager, TransactionORM
 
 
-def fix_missing_categories():
+def fix_missing_categories() -> None:
     """Fix transactions with missing category assignments based on merchant patterns."""
 
     config = AppConfig()

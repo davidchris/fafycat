@@ -101,7 +101,7 @@ def parse_labeled_csv(file_path: Path) -> list[TransactionInput]:
     return transactions
 
 
-def import_all_labeled_data(data_path: Path = None):
+def import_all_labeled_data(data_path: Path | None = None) -> None:
     """Import all labeled data files."""
     # Path to labeled data - use provided path or environment variable
     default_path = os.getenv("FAFYCAT_LABELED_DATA_PATH", "data/labeled")
@@ -189,7 +189,7 @@ def import_all_labeled_data(data_path: Path = None):
         print("  5. Review predictions on new transactions")
 
 
-def check_categories(data_path: Path = None):
+def check_categories(data_path: Path | None = None) -> set:
     """Check what categories exist in the labeled data."""
     default_path = os.getenv("FAFYCAT_LABELED_DATA_PATH", "data/labeled")
     labeled_data_dir = Path(default_path) if data_path is None else data_path
@@ -223,7 +223,7 @@ def check_categories(data_path: Path = None):
     return all_categories
 
 
-def main():
+def main() -> None:
     """Main import function."""
     import argparse
 

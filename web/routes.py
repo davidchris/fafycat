@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 @router.get("/app", response_class=HTMLResponse)
-async def main_app(request: Request):
+async def main_app(request: Request) -> HTMLResponse:
     """Main application page."""
     content = """
     <div class="container mx-auto px-4 py-8">
@@ -27,7 +27,7 @@ async def main_app(request: Request):
 
 
 @router.get("/import", response_class=HTMLResponse)
-async def import_page(request: Request):
+async def import_page(request: Request) -> HTMLResponse:
     """Import transactions page."""
     from web.pages.import_page import render_import_page
 
@@ -35,7 +35,7 @@ async def import_page(request: Request):
 
 
 @router.get("/review", response_class=HTMLResponse)
-async def review_page(request: Request):
+async def review_page(request: Request) -> HTMLResponse:
     """Review and categorize transactions page."""
     from web.pages.review_page import render_review_page
 
@@ -43,7 +43,7 @@ async def review_page(request: Request):
 
 
 @router.get("/export", response_class=HTMLResponse)
-async def export_page(request: Request):
+async def export_page(request: Request) -> HTMLResponse:
     """Export data configuration page."""
     from api.dependencies import get_db_manager
     from web.pages.export_page import create_export_page
@@ -56,7 +56,7 @@ async def export_page(request: Request):
 
 
 @router.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request):
+async def settings_page(request: Request) -> HTMLResponse:
     """Settings and categories page."""
     from api.dependencies import get_db_manager
     from web.pages.settings_page import render_settings_page
@@ -69,7 +69,7 @@ async def settings_page(request: Request):
 
 
 @router.get("/analytics", response_class=HTMLResponse)
-async def analytics_page(request: Request):
+async def analytics_page(request: Request) -> HTMLResponse:
     """Analytics and financial insights page."""
     from api.dependencies import get_db_manager
     from web.pages.analytics_page import render_analytics_page
@@ -82,7 +82,7 @@ async def analytics_page(request: Request):
 
 
 @router.post("/upload-csv", response_class=HTMLResponse)
-async def upload_csv_web(request: Request, file: UploadFile):
+async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
     """Handle CSV upload and return HTML response with preview."""
     import os
     import tempfile
@@ -189,12 +189,12 @@ async def upload_csv_web(request: Request, file: UploadFile):
         return create_page_layout("Upload Error - FafyCat", content)
 
 
-@router.post("/transactions/{transaction_id}/categorize", response_class=HTMLResponse)
+@router.post("/transactions/{transaction_id}/categorize", response_model=None)
 async def categorize_transaction_web(
     request: Request,
     transaction_id: str,
     actual_category: str = Form(...),
-):
+) -> HTMLResponse | RedirectResponse:
     """Handle form submission for categorizing a transaction."""
     db_manager = get_db_manager(request)
 
@@ -233,7 +233,7 @@ async def categorize_transaction_web(
 
 
 @router.post("/api/export/summary", response_class=HTMLResponse)
-async def export_summary_htmx(request: Request):
+async def export_summary_htmx(request: Request) -> str:
     """HTMX endpoint for export summary updates."""
     from api.export import ExportService
     from web.pages.export_page import create_export_summary_response

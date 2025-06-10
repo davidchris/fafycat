@@ -19,7 +19,7 @@ from .naive_bayes_classifier import NaiveBayesTextClassifier
 class EnsembleCategorizer:
     """Ensemble categorizer combining LightGBM and Naive Bayes models."""
 
-    def __init__(self, session: Session, config: MLConfig):
+    def __init__(self, session: Session, config: MLConfig) -> None:
         self.session = session
         self.config = config
 
@@ -37,7 +37,7 @@ class EnsembleCategorizer:
         # Ensemble parameters
         self.ensemble_weights = {"lgbm": 0.7, "nb": 0.3}  # Default weights
         self.is_trained = False
-        self.cv_results = None
+        self.cv_results: dict[str, Any] | None = None
         self.model_version = "1.0-ensemble"
 
     def prepare_training_data(self) -> tuple[list[TransactionInput], np.ndarray]:
@@ -55,7 +55,7 @@ class EnsembleCategorizer:
         min_samples_per_category = max(3, self.cv_validator.n_splits)  # Need at least n_splits samples for CV
 
         # Count transactions per category
-        category_counts = {}
+        category_counts: dict[int, int] = {}
         for txn in transactions:
             category_counts[txn.category_id] = category_counts.get(txn.category_id, 0) + 1
 
@@ -218,15 +218,17 @@ class EnsembleCategorizer:
 
         return probas
 
-    def _create_lgbm_wrapper_class(self):
+    def _create_lgbm_wrapper_class(self) -> type:
         """Create a wrapper class for LightGBM that matches the interface expected by CV."""
 
         class LightGBMWrapper:
-            def __init__(self, session: Session, config: MLConfig):
-                self.categorizer = TransactionCategorizer(session, config)
-                self.label_encoder = None
+            def __init__(self, session: Session, config: MLConfig) -> None:
+                from sklearn.preprocessing import LabelEncoder
 
-            def fit(self, transactions: list[TransactionInput], labels: np.ndarray):
+                self.categorizer = TransactionCategorizer(session, config)
+                self.label_encoder: LabelEncoder | None = None
+
+            def fit(self, transactions: list[TransactionInput], labels: np.ndarray) -> None:
                 # Convert labels to appropriate format and store the encoder
                 from sklearn.preprocessing import LabelEncoder
 
@@ -239,6 +241,9 @@ class EnsembleCategorizer:
                 self.categorizer.train(test_size=0.0)
 
             def predict_proba(self, transactions: list[TransactionInput]) -> np.ndarray:
+                if self.label_encoder is None:
+                    raise ValueError("Model must be fitted before making predictions")
+
                 predictions = self.categorizer.predict_with_confidence(transactions)
 
                 # Convert to probability matrix
@@ -264,6 +269,9 @@ class EnsembleCategorizer:
                 return probas
 
             def predict(self, transactions: list[TransactionInput]) -> np.ndarray:
+                if self.label_encoder is None:
+                    raise ValueError("Model must be fitted before making predictions")
+
                 probas = self.predict_proba(transactions)
                 predictions = np.argmax(probas, axis=1)
                 return self.label_encoder.inverse_transform(predictions)
@@ -483,7 +491,7 @@ class EnsembleCategorizer:
 
                     # Temporarily add the module mapping for old pickle files
                     class LegacyUnpickler(_pickle.Unpickler):
-                        def find_class(self, module, name):
+                        def find_class(self, module, name) -> Any:
                             # Map old module paths to new ones
                             if module.startswith("fafycat."):
                                 # Remove the old 'fafycat.' prefix and use the current structure

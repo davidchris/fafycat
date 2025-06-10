@@ -1,7 +1,7 @@
 """Layout components for web pages."""
 
 
-def create_sidebar():
+def create_sidebar() -> str:
     """Create the navigation sidebar HTML."""
     return """
     <div class="w-64 bg-gray-50 h-screen p-4 fixed left-0 top-0 flex flex-col">
@@ -27,7 +27,7 @@ def create_sidebar():
     """
 
 
-def create_page_layout(title: str, content: str):
+def create_page_layout(title: str, content: str) -> str:
     """Create the main page layout with sidebar and content area."""
     return f"""
     <!DOCTYPE html>

@@ -112,7 +112,7 @@ def train_model() -> None:
     print(result.stdout)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Reset database and import labeled data from scratch")
     parser.add_argument(
         "--labeled-data-path",

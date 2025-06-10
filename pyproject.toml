@@ -23,6 +23,18 @@ classifiers = [
     "Environment :: Web Environment",
     "Framework :: FastAPI",
 ]
+dependencies = [
+    "fastapi>=0.115.12",
+    "httpx>=0.28.1",
+    "lightgbm>=4.6.0",
+    "numpy>=2.3.0",
+    "pandas>=2.3.0",
+    "python-fasthtml>=0.12.19",
+    "requests>=2.32.4",
+    "scikit-learn>=1.7.0",
+    "sqlalchemy>=2.0.41",
+    "uvicorn>=0.34.3",
+]
 
 [project.urls]
 Homepage = "https://github.com/davidchris/fafycat"
@@ -100,6 +112,11 @@ check_untyped_defs = true
 warn_return_any = true
 show_error_codes = true
 warn_unused_ignores = true
+
+exclude = [
+    '^tests/',
+
+]
 
 
 # Ignore missing stubs for external libraries

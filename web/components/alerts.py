@@ -3,7 +3,7 @@
 from fasthtml.common import H3, A, Div, P
 
 
-def create_success_alert(title: str, message: str, details: dict = None) -> Div:
+def create_success_alert(title: str, message: str, details: dict | None = None) -> Div:
     """Create a green success alert box."""
     content = [H3(title, cls="text-lg font-semibold text-green-800 mb-2")]
 
@@ -19,7 +19,7 @@ def create_success_alert(title: str, message: str, details: dict = None) -> Div:
     return Div(*content, cls="bg-green-50 border border-green-200 rounded-lg p-6 mb-6")
 
 
-def create_info_alert(title: str, message: str, link_text: str = None, link_url: str = None) -> Div:
+def create_info_alert(title: str, message: str, link_text: str | None = None, link_url: str | None = None) -> Div:
     """Create a blue info alert box."""
     content = [H3(title, cls="text-lg font-semibold text-blue-800 mb-2")]
 

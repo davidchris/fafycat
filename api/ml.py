@@ -280,11 +280,11 @@ async def retrain_model(
         with training_db_manager.get_session() as training_session:
             # Choose between ensemble and single model based on config
             if _config.ml.use_ensemble:
-                categorizer = EnsembleCategorizer(training_session, _config.ml)
+                ensemble_categorizer = EnsembleCategorizer(training_session, _config.ml)
                 model_filename = "ensemble_categorizer.pkl"
 
                 # Train ensemble with validation optimization
-                cv_results = categorizer.train_with_validation_optimization()
+                cv_results = ensemble_categorizer.train_with_validation_optimization()
 
                 response_data = {
                     "status": "success",
@@ -297,23 +297,26 @@ async def retrain_model(
                     "validation_samples": cv_results["n_validation_samples"],
                 }
             else:
-                categorizer = TransactionCategorizer(training_session, _config.ml)
+                single_categorizer = TransactionCategorizer(training_session, _config.ml)
                 model_filename = "categorizer.pkl"
 
                 # Train single model
-                metrics = categorizer.train()
+                metrics = single_categorizer.train()
 
                 response_data = {
                     "status": "success",
                     "message": "Model retrained successfully",
                     "accuracy": metrics.accuracy,
                     "model_path": str(_config.ml.model_dir / model_filename),
-                    "training_samples": len(categorizer.prepare_training_data()[0]),
+                    "training_samples": len(single_categorizer.prepare_training_data()[0]),
                 }
 
             # Save the trained model
             model_path = _config.ml.model_dir / model_filename
-            categorizer.save_model(model_path)
+            if _config.ml.use_ensemble:
+                ensemble_categorizer.save_model(model_path)
+            else:
+                single_categorizer.save_model(model_path)
 
         # Reset global categorizer to force reload
         _categorizer = None

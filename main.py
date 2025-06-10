@@ -2,10 +2,11 @@
 
 import logging
 import time
+from collections.abc import Callable
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from src.fafycat.core.config import AppConfig
@@ -33,7 +34,7 @@ def create_app() -> FastAPI:
 
     # Add performance monitoring middleware
     @app.middleware("http")
-    async def add_process_time_header(request: Request, call_next):
+    async def add_process_time_header(request: Request, call_next: Callable) -> Response:
         start_time = time.time()
         response = await call_next(request)
         process_time = time.time() - start_time
@@ -74,7 +75,7 @@ def create_app() -> FastAPI:
 
     # Root redirect to main app
     @app.get("/")
-    async def root():
+    async def root() -> RedirectResponse:
         return RedirectResponse(url="/app", status_code=302)
 
     return app

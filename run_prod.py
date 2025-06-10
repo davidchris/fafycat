@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 
-def main():
+def main() -> None:
     """Run FafyCat in production mode."""
     # Set production environment
     os.environ.setdefault("FAFYCAT_DB_URL", "sqlite:///data/fafycat_prod.db")
