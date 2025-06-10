@@ -86,6 +86,10 @@ uv run python scripts/import_labeled_data.py --data-path /path/to/your/data
 uv run python scripts/reset_and_import.py --labeled-data-path /path/to/your/data --train-model
 ```
 
+#### Where do I get my banking transactions from?
+
+- I'm getting mine via the [MoneyMoney App](https://moneymoney.app).
+
 ## 🏗️ Architecture
 
 ```
