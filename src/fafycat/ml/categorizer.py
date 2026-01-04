@@ -277,6 +277,14 @@ class TransactionCategorizer:
 
         # Get category names
         category_names = {}
+        if self.classes_ is None:
+            return ModelMetrics(
+                accuracy=accuracy,
+                precision_per_category={},
+                recall_per_category={},
+                confusion_matrix=[],
+                feature_importance={},
+            )
         for category_id in self.classes_:
             category = self.session.query(CategoryORM).filter(CategoryORM.id == category_id).first()
             if category:

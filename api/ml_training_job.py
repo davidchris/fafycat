@@ -3,9 +3,14 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
+
+
+def _utc_now() -> datetime:
+    """Get current UTC time (timezone-aware)."""
+    return datetime.now(UTC)
 
 
 class TrainingPhase(str, Enum):
@@ -47,8 +52,8 @@ class TrainingJob:
     job_id: str
     status: str = "pending"  # pending, running, completed, failed
     phase: TrainingPhase = TrainingPhase.PENDING
-    started_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    started_at: datetime = field(default_factory=_utc_now)
+    updated_at: datetime = field(default_factory=_utc_now)
     completed_at: datetime | None = None
     result: dict[str, Any] | None = None
     error: str | None = None
@@ -96,13 +101,13 @@ def create_training_job() -> TrainingJob:
 def update_job_phase(phase: TrainingPhase) -> None:
     if _current_job:
         _current_job.phase = phase
-        _current_job.updated_at = datetime.utcnow()
+        _current_job.updated_at = _utc_now()
 
 
 def set_job_running() -> None:
     if _current_job:
         _current_job.status = "running"
-        _current_job.updated_at = datetime.utcnow()
+        _current_job.updated_at = _utc_now()
 
 
 def complete_job(result: dict[str, Any]) -> None:
@@ -110,8 +115,8 @@ def complete_job(result: dict[str, Any]) -> None:
         _current_job.status = "completed"
         _current_job.phase = TrainingPhase.DONE
         _current_job.result = result
-        _current_job.completed_at = datetime.utcnow()
-        _current_job.updated_at = datetime.utcnow()
+        _current_job.completed_at = _utc_now()
+        _current_job.updated_at = _utc_now()
 
 
 def fail_job(error: str) -> None:
@@ -119,8 +124,8 @@ def fail_job(error: str) -> None:
         _current_job.status = "failed"
         _current_job.phase = TrainingPhase.ERROR
         _current_job.error = error
-        _current_job.completed_at = datetime.utcnow()
-        _current_job.updated_at = datetime.utcnow()
+        _current_job.completed_at = _utc_now()
+        _current_job.updated_at = _utc_now()
 
 
 def get_executor() -> ThreadPoolExecutor:

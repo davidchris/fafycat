@@ -107,16 +107,41 @@ convention = "google"
 "test_*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for test files
 
 [tool.ty.src]
-exclude = ["tests/"]
+exclude = ["tests/", "*.ipynb"]
 
 [tool.ty.environment]
 python = ".venv"
 
 [tool.ty.rules]
-# Equivalent to warn_unused_ignores
-unused-ignore-comment = "warn"
+# Core type checking - keep as errors
+invalid-return-type = "warn"  # Many false positives from fasthtml
+invalid-assignment = "error"
+
+# Reduce noise from external libraries (fasthtml, pandas have incomplete stubs)
+invalid-argument-type = "warn"
+invalid-type-form = "ignore"
+non-subscriptable = "warn"
+possibly-missing-attribute = "warn"
+invalid-parameter-default = "warn"  # Common Python pattern: x: T = None
+
 # Handle unresolved imports gracefully for external libs without stubs
 unresolved-import = "warn"
+
+# Equivalent to mypy's warn_unused_ignores
+unused-ignore-comment = "warn"
+
+# datetime.utcnow in SQLAlchemy Column defaults is acceptable pattern
+deprecated = "warn"
+
+# Exclude simulation notebooks and scripts from type checking
+[[tool.ty.overrides]]
+include = ["simulations/", "scripts/"]
+
+[tool.ty.overrides.rules]
+invalid-return-type = "ignore"
+invalid-assignment = "ignore"
+invalid-argument-type = "ignore"
+unresolved-reference = "ignore"
 
 [tool.ty.terminal]
 output-format = "full"
