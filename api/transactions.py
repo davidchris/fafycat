@@ -1,5 +1,8 @@
 """API routes for transaction operations."""
 
+import contextlib
+from datetime import date
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -127,6 +130,8 @@ async def get_transactions_table(
     sort_order: str = Query("desc"),  # asc, desc
     search: str = Query(""),
     category_filter: str = Query(""),
+    start_date: str = Query(""),
+    end_date: str = Query(""),
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
     """Get transactions table fragment for HTMX filtering with pagination."""
@@ -143,6 +148,18 @@ async def get_transactions_table(
         is_reviewed = True
     # status == "all" means no filters
 
+    # Parse date filters
+    parsed_start_date = None
+    parsed_end_date = None
+
+    if start_date:
+        with contextlib.suppress(ValueError):
+            parsed_start_date = date.fromisoformat(start_date)
+
+    if end_date:
+        with contextlib.suppress(ValueError):
+            parsed_end_date = date.fromisoformat(end_date)
+
     # Calculate skip for pagination
     skip = (page - 1) * page_size
 
@@ -158,6 +175,8 @@ async def get_transactions_table(
         sort_by=sort_by,
         sort_order=sort_order,
         search=search,
+        start_date=parsed_start_date,
+        end_date=parsed_end_date,
     )
 
     categories = CategoryService.get_categories(db)

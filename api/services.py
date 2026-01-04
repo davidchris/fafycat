@@ -89,6 +89,8 @@ class TransactionService:
         sort_by: str = "date",
         sort_order: str = "desc",
         search: str = "",
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> dict:
         """Get transactions with pagination and enhanced filtering."""
         # Build base query
@@ -121,15 +123,15 @@ class TransactionService:
                 )
             else:
                 # Filter by effective/final category: actual_category takes precedence over predicted_category
-                # This means: if actual_category exists, use it; otherwise use predicted_category
+                # This ensures reviewed transactions use their assigned category, unreviewed use predicted category
                 query = query.filter(
                     or_(
-                        # Case 1: Has actual category and it matches
+                        # Case 1: Has actual category and it matches (user-assigned, takes precedence)
                         and_(
                             TransactionORM.category_id.is_not(None),
                             TransactionORM.category.has(CategoryORM.name == category),
                         ),
-                        # Case 2: No actual category, but predicted category matches
+                        # Case 2: No actual category, but predicted category matches (unreviewed)
                         and_(
                             TransactionORM.category_id.is_(None),
                             TransactionORM.predicted_category_id.is_not(None),
@@ -151,6 +153,12 @@ class TransactionService:
                     ),
                 )
             )
+
+        # Apply date range filters
+        if start_date is not None:
+            query = query.filter(TransactionORM.date >= start_date)
+        if end_date is not None:
+            query = query.filter(TransactionORM.date <= end_date)
 
         # Get total count before applying pagination
         total_count = query.count()
