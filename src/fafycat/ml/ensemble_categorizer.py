@@ -2,6 +2,7 @@
 
 import json
 import pickle
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -164,8 +165,15 @@ class EnsembleCategorizer:
 
         return txn_inputs, np.array(categories)
 
-    def train_with_validation_optimization(self) -> dict[str, Any]:
-        """Train ensemble with simple validation-based weight optimization."""
+    def train_with_validation_optimization(
+        self, progress_callback: Callable[[str], None] | None = None
+    ) -> dict[str, Any]:
+        """Train ensemble with simple validation-based weight optimization.
+
+        Args:
+            progress_callback: Optional callback for progress updates. Called with phase name
+                              (e.g., "training_nb", "optimizing_weights").
+        """
         print("🔍 Preparing training data for ensemble...")
         transactions, labels = self.prepare_training_data()
 
@@ -186,6 +194,8 @@ class EnsembleCategorizer:
         lgbm_temp.train(test_size=0.0)  # Use all available data in the current session
 
         # Train Naive Bayes component
+        if progress_callback:
+            progress_callback("training_nb")
         print("  Training Naive Bayes...")
         nb_temp = NaiveBayesTextClassifier(
             alpha=getattr(self.config, "nb_alpha", 1.0),
@@ -194,6 +204,8 @@ class EnsembleCategorizer:
         )
         nb_temp.fit(train_transactions, train_labels)
 
+        if progress_callback:
+            progress_callback("optimizing_weights")
         print("🔄 Optimizing ensemble weights on validation set...")
 
         # Get predictions on validation set

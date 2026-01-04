@@ -132,6 +132,80 @@ async def get_top_transactions(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.get("/year-over-year")
+async def get_year_over_year_comparison(
+    session: Session = Depends(get_db_session),
+    category_type: str | None = Query(None, description="Filter by category type (spending/income/saving)"),
+    years: str | None = Query(None, description="Comma-separated list of years to compare"),
+) -> dict[str, Any]:
+    """Get year-over-year category comparison with totals and monthly averages."""
+    try:
+        # Parse years if provided
+        years_list = None
+        if years:
+            try:
+                years_list = [int(y.strip()) for y in years.split(",")]
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail="Invalid years format. Use comma-separated integers."
+                ) from None
+
+        result = AnalyticsService.get_year_over_year_comparison(session, category_type, years_list)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/category-cumulative")
+async def get_category_cumulative_data(
+    session: Session = Depends(get_db_session),
+    category_id: int = Query(..., description="Category ID for cumulative data"),
+    years: str | None = Query(None, description="Comma-separated list of years"),
+) -> dict[str, Any]:
+    """Get monthly cumulative data for a specific category across multiple years."""
+    try:
+        # Parse years if provided
+        years_list = None
+        if years:
+            try:
+                years_list = [int(y.strip()) for y in years.split(",")]
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail="Invalid years format. Use comma-separated integers."
+                ) from None
+
+        result = AnalyticsService.get_category_cumulative_data(session, category_id, years_list)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/categories")
+async def get_categories(session: Session = Depends(get_db_session)) -> dict[str, Any]:
+    """Get all active categories for selection."""
+    try:
+        from api.services import CategoryService
+
+        categories = CategoryService.get_categories(session)
+        return {"categories": categories}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/available-years")
+async def get_available_years(session: Session = Depends(get_db_session)) -> dict[str, Any]:
+    """Get all years that have transaction data for the year selector."""
+    try:
+        result = AnalyticsService.get_available_years(session)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 # HTML endpoints for HTMX integration
 @router.get("/budget-variance-html", response_class=HTMLResponse)
 async def get_budget_variance_html(

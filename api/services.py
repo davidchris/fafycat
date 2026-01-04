@@ -89,6 +89,8 @@ class TransactionService:
         sort_by: str = "date",
         sort_order: str = "desc",
         search: str = "",
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> dict:
         """Get transactions with pagination and enhanced filtering."""
         # Build base query
@@ -121,15 +123,15 @@ class TransactionService:
                 )
             else:
                 # Filter by effective/final category: actual_category takes precedence over predicted_category
-                # This means: if actual_category exists, use it; otherwise use predicted_category
+                # This ensures reviewed transactions use their assigned category, unreviewed use predicted category
                 query = query.filter(
                     or_(
-                        # Case 1: Has actual category and it matches
+                        # Case 1: Has actual category and it matches (user-assigned, takes precedence)
                         and_(
                             TransactionORM.category_id.is_not(None),
                             TransactionORM.category.has(CategoryORM.name == category),
                         ),
-                        # Case 2: No actual category, but predicted category matches
+                        # Case 2: No actual category, but predicted category matches (unreviewed)
                         and_(
                             TransactionORM.category_id.is_(None),
                             TransactionORM.predicted_category_id.is_not(None),
@@ -151,6 +153,12 @@ class TransactionService:
                     ),
                 )
             )
+
+        # Apply date range filters
+        if start_date is not None:
+            query = query.filter(TransactionORM.date >= start_date)
+        if end_date is not None:
+            query = query.filter(TransactionORM.date <= end_date)
 
         # Get total count before applying pagination
         total_count = query.count()
@@ -835,6 +843,275 @@ class AnalyticsService:
             "total_spending": abs(total_spending),
             "transactions_count": len(top_transactions),
         }
+
+    @staticmethod
+    def _get_available_years(session: Session, max_years: int = 3) -> list[int]:
+        """Get available years with transaction data, most recent first."""
+        year_query = session.query(func.distinct(func.strftime("%Y", TransactionORM.date))).order_by(
+            func.strftime("%Y", TransactionORM.date).desc()
+        )
+        available_years = [int(y[0]) for y in year_query.all()]
+        return available_years[:max_years] if len(available_years) >= max_years else available_years
+
+    @staticmethod
+    def _get_current_year_end_date(session: Session, current_year: int) -> date | None:
+        """Get the max transaction date for the current year."""
+        max_date_query = session.query(func.max(TransactionORM.date)).filter(
+            func.strftime("%Y", TransactionORM.date) == str(current_year)
+        )
+        return max_date_query.scalar()
+
+    @staticmethod
+    def _calculate_yoy_changes(category: dict[str, Any]) -> None:
+        """Calculate year-over-year changes for a category (mutates category dict)."""
+        sorted_years = sorted([int(y) for y in category["yearly_data"]])
+        for i in range(1, len(sorted_years)):
+            prev_year = sorted_years[i - 1]
+            curr_year = sorted_years[i]
+
+            prev_data = category["yearly_data"].get(str(prev_year), {})
+            curr_data = category["yearly_data"].get(str(curr_year), {})
+
+            prev_total = prev_data.get("total", 0)
+            curr_total = curr_data.get("total", 0)
+            prev_monthly_avg = prev_data.get("monthly_avg", 0)
+            curr_monthly_avg = curr_data.get("monthly_avg", 0)
+
+            absolute_change_total = curr_total - prev_total
+            percentage_change_total = ((curr_total / prev_total - 1) * 100) if prev_total != 0 else 0
+
+            absolute_change_monthly = curr_monthly_avg - prev_monthly_avg
+            percentage_change_monthly = (
+                ((curr_monthly_avg / prev_monthly_avg - 1) * 100) if prev_monthly_avg != 0 else 0
+            )
+
+            category["changes"][f"{prev_year}_to_{curr_year}"] = {
+                "absolute_total": absolute_change_total,
+                "percentage_total": percentage_change_total,
+                "absolute_monthly": absolute_change_monthly,
+                "percentage_monthly": percentage_change_monthly,
+            }
+
+    @staticmethod
+    def get_year_over_year_comparison(
+        session: Session, category_type: str | None = None, years: list[int] | None = None
+    ) -> dict[str, Any]:
+        """Get year-over-year comparison of categories with totals and monthly averages."""
+        if not years:
+            years = AnalyticsService._get_available_years(session)
+
+        if not years:
+            return {"categories": [], "summary": {"years": [], "total_by_year": {}}}
+
+        # Determine consistent date period when current year is included
+        current_year = date.today().year
+        end_date = AnalyticsService._get_current_year_end_date(session, current_year) if current_year in years else None
+
+        # Build base query
+        query = (
+            session.query(
+                CategoryORM.id,
+                CategoryORM.name,
+                CategoryORM.type,
+                func.strftime("%Y", TransactionORM.date).label("year"),
+                func.count(TransactionORM.id).label("transaction_count"),
+                func.sum(TransactionORM.amount).label("total_amount"),
+            )
+            .join(
+                CategoryORM,
+                CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
+            )
+            .filter(CategoryORM.is_active)
+            .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
+            .filter(func.strftime("%Y", TransactionORM.date).in_([str(y) for y in years]))
+        )
+
+        # Apply consistent date filtering when current year is included
+        if end_date:
+            date_conditions = [
+                and_(
+                    func.strftime("%Y", TransactionORM.date) == str(year),
+                    TransactionORM.date <= date(year, end_date.month, end_date.day),
+                )
+                for year in years
+            ]
+            query = query.filter(or_(*date_conditions))
+
+        if category_type:
+            query = query.filter(CategoryORM.type == category_type)
+
+        query = query.group_by(
+            CategoryORM.id, CategoryORM.name, CategoryORM.type, func.strftime("%Y", TransactionORM.date)
+        )
+        results = query.all()
+
+        # Organize data by category
+        category_data: dict[int, dict[str, Any]] = {}
+        yearly_totals = {year: 0.0 for year in years}
+
+        for result in results:
+            category_id = result.id
+            year = int(result.year)
+            total_amount = float(result.total_amount) if result.total_amount else 0
+
+            if category_id not in category_data:
+                category_data[category_id] = {
+                    "name": result.name,
+                    "type": result.type,
+                    "yearly_data": {},
+                    "changes": {},
+                }
+
+            # Calculate months with data for accurate monthly average
+            query_start_date = date(year, 1, 1) if end_date else None
+            query_end_date = date(year, end_date.month, end_date.day) if end_date else None
+            months_with_data = AnalyticsService._get_months_with_data(
+                session, category_id, year, start_date=query_start_date, end_date=query_end_date
+            )
+
+            category_data[category_id]["yearly_data"][str(year)] = {
+                "total": total_amount,
+                "monthly_avg": total_amount / months_with_data if months_with_data > 0 else 0,
+                "transactions": result.transaction_count,
+                "months_with_data": months_with_data,
+            }
+            yearly_totals[year] += total_amount
+
+        # Calculate year-over-year changes
+        for category in category_data.values():
+            AnalyticsService._calculate_yoy_changes(category)
+
+        # Sort categories by most recent year's total
+        most_recent_year = str(max(years))
+        categories_list = sorted(
+            category_data.values(),
+            key=lambda c: abs(c["yearly_data"].get(most_recent_year, {}).get("total", 0)),
+            reverse=True,
+        )
+
+        return {
+            "categories": categories_list,
+            "summary": {
+                "years": sorted(years),
+                "total_by_year": {str(year): total for year, total in yearly_totals.items()},
+                "category_type_filter": category_type,
+            },
+        }
+
+    @staticmethod
+    def _get_months_with_data(
+        session: Session, category_id: int, year: int, start_date: date | None = None, end_date: date | None = None
+    ) -> int:
+        """Get the number of months with transaction data for a category in a specific year.
+
+        Args:
+            session: Database session
+            category_id: The category ID to count months for
+            year: The year to filter by
+            start_date: Optional start date to limit the count (used for fair comparisons)
+            end_date: Optional end date to limit the count (used for fair comparisons)
+
+        Returns:
+            Number of distinct months with transaction data in the specified year and date range
+        """
+        query = (
+            session.query(func.count(func.distinct(func.strftime("%m", TransactionORM.date))))
+            .filter(or_(TransactionORM.category_id == category_id, TransactionORM.predicted_category_id == category_id))
+            .filter(func.strftime("%Y", TransactionORM.date) == str(year))
+        )
+
+        # Apply date range filters if provided (to match parent query filtering)
+        if start_date:
+            query = query.filter(TransactionORM.date >= start_date)
+        if end_date:
+            query = query.filter(TransactionORM.date <= end_date)
+
+        result = query.scalar()
+        return result if result else 0
+
+    @staticmethod
+    def get_category_cumulative_data(
+        session: Session, category_id: int, years: list[int] | None = None
+    ) -> dict[str, Any]:
+        """Get monthly cumulative data for a specific category across multiple years."""
+        if not years:
+            year_query = session.query(func.distinct(func.strftime("%Y", TransactionORM.date))).order_by(
+                func.strftime("%Y", TransactionORM.date).desc()
+            )
+            available_years = [int(y[0]) for y in year_query.all()]
+            years = available_years[:3] if len(available_years) >= 3 else available_years
+
+        if not years:
+            return {"years": [], "monthly_data": {}, "category_name": None}
+
+        # Get category details
+        category = session.query(CategoryORM).filter(CategoryORM.id == category_id).first()
+        if not category:
+            return {"years": [], "monthly_data": {}, "category_name": None}
+
+        # Query monthly transaction data for the category
+        # Use effective category: actual_category takes precedence over predicted_category
+        query = (
+            session.query(
+                func.strftime("%Y", TransactionORM.date).label("year"),
+                func.strftime("%m", TransactionORM.date).label("month"),
+                func.sum(TransactionORM.amount).label("amount"),
+            )
+            .filter(func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id) == category_id)
+            .filter(func.strftime("%Y", TransactionORM.date).in_([str(y) for y in years]))
+            .group_by(func.strftime("%Y", TransactionORM.date), func.strftime("%m", TransactionORM.date))
+            .order_by(func.strftime("%Y", TransactionORM.date), func.strftime("%m", TransactionORM.date))
+        )
+
+        results = query.all()
+
+        # Organize data by year
+        yearly_data = {}
+        for year in years:
+            yearly_data[str(year)] = {
+                "monthly_totals": [0] * 12,  # Jan-Dec
+                "cumulative": [0] * 12,
+            }
+
+        # Populate monthly data
+        for result in results:
+            year = result.year
+            month = int(result.month) - 1  # Convert to 0-indexed
+            amount = float(result.amount) if result.amount else 0
+
+            if year in yearly_data:
+                yearly_data[year]["monthly_totals"][month] = amount
+
+        # Calculate cumulative sums
+        for year_data in yearly_data.values():
+            running_total = 0
+            for i in range(12):
+                running_total += year_data["monthly_totals"][i]
+                year_data["cumulative"][i] = running_total
+
+        return {
+            "years": sorted(years),
+            "monthly_data": yearly_data,
+            "category_name": category.name,
+            "category_type": category.type,
+        }
+
+    @staticmethod
+    def get_available_years(session: Session) -> dict[str, Any]:
+        """Get all years that have transaction data for the year selector."""
+        # Query for distinct years from transactions
+        years_query = (
+            session.query(func.strftime("%Y", TransactionORM.date).label("year"))
+            .distinct()
+            .order_by(func.strftime("%Y", TransactionORM.date).desc())
+        )
+
+        years = [int(row.year) for row in years_query.all()]
+
+        # Get current year for default selection
+        current_year = date.today().year
+
+        return {"years": years, "current_year": current_year}
 
 
 class BudgetService:

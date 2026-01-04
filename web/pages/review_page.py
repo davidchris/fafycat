@@ -294,7 +294,7 @@ def render_review_page(request: Request):
                                    hx-get="/api/transactions/table"
                                    hx-trigger="change"
                                    hx-target="#transaction-table"
-                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter']"
+                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                    class="mr-2">
                             Priority Review
                         </label>
@@ -303,7 +303,7 @@ def render_review_page(request: Request):
                                    hx-get="/api/transactions/table"
                                    hx-trigger="change"
                                    hx-target="#transaction-table"
-                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter']"
+                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                    class="mr-2">
                             All Pending
                         </label>
@@ -312,7 +312,7 @@ def render_review_page(request: Request):
                                    hx-get="/api/transactions/table"
                                    hx-trigger="change"
                                    hx-target="#transaction-table"
-                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter']"
+                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                    class="mr-2">
                             Auto-Accepted
                         </label>
@@ -321,7 +321,7 @@ def render_review_page(request: Request):
                                    hx-get="/api/transactions/table"
                                    hx-trigger="change"
                                    hx-target="#transaction-table"
-                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter']"
+                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                    class="mr-2">
                             All Transactions
                         </label>
@@ -335,7 +335,7 @@ def render_review_page(request: Request):
                            hx-get="/api/transactions/table"
                            hx-trigger="input changed delay:300ms"
                            hx-target="#transaction-table"
-                           hx-include="[name='status']:checked, [name='confidence_lt'], [name='sort_by'], [name='sort_order']"
+                           hx-include="[name='status']:checked, [name='confidence_lt'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                            class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                 </div>
                 
@@ -346,14 +346,36 @@ def render_review_page(request: Request):
                             hx-get="/api/transactions/table"
                             hx-trigger="change"
                             hx-target="#transaction-table"
-                            hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter']"
+                            hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                             class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                         <option value="">All Categories</option>
                         <option value="uncategorized">Uncategorized</option>
                         {_generate_category_options(categories)}
                     </select>
                 </div>
-                
+
+                <!-- Date Range Filter -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Start Date:</label>
+                        <input type="date" name="start_date"
+                               hx-get="/api/transactions/table"
+                               hx-trigger="change"
+                               hx-target="#transaction-table"
+                               hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2">End Date:</label>
+                        <input type="date" name="end_date"
+                               hx-get="/api/transactions/table"
+                               hx-trigger="change"
+                               hx-target="#transaction-table"
+                               hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                </div>
+
                 <!-- Confidence Threshold (only for pending) -->
                 <div id="confidence-filter">
                     <label class="block text-sm font-medium mb-2">Confidence threshold:</label>
@@ -362,7 +384,7 @@ def render_review_page(request: Request):
                            hx-get="/api/transactions/table"
                            hx-trigger="change throttle:500ms"
                            hx-target="#transaction-table"
-                           hx-include="[name='status']:checked, [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter']"
+                           hx-include="[name='status']:checked, [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                            class="w-full">
                     <p id="threshold-display" class="text-sm text-gray-600 mt-2">
                         Show transactions with confidence below 80%
@@ -377,7 +399,7 @@ def render_review_page(request: Request):
                                 hx-get="/api/transactions/table"
                                 hx-trigger="change"
                                 hx-target="#transaction-table"
-                                hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_order'], [name='category_filter']"
+                                hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                             <option value="date" selected>Date</option>
                             <option value="confidence_score">Confidence</option>
@@ -391,7 +413,7 @@ def render_review_page(request: Request):
                                 hx-get="/api/transactions/table"
                                 hx-trigger="change"
                                 hx-target="#transaction-table"
-                                hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='category_filter']"
+                                hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                 class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                             <option value="desc" selected>Descending</option>
                             <option value="asc">Ascending</option>

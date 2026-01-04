@@ -1,11 +1,24 @@
 """API routes for ML prediction operations."""
 
+import asyncio
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_db_session
+from api.ml_training_job import (
+    TrainingPhase,
+    complete_job,
+    create_training_job,
+    fail_job,
+    get_current_job,
+    get_executor,
+    get_job_by_id,
+    is_training_in_progress,
+    set_job_running,
+    update_job_phase,
+)
 from api.models import (
     BulkPredictRequest,
     BulkPredictResponse,
@@ -260,37 +273,49 @@ async def get_ml_status(
         }
 
 
-@router.post("/retrain")
-async def retrain_model(
-    db: Session = Depends(get_db_session),
-) -> dict:
-    """Trigger model retraining with current transaction data."""
-    try:
-        global _categorizer, _config
+def _run_training_sync() -> None:
+    """Synchronous training function to run in executor."""
+    global _categorizer, _config
 
+    try:
         _config = AppConfig()
         _config.ensure_dirs()
 
         # Create a separate database manager and session for training
-        # This prevents the long-running training from blocking other operations
         from src.fafycat.core.database import DatabaseManager
 
         training_db_manager = DatabaseManager(_config)
 
         with training_db_manager.get_session() as training_session:
+            update_job_phase(TrainingPhase.PREPARING_DATA)
+
             # Choose between ensemble and single model based on config
             if _config.ml.use_ensemble:
                 ensemble_categorizer = EnsembleCategorizer(training_session, _config.ml)
                 model_filename = "ensemble_categorizer.pkl"
 
-                # Train ensemble with validation optimization
-                cv_results = ensemble_categorizer.train_with_validation_optimization()
+                # Create progress callback to update job phases during training
+                def progress_callback(phase_name: str) -> None:
+                    phase_map = {
+                        "training_nb": TrainingPhase.TRAINING_NB,
+                        "optimizing_weights": TrainingPhase.OPTIMIZING_WEIGHTS,
+                    }
+                    if phase_name in phase_map:
+                        update_job_phase(phase_map[phase_name])
 
-                response_data = {
+                # Train ensemble with validation optimization
+                update_job_phase(TrainingPhase.TRAINING_LGBM)
+                cv_results = ensemble_categorizer.train_with_validation_optimization(
+                    progress_callback=progress_callback
+                )
+
+                update_job_phase(TrainingPhase.SAVING_MODEL)
+
+                result_data = {
                     "status": "success",
                     "message": "Ensemble model retrained successfully",
-                    "accuracy": cv_results["validation_accuracy"],  # Frontend expects 'accuracy' field
-                    "validation_accuracy": cv_results["validation_accuracy"],  # Keep for backwards compatibility
+                    "accuracy": cv_results["validation_accuracy"],
+                    "validation_accuracy": cv_results["validation_accuracy"],
                     "ensemble_weights": cv_results["best_weights"],
                     "model_path": str(_config.ml.model_dir / model_filename),
                     "training_samples": cv_results["n_training_samples"],
@@ -300,10 +325,12 @@ async def retrain_model(
                 single_categorizer = TransactionCategorizer(training_session, _config.ml)
                 model_filename = "categorizer.pkl"
 
-                # Train single model
+                update_job_phase(TrainingPhase.TRAINING_LGBM)
                 metrics = single_categorizer.train()
 
-                response_data = {
+                update_job_phase(TrainingPhase.SAVING_MODEL)
+
+                result_data = {
                     "status": "success",
                     "message": "Model retrained successfully",
                     "accuracy": metrics.accuracy,
@@ -321,12 +348,61 @@ async def retrain_model(
         # Reset global categorizer to force reload
         _categorizer = None
 
-        return response_data
+        complete_job(result_data)
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Training failed: {str(e)}") from e
+        fail_job(f"Training failed: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Retraining failed: {str(e)}") from e
+        fail_job(f"Retraining failed: {str(e)}")
+
+
+@router.post("/retrain")
+async def retrain_model() -> dict:
+    """Start model retraining as a background job."""
+    # Check if training already in progress
+    if is_training_in_progress():
+        current = get_current_job()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Training already in progress",
+                "job_id": current.job_id if current else None,
+            },
+        )
+
+    # Create new job
+    job = create_training_job()
+    set_job_running()
+
+    # Run training in background thread
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(get_executor(), _run_training_sync)
+
+    return {
+        "job_id": job.job_id,
+        "status": "pending",
+        "message": "Training job started",
+    }
+
+
+@router.get("/training-status/{job_id}")
+async def get_training_status(job_id: str) -> dict:
+    """Get status of a training job by ID."""
+    job = get_job_by_id(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Training job not found")
+
+    return job.to_dict()
+
+
+@router.get("/training-status")
+async def get_current_training_status() -> dict:
+    """Get status of current/latest training job."""
+    job = get_current_job()
+    if not job:
+        raise HTTPException(status_code=404, detail="No training job found")
+
+    return job.to_dict()
 
 
 @router.post("/predict/batch-unpredicted")

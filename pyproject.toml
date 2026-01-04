@@ -27,8 +27,10 @@ dependencies = [
     "fastapi>=0.115.12",
     "httpx>=0.28.1",
     "lightgbm>=4.6.0",
+    "matplotlib>=3.10.6",
     "numpy>=2.3.0",
     "pandas>=2.3.0",
+    "python-dateutil>=2.9.0.post0",
     "python-fasthtml>=0.12.19",
     "requests>=2.32.4",
     "scikit-learn>=1.7.0",
@@ -104,34 +106,48 @@ convention = "google"
 "tests/*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for tests
 "test_*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for test files
 
-[tool.mypy]
-disallow_untyped_defs = true
-disallow_any_unimported = false
-no_implicit_optional = true
-check_untyped_defs = true
-warn_return_any = true
-show_error_codes = true
-warn_unused_ignores = true
+[tool.ty.src]
+exclude = ["tests/", "*.ipynb"]
 
-exclude = [
-    '^tests/',
+[tool.ty.environment]
+python = ".venv"
 
-]
+[tool.ty.rules]
+# Core type checking - keep as errors
+invalid-return-type = "warn"  # Many false positives from fasthtml
+invalid-assignment = "error"
 
+# Reduce noise from external libraries (fasthtml, pandas have incomplete stubs)
+invalid-argument-type = "warn"
+invalid-type-form = "ignore"
+non-subscriptable = "warn"
+possibly-missing-attribute = "warn"
+invalid-parameter-default = "warn"  # Common Python pattern: x: T = None
 
-# Ignore missing stubs for external libraries
-[[tool.mypy.overrides]]
-module = [
-    "pandas.*",
-    "plotly.*",
-    "lightgbm.*",
-    "sklearn.*"
-]
-ignore_missing_imports = true
+# Handle unresolved imports gracefully for external libs without stubs
+unresolved-import = "warn"
+
+# Equivalent to mypy's warn_unused_ignores
+unused-ignore-comment = "warn"
+
+# datetime.utcnow in SQLAlchemy Column defaults is acceptable pattern
+deprecated = "warn"
+
+# Exclude simulation notebooks and scripts from type checking
+[[tool.ty.overrides]]
+include = ["simulations/", "scripts/"]
+
+[tool.ty.overrides.rules]
+invalid-return-type = "ignore"
+invalid-assignment = "ignore"
+invalid-argument-type = "ignore"
+unresolved-reference = "ignore"
+
+[tool.ty.terminal]
+output-format = "full"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.16.0",
     "pytest>=8.3.5",
     "pytest-benchmark>=5.1.0",
     "pytest-cov>=6.1.1",
