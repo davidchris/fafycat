@@ -106,34 +106,23 @@ convention = "google"
 "tests/*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for tests
 "test_*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for test files
 
-[tool.mypy]
-disallow_untyped_defs = true
-disallow_any_unimported = false
-no_implicit_optional = true
-check_untyped_defs = true
-warn_return_any = true
-show_error_codes = true
-warn_unused_ignores = true
+[tool.ty.src]
+exclude = ["tests/"]
 
-exclude = [
-    '^tests/',
+[tool.ty.environment]
+python = ".venv"
 
-]
+[tool.ty.rules]
+# Equivalent to warn_unused_ignores
+unused-ignore-comment = "warn"
+# Handle unresolved imports gracefully for external libs without stubs
+unresolved-import = "warn"
 
-
-# Ignore missing stubs for external libraries
-[[tool.mypy.overrides]]
-module = [
-    "pandas.*",
-    "plotly.*",
-    "lightgbm.*",
-    "sklearn.*"
-]
-ignore_missing_imports = true
+[tool.ty.terminal]
+output-format = "full"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.16.0",
     "pytest>=8.3.5",
     "pytest-benchmark>=5.1.0",
     "pytest-cov>=6.1.1",
