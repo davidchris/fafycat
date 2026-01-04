@@ -288,6 +288,12 @@ def render_analytics_page(request: Request, session: Session) -> HTMLResponse:
     
     <!-- Load initial data -->
     <script>
+        // Sort state for year-over-year comparison table
+        let yoySortColumn = null;
+        let yoySortOrder = 'asc';
+        let yoyCurrentData = null;
+        let yoyCurrentViewMode = null;
+
         // Load initial data when page loads
         document.addEventListener('DOMContentLoaded', function() {
             // Populate year selector with current year as default
@@ -673,8 +679,77 @@ def render_analytics_page(request: Request, session: Session) -> HTMLResponse:
                 });
         }
         
+        // Sort year-over-year table data by column
+        function sortYoyTableData(columnName, data, viewMode) {
+            const sortedCategories = [...data.categories];
+            const years = data.summary.years || [];
+            const lastYear = years[years.length - 1];
+            const prevYear = years[years.length - 2];
+            const changeKey = `${prevYear}_to_${lastYear}`;
+
+            sortedCategories.sort((a, b) => {
+                let aValue, bValue;
+
+                if (columnName === 'category') {
+                    aValue = a.name.toLowerCase();
+                    bValue = b.name.toLowerCase();
+                } else if (years.includes(Number(columnName))) {
+                    // Sorting by year column
+                    const year = Number(columnName);
+                    aValue = viewMode === 'monthly_avg'
+                        ? (a.yearly_data[year]?.monthly_avg || 0)
+                        : (a.yearly_data[year]?.total || 0);
+                    bValue = viewMode === 'monthly_avg'
+                        ? (b.yearly_data[year]?.monthly_avg || 0)
+                        : (b.yearly_data[year]?.total || 0);
+                } else if (columnName === 'change') {
+                    const aChange = a.changes[changeKey];
+                    const bChange = b.changes[changeKey];
+                    aValue = aChange ? (viewMode === 'monthly_avg' ? aChange.absolute_monthly : aChange.absolute_total) : 0;
+                    bValue = bChange ? (viewMode === 'monthly_avg' ? bChange.absolute_monthly : bChange.absolute_total) : 0;
+                } else if (columnName === 'percent_change') {
+                    const aChange = a.changes[changeKey];
+                    const bChange = b.changes[changeKey];
+                    aValue = aChange ? (viewMode === 'monthly_avg' ? aChange.percentage_monthly : aChange.percentage_total) : 0;
+                    bValue = bChange ? (viewMode === 'monthly_avg' ? bChange.percentage_monthly : bChange.percentage_total) : 0;
+                }
+
+                if (typeof aValue === 'string') {
+                    return yoySortOrder === 'asc'
+                        ? aValue.localeCompare(bValue)
+                        : bValue.localeCompare(aValue);
+                } else {
+                    return yoySortOrder === 'asc'
+                        ? aValue - bValue
+                        : bValue - aValue;
+                }
+            });
+
+            return { ...data, categories: sortedCategories };
+        }
+
+        // Handle header click for sorting
+        function handleYoyHeaderClick(columnName) {
+            // If clicking the same column, toggle sort order
+            if (yoySortColumn === columnName) {
+                yoySortOrder = yoySortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                // New column, sort ascending by default
+                yoySortColumn = columnName;
+                yoySortOrder = 'asc';
+            }
+
+            // Sort and re-render
+            const sortedData = sortYoyTableData(columnName, yoyCurrentData, yoyCurrentViewMode);
+            updateYearOverYearDisplay(sortedData, yoyCurrentViewMode);
+        }
+
         // Update year-over-year comparison display
         function updateYearOverYearDisplay(data, viewMode) {
+            // Save current data and view mode for re-rendering after sort
+            yoyCurrentData = data;
+            yoyCurrentViewMode = viewMode;
+
             const container = document.getElementById('yoy-comparison-container');
             const categories = data.categories || [];
             const years = data.summary.years || [];
@@ -689,28 +764,33 @@ def render_analytics_page(request: Request, session: Session) -> HTMLResponse:
                     <table class="min-w-full bg-white border border-gray-200">
                         <thead class="bg-gray-50">
                             <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Category
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none" data-column="category" onclick="handleYoyHeaderClick('category')">
+                                    Category ${yoySortColumn === 'category' ? (yoySortOrder === 'asc' ? '▲' : '▼') : ''}
                                 </th>
             `;
             
             // Add column headers for each year
             years.forEach(year => {
+                const yearStr = year.toString();
+                const isSorted = yoySortColumn === yearStr;
+                const indicator = isSorted ? (yoySortOrder === 'asc' ? '▲' : '▼') : '';
                 html += `
-                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        ${year} ${viewMode === 'monthly_avg' ? '(Avg/Mo)' : '(Total)'}
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none" data-column="${year}" onclick="handleYoyHeaderClick('${year}')">
+                        ${year} ${viewMode === 'monthly_avg' ? '(Avg/Mo)' : '(Total)'} ${indicator}
                     </th>
                 `;
             });
             
             // Add change columns if multiple years
             if (years.length > 1) {
+                const changeIndicator = yoySortColumn === 'change' ? (yoySortOrder === 'asc' ? '▲' : '▼') : '';
+                const percentIndicator = yoySortColumn === 'percent_change' ? (yoySortOrder === 'asc' ? '▲' : '▼') : '';
                 html += `
-                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Change
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none" data-column="change" onclick="handleYoyHeaderClick('change')">
+                        Change ${changeIndicator}
                     </th>
-                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        % Change
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none" data-column="percent_change" onclick="handleYoyHeaderClick('percent_change')">
+                        % Change ${percentIndicator}
                     </th>
                 `;
             }
@@ -745,14 +825,17 @@ def render_analytics_page(request: Request, session: Session) -> HTMLResponse:
                         // Use the appropriate change values based on view mode
                         const absoluteChange = viewMode === 'monthly_avg' ? change.absolute_monthly : change.absolute_total;
                         const percentageChange = viewMode === 'monthly_avg' ? change.percentage_monthly : change.percentage_total;
-                        
-                        const changeColor = absoluteChange > 0 ? 'text-red-600' : 'text-green-600';
-                        const arrow = absoluteChange > 0 ? '↑' : '↓';
+
+                        // Determine arrow direction based on magnitude change and category type
+                        // For spending (stored as negative): absoluteChange < 0 means magnitude increased
+                        // For income/saving: absoluteChange > 0 means magnitude increased
+                        const shouldShowUpArrow = category.type === 'spending' ? absoluteChange < 0 : absoluteChange > 0;
+                        const arrow = shouldShowUpArrow ? '↑' : '↓';
                         html += `
-                            <td class="px-6 py-4 whitespace-nowrap text-sm ${changeColor} text-right">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
                                 ${arrow} €${Math.abs(absoluteChange).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm ${changeColor} text-right">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
                                 ${percentageChange > 0 ? '+' : ''}${percentageChange.toFixed(1)}%
                             </td>
                         `;

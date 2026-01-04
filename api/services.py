@@ -932,7 +932,15 @@ class AnalyticsService:
                 }
 
             # Calculate months with data for accurate monthly average
-            months_with_data = AnalyticsService._get_months_with_data(session, category_id, year)
+            # Use the same date range as the transaction query for fair comparison
+            query_start_date = None
+            query_end_date = None
+            if end_date:
+                query_start_date = date(year, 1, 1)
+                query_end_date = date(year, end_date.month, end_date.day)
+            months_with_data = AnalyticsService._get_months_with_data(
+                session, category_id, year, start_date=query_start_date, end_date=query_end_date
+            )
             monthly_avg = total_amount / months_with_data if months_with_data > 0 else 0
 
             category_data[category_id]["yearly_data"][str(year)] = {
@@ -994,13 +1002,32 @@ class AnalyticsService:
         }
 
     @staticmethod
-    def _get_months_with_data(session: Session, category_id: int, year: int) -> int:
-        """Get the number of months with transaction data for a category in a specific year."""
+    def _get_months_with_data(
+        session: Session, category_id: int, year: int, start_date: date | None = None, end_date: date | None = None
+    ) -> int:
+        """Get the number of months with transaction data for a category in a specific year.
+
+        Args:
+            session: Database session
+            category_id: The category ID to count months for
+            year: The year to filter by
+            start_date: Optional start date to limit the count (used for fair comparisons)
+            end_date: Optional end date to limit the count (used for fair comparisons)
+
+        Returns:
+            Number of distinct months with transaction data in the specified year and date range
+        """
         query = (
             session.query(func.count(func.distinct(func.strftime("%m", TransactionORM.date))))
             .filter(or_(TransactionORM.category_id == category_id, TransactionORM.predicted_category_id == category_id))
             .filter(func.strftime("%Y", TransactionORM.date) == str(year))
         )
+
+        # Apply date range filters if provided (to match parent query filtering)
+        if start_date:
+            query = query.filter(TransactionORM.date >= start_date)
+        if end_date:
+            query = query.filter(TransactionORM.date <= end_date)
 
         result = query.scalar()
         return result if result else 0
@@ -1026,13 +1053,14 @@ class AnalyticsService:
             return {"years": [], "monthly_data": {}, "category_name": None}
 
         # Query monthly transaction data for the category
+        # Use effective category: actual_category takes precedence over predicted_category
         query = (
             session.query(
                 func.strftime("%Y", TransactionORM.date).label("year"),
                 func.strftime("%m", TransactionORM.date).label("month"),
                 func.sum(TransactionORM.amount).label("amount"),
             )
-            .filter(or_(TransactionORM.category_id == category_id, TransactionORM.predicted_category_id == category_id))
+            .filter(func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id) == category_id)
             .filter(func.strftime("%Y", TransactionORM.date).in_([str(y) for y in years]))
             .group_by(func.strftime("%Y", TransactionORM.date), func.strftime("%m", TransactionORM.date))
             .order_by(func.strftime("%Y", TransactionORM.date), func.strftime("%m", TransactionORM.date))
