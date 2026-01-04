@@ -28,7 +28,7 @@ FafyCat is a privacy-focused financial transaction categorization tool that uses
 
 2. **Install dependencies**
    ```bash
-   uv install
+   uv sync
    ```
 
 3. **Configure environment** (optional)
@@ -199,7 +199,7 @@ uvx ruff check --fix
 uvx ruff format
 
 # Type checking
-uv run mypy
+uvx ty check
 ```
 
 ### API Documentation
