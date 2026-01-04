@@ -35,7 +35,7 @@ def load_baseline_data() -> dict[str, float]:
         except Exception:
             return loader.get_baseline_cashflow(year=2024)
     except FileNotFoundError:
-        return {'income': 4500.0, 'spending': 3200.0, 'saving': 800.0}
+        return {"income": 4500.0, "spending": 3200.0, "saving": 800.0}
 
 
 def create_scenarios() -> dict:
@@ -74,16 +74,16 @@ def save_visualizations(results: dict, worst_case: tuple) -> None:
     try:
         import matplotlib.pyplot as plt
 
-        fig = compare_scenarios(*results.values(), metric='cumulative_savings')
-        fig.savefig('simulation_comparison.png', dpi=150, bbox_inches='tight')
+        fig = compare_scenarios(*results.values(), metric="cumulative_savings")
+        fig.savefig("simulation_comparison.png", dpi=150, bbox_inches="tight")
 
         detailed_fig = quick_plot(worst_case[1], show_details=True)
         detailed_fig.savefig(
-            f'detailed_{worst_case[0].lower().replace(" ", "_")}.png',
+            f"detailed_{worst_case[0].lower().replace(' ', '_')}.png",
             dpi=150,
-            bbox_inches='tight',
+            bbox_inches="tight",
         )
-        plt.close('all')
+        plt.close("all")
     except ImportError:
         pass
 
@@ -104,14 +104,13 @@ def main():
             sim.calculate_required_runway(scenarios[name], months=simulation_months)
 
     # Find worst case and save outputs
-    worst_case = min(results.items(), key=lambda x: x[1].summary['final_savings'])
+    worst_case = min(results.items(), key=lambda x: x[1].summary["final_savings"])
     save_visualizations(results, worst_case)
 
     import contextlib
 
     with contextlib.suppress(Exception):
-        worst_case[1].monthly_data.to_csv('simulation_results.csv')
-
+        worst_case[1].monthly_data.to_csv("simulation_results.csv")
 
 
 if __name__ == "__main__":

@@ -163,9 +163,7 @@ class CSVDataSource(DataSource):
         start_date = end_date - relativedelta(months=months - 1)
         start_date = start_date.replace(day=1)
 
-        mask = (self._df[self.date_column].dt.date >= start_date) & (
-            self._df[self.date_column].dt.date <= end_date
-        )
+        mask = (self._df[self.date_column].dt.date >= start_date) & (self._df[self.date_column].dt.date <= end_date)
         filtered_df = self._df[mask]
 
         # Calculate averages by category type

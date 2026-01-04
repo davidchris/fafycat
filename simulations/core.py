@@ -27,21 +27,28 @@ class SimulationResult:
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize)
 
         # Monthly cash flow
-        ax1.plot(self.monthly_data.index, self.monthly_data['net_cashflow'],
-                marker='o', linewidth=2, label='Net Cash Flow')
-        ax1.axhline(y=0, color='red', linestyle='--', alpha=0.5)
-        ax1.set_title(f'{self.scenario_name} - Monthly Cash Flow')
-        ax1.set_ylabel('EUR')
+        ax1.plot(
+            self.monthly_data.index, self.monthly_data["net_cashflow"], marker="o", linewidth=2, label="Net Cash Flow"
+        )
+        ax1.axhline(y=0, color="red", linestyle="--", alpha=0.5)
+        ax1.set_title(f"{self.scenario_name} - Monthly Cash Flow")
+        ax1.set_ylabel("EUR")
         ax1.legend()
         ax1.grid(True, alpha=0.3)
 
         # Cumulative savings
-        ax2.plot(self.monthly_data.index, self.monthly_data['cumulative_savings'],
-                color='green', marker='s', linewidth=2, label='Cumulative Savings')
-        ax2.axhline(y=0, color='red', linestyle='--', alpha=0.5)
-        ax2.set_title('Cumulative Savings/Runway')
-        ax2.set_ylabel('EUR')
-        ax2.set_xlabel('Month')
+        ax2.plot(
+            self.monthly_data.index,
+            self.monthly_data["cumulative_savings"],
+            color="green",
+            marker="s",
+            linewidth=2,
+            label="Cumulative Savings",
+        )
+        ax2.axhline(y=0, color="red", linestyle="--", alpha=0.5)
+        ax2.set_title("Cumulative Savings/Runway")
+        ax2.set_ylabel("EUR")
+        ax2.set_xlabel("Month")
         ax2.legend()
         ax2.grid(True, alpha=0.3)
 
@@ -55,10 +62,10 @@ class SimulationResult:
             use_total_liquid: If True, use total_liquid column (includes household).
                              If False, use cumulative_savings (personal only).
         """
-        if use_total_liquid and 'total_liquid' in self.monthly_data.columns:
-            column = 'total_liquid'
+        if use_total_liquid and "total_liquid" in self.monthly_data.columns:
+            column = "total_liquid"
         else:
-            column = 'cumulative_savings'
+            column = "cumulative_savings"
         negative_months = self.monthly_data[self.monthly_data[column] < 0]
         if len(negative_months) == 0:
             return None  # Never runs out
@@ -93,8 +100,13 @@ class Scenario(ABC):
 class Simulation:
     """Main simulation engine."""
 
-    def __init__(self, baseline_data: dict[str, float], initial_savings: float = 0.0,
-                 household_savings: float = 0.0, household_monthly_contribution: float = 0.0):
+    def __init__(
+        self,
+        baseline_data: dict[str, float],
+        initial_savings: float = 0.0,
+        household_savings: float = 0.0,
+        household_monthly_contribution: float = 0.0,
+    ):
         """Initialize simulation with baseline monthly data.
 
         Args:
@@ -146,9 +158,9 @@ class Simulation:
             adjusted_data = scenario.apply_adjustments(self.baseline_data, month_num)
 
             # Calculate net cash flow
-            monthly_income = adjusted_data.get('income', 0)
-            monthly_spending = adjusted_data.get('spending', 0)
-            monthly_saving = adjusted_data.get('saving', 0)
+            monthly_income = adjusted_data.get("income", 0)
+            monthly_spending = adjusted_data.get("spending", 0)
+            monthly_saving = adjusted_data.get("saving", 0)
             net_cashflow = monthly_income - monthly_spending
 
             # Update personal savings
@@ -160,44 +172,44 @@ class Simulation:
             # Calculate combined liquid position
             total_liquid = cumulative_savings + household_balance
 
-            monthly_results.append({
-                'month': month_num,
-                'date': month_date,
-                'income': monthly_income,
-                'spending': monthly_spending,
-                'saving': monthly_saving,
-                'net_cashflow': net_cashflow,
-                'household_contribution': self.household_monthly_contribution,
-                'household_balance': household_balance,
-                'total_liquid': total_liquid,
-                'cumulative_savings': cumulative_savings
-            })
+            monthly_results.append(
+                {
+                    "month": month_num,
+                    "date": month_date,
+                    "income": monthly_income,
+                    "spending": monthly_spending,
+                    "saving": monthly_saving,
+                    "net_cashflow": net_cashflow,
+                    "household_contribution": self.household_monthly_contribution,
+                    "household_balance": household_balance,
+                    "total_liquid": total_liquid,
+                    "cumulative_savings": cumulative_savings,
+                }
+            )
 
         # Convert to DataFrame
         df = pd.DataFrame(monthly_results)
-        df.set_index('month', inplace=True)
+        df.set_index("month", inplace=True)
 
         # Calculate summary statistics
         summary = {
-            'total_months': months,
-            'final_savings': cumulative_savings,
-            'final_household_balance': household_balance,
-            'final_total_liquid': cumulative_savings + household_balance,
-            'avg_monthly_cashflow': df['net_cashflow'].mean(),
-            'min_savings': df['cumulative_savings'].min(),
-            'min_total_liquid': df['total_liquid'].min(),
-            'scenario_name': scenario.name
+            "total_months": months,
+            "final_savings": cumulative_savings,
+            "final_household_balance": household_balance,
+            "final_total_liquid": cumulative_savings + household_balance,
+            "avg_monthly_cashflow": df["net_cashflow"].mean(),
+            "min_savings": df["cumulative_savings"].min(),
+            "min_total_liquid": df["total_liquid"].min(),
+            "scenario_name": scenario.name,
         }
 
         return SimulationResult(
-            monthly_data=df,
-            summary=summary,
-            scenario_name=scenario.name,
-            parameters=scenario.get_parameters()
+            monthly_data=df, summary=summary, scenario_name=scenario.name, parameters=scenario.get_parameters()
         )
 
-    def calculate_required_runway(self, scenario: Scenario, months: int = 24,
-                                 safety_margin: float = 1.5) -> dict[str, float]:
+    def calculate_required_runway(
+        self, scenario: Scenario, months: int = 24, safety_margin: float = 1.5
+    ) -> dict[str, float]:
         """Calculate required emergency fund for scenario.
 
         Args:
@@ -209,15 +221,15 @@ class Simulation:
             Dict with runway analysis
         """
         result = self.run(scenario, months)
-        min_savings = result.monthly_data['cumulative_savings'].min()
+        min_savings = result.monthly_data["cumulative_savings"].min()
 
         # If savings never go negative, no emergency fund needed
         required_emergency_fund = 0.0 if min_savings >= 0 else abs(min_savings) * safety_margin
 
         return {
-            'required_emergency_fund': required_emergency_fund,
-            'safety_margin': safety_margin,
-            'min_savings_point': min_savings,
-            'runway_months': result.get_runway_months(),
-            'recommended_total_savings': self.initial_savings + required_emergency_fund
+            "required_emergency_fund": required_emergency_fund,
+            "safety_margin": safety_margin,
+            "min_savings_point": min_savings,
+            "runway_months": result.get_runway_months(),
+            "recommended_total_savings": self.initial_savings + required_emergency_fund,
         }

@@ -34,7 +34,7 @@ class ParentalLeaveScenario(Scenario):
         # Generate descriptive name if not provided
         if name is None:
             if salary_replacement_rate > 0:
-                replacement_desc = f"{salary_replacement_rate*100:.0f}% replacement"
+                replacement_desc = f"{salary_replacement_rate * 100:.0f}% replacement"
             else:
                 replacement_desc = "no benefits"
             name = f"{months_without_salary}-Month Leave ({replacement_desc})"
@@ -51,14 +51,14 @@ class ParentalLeaveScenario(Scenario):
 
         # Store parameters for documentation
         self.parameters = {
-            'months_without_salary': months_without_salary,
-            'salary_replacement_rate': salary_replacement_rate,
-            'inflation_rate': inflation_rate,
-            'kindergeld_increase': kindergeld_increase,
-            'start_month': start_month,
-            'reduced_spending': self.reduced_spending,
-            'elterngeld_cap': elterngeld_cap,
-            'name': self.name
+            "months_without_salary": months_without_salary,
+            "salary_replacement_rate": salary_replacement_rate,
+            "inflation_rate": inflation_rate,
+            "kindergeld_increase": kindergeld_increase,
+            "start_month": start_month,
+            "reduced_spending": self.reduced_spending,
+            "elterngeld_cap": elterngeld_cap,
+            "name": self.name,
         }
 
     def apply_adjustments(self, baseline_data: dict[str, float], month_number: int = 1) -> dict[str, float]:
@@ -66,27 +66,27 @@ class ParentalLeaveScenario(Scenario):
         adjusted = baseline_data.copy()
 
         # Apply inflation to all amounts (monthly rate)
-        monthly_inflation = (1 + self.inflation_rate) ** (1/12) - 1
+        monthly_inflation = (1 + self.inflation_rate) ** (1 / 12) - 1
         for key in adjusted:
-            adjusted[key] *= (1 + monthly_inflation)
+            adjusted[key] *= 1 + monthly_inflation
 
         # Apply parental leave adjustments during the specified months
         if self.start_month <= month_number < self.start_month + self.months_without_salary:
             # Calculate Elterngeld (67% of salary, capped at €1,800/month)
-            elterngeld = min(adjusted['income'] * self.salary_replacement_rate, self.elterngeld_cap)
-            adjusted['income'] = elterngeld
+            elterngeld = min(adjusted["income"] * self.salary_replacement_rate, self.elterngeld_cap)
+            adjusted["income"] = elterngeld
             # Add child benefits increase
-            adjusted['income'] += self.kindergeld_increase
+            adjusted["income"] += self.kindergeld_increase
 
             # Apply any spending reductions during parental leave
             if self.reduced_spending:
                 for category, reduction_factor in self.reduced_spending.items():
                     if category in adjusted:
-                        adjusted[category] *= (1 - reduction_factor)
+                        adjusted[category] *= 1 - reduction_factor
 
         elif month_number >= self.start_month:
             # After parental leave - still get increased child benefits
-            adjusted['income'] += self.kindergeld_increase
+            adjusted["income"] += self.kindergeld_increase
 
         return adjusted
 
@@ -102,15 +102,12 @@ class InflationOnlyScenario(Scenario):
         """
         super().__init__("Inflation Only")
         self.annual_inflation_rate = annual_inflation_rate
-        self.parameters = {'annual_inflation_rate': annual_inflation_rate}
+        self.parameters = {"annual_inflation_rate": annual_inflation_rate}
 
     def apply_adjustments(self, baseline_data: dict[str, float], month_number: int = 1) -> dict[str, float]:
         """Apply inflation to all baseline amounts."""
-        monthly_inflation = (1 + self.annual_inflation_rate) ** (1/12) - 1
-        return {
-            key: value * (1 + monthly_inflation)
-            for key, value in baseline_data.items()
-        }
+        monthly_inflation = (1 + self.annual_inflation_rate) ** (1 / 12) - 1
+        return {key: value * (1 + monthly_inflation) for key, value in baseline_data.items()}
 
 
 class IncomeChangeScenario(Scenario):
@@ -133,7 +130,7 @@ class IncomeChangeScenario(Scenario):
         """
         if name is None:
             change_desc = "increase" if income_change_percent > 0 else "decrease"
-            name = f"Income {change_desc} ({income_change_percent*100:.0f}%)"
+            name = f"Income {change_desc} ({income_change_percent * 100:.0f}%)"
 
         super().__init__(name)
 
@@ -142,9 +139,9 @@ class IncomeChangeScenario(Scenario):
         self.duration_months = duration_months
 
         self.parameters = {
-            'income_change_percent': income_change_percent,
-            'start_month': start_month,
-            'duration_months': duration_months
+            "income_change_percent": income_change_percent,
+            "start_month": start_month,
+            "duration_months": duration_months,
         }
 
     def apply_adjustments(self, baseline_data: dict[str, float], month_number: int = 1) -> dict[str, float]:
@@ -154,7 +151,7 @@ class IncomeChangeScenario(Scenario):
         # Apply income change during specified period
         change_end = self.start_month + self.duration_months
         if self.start_month <= month_number < change_end:
-            adjusted['income'] *= (1 + self.income_change_percent)
+            adjusted["income"] *= 1 + self.income_change_percent
 
         return adjusted
 
@@ -176,7 +173,7 @@ class SpendingReductionScenario(Scenario):
             name: Custom scenario name
         """
         if name is None:
-            name = f"Spending Reduction ({spending_reduction_percent*100:.0f}%)"
+            name = f"Spending Reduction ({spending_reduction_percent * 100:.0f}%)"
 
         super().__init__(name)
 
@@ -184,8 +181,8 @@ class SpendingReductionScenario(Scenario):
         self.category_reductions = category_reductions or {}
 
         self.parameters = {
-            'spending_reduction_percent': spending_reduction_percent,
-            'category_reductions': self.category_reductions
+            "spending_reduction_percent": spending_reduction_percent,
+            "category_reductions": self.category_reductions,
         }
 
     def apply_adjustments(self, baseline_data: dict[str, float], month_number: int = 1) -> dict[str, float]:
@@ -193,13 +190,13 @@ class SpendingReductionScenario(Scenario):
         adjusted = baseline_data.copy()
 
         # Apply overall spending reduction
-        if 'spending' in adjusted:
-            adjusted['spending'] *= (1 - self.spending_reduction_percent)
+        if "spending" in adjusted:
+            adjusted["spending"] *= 1 - self.spending_reduction_percent
 
         # Apply category-specific reductions
         for category, reduction_percent in self.category_reductions.items():
             if category in adjusted:
-                adjusted[category] *= (1 - reduction_percent)
+                adjusted[category] *= 1 - reduction_percent
 
         return adjusted
 
@@ -223,13 +220,15 @@ class CustomScenario(Scenario):
         """Apply custom adjustment function."""
         # For backwards compatibility, check if function accepts month_number
         import inspect
+
         sig = inspect.signature(self.adjustment_function)
-        if 'month_number' in sig.parameters:
+        if "month_number" in sig.parameters:
             return self.adjustment_function(baseline_data, month_number)
         return self.adjustment_function(baseline_data)
 
 
 # Convenience functions for common scenarios
+
 
 def create_job_loss_scenario(months: int = 6, unemployment_benefit_rate: float = 0.6) -> ParentalLeaveScenario:
     """Create a job loss scenario with unemployment benefits.
@@ -244,7 +243,7 @@ def create_job_loss_scenario(months: int = 6, unemployment_benefit_rate: float =
     scenario = ParentalLeaveScenario(
         months_without_salary=months,
         salary_replacement_rate=unemployment_benefit_rate,
-        kindergeld_increase=0.0  # No child benefit increase for job loss
+        kindergeld_increase=0.0,  # No child benefit increase for job loss
     )
     scenario.name = f"Job Loss ({months} months)"
     return scenario
@@ -263,5 +262,5 @@ def create_sabbatical_scenario(months: int = 6, savings_increase: float = 0.0) -
     return IncomeChangeScenario(
         income_change_percent=-1.0,  # No income
         duration_months=months,
-        name=f"Sabbatical ({months} months)"
+        name=f"Sabbatical ({months} months)",
     )

@@ -13,29 +13,29 @@ class TestDictDataSource:
 
     def test_returns_copy(self):
         """Returns a copy, not the original dict."""
-        original = {'income': 5000.0, 'spending': 3000.0, 'saving': 500.0}
+        original = {"income": 5000.0, "spending": 3000.0, "saving": 500.0}
         source = DictDataSource(original)
 
         result = source.get_baseline_cashflow()
-        result['income'] = 0  # Modify result
+        result["income"] = 0  # Modify result
 
         # Original should be unchanged
-        assert source.get_baseline_cashflow()['income'] == 5000.0
+        assert source.get_baseline_cashflow()["income"] == 5000.0
 
     def test_get_baseline_cashflow(self):
         """get_baseline_cashflow returns expected format."""
-        data = {'income': 5000.0, 'spending': 3000.0, 'saving': 500.0}
+        data = {"income": 5000.0, "spending": 3000.0, "saving": 500.0}
         source = DictDataSource(data)
 
         result = source.get_baseline_cashflow()
 
-        assert result['income'] == 5000.0
-        assert result['spending'] == 3000.0
-        assert result['saving'] == 500.0
+        assert result["income"] == 5000.0
+        assert result["spending"] == 3000.0
+        assert result["saving"] == 500.0
 
     def test_get_monthly_averages(self):
         """get_monthly_averages returns same data (pre-aggregated)."""
-        data = {'income': 5000.0, 'spending': 3000.0}
+        data = {"income": 5000.0, "spending": 3000.0}
         source = DictDataSource(data)
 
         # Parameters are ignored for DictDataSource
@@ -45,7 +45,7 @@ class TestDictDataSource:
 
     def test_implements_datasource(self):
         """DictDataSource implements DataSource interface."""
-        source = DictDataSource({'income': 1000.0})
+        source = DictDataSource({"income": 1000.0})
         assert isinstance(source, DataSource)
 
 
@@ -55,7 +55,7 @@ class TestCSVDataSource:
     def test_file_not_found(self):
         """Raises FileNotFoundError for missing file."""
         with pytest.raises(FileNotFoundError):
-            CSVDataSource('/nonexistent/path/file.csv')
+            CSVDataSource("/nonexistent/path/file.csv")
 
     def test_load_csv_data(self, tmp_path):
         """Loads CSV data correctly."""
@@ -74,17 +74,17 @@ class TestCSVDataSource:
 {last_month.isoformat()},1100.00,spending
 {last_month.isoformat()},600.00,saving
 """
-        csv_file = tmp_path / 'transactions.csv'
+        csv_file = tmp_path / "transactions.csv"
         csv_file.write_text(csv_content)
 
         source = CSVDataSource(str(csv_file), months_back=12)
         result = source.get_baseline_cashflow()
 
-        assert 'income' in result
-        assert 'spending' in result
-        assert 'saving' in result
-        assert result['income'] > 0
-        assert result['spending'] > 0
+        assert "income" in result
+        assert "spending" in result
+        assert "saving" in result
+        assert result["income"] > 0
+        assert result["spending"] > 0
 
     def test_custom_column_names(self, tmp_path):
         """Supports custom column names."""
@@ -92,25 +92,25 @@ class TestCSVDataSource:
 2024-01-15,5000.00,income
 2024-01-20,1200.00,spending
 """
-        csv_file = tmp_path / 'custom.csv'
+        csv_file = tmp_path / "custom.csv"
         csv_file.write_text(csv_content)
 
         source = CSVDataSource(
             str(csv_file),
-            date_column='transaction_date',
-            amount_column='value',
-            category_type_column='type',
+            date_column="transaction_date",
+            amount_column="value",
+            category_type_column="type",
         )
 
         result = source.get_baseline_cashflow()
-        assert 'income' in result
+        assert "income" in result
 
     def test_implements_datasource(self, tmp_path):
         """CSVDataSource implements DataSource interface."""
         csv_content = """date,amount,category_type
 2024-01-15,5000.00,income
 """
-        csv_file = tmp_path / 'test.csv'
+        csv_file = tmp_path / "test.csv"
         csv_file.write_text(csv_content)
 
         source = CSVDataSource(str(csv_file))
@@ -121,14 +121,14 @@ class TestCSVDataSource:
         csv_content = """date,amount,category_type
 2024-01-15,5000.00,income
 """
-        csv_file = tmp_path / 'income_only.csv'
+        csv_file = tmp_path / "income_only.csv"
         csv_file.write_text(csv_content)
 
         source = CSVDataSource(str(csv_file), months_back=12)
         result = source.get_baseline_cashflow()
 
-        assert result['spending'] == 0.0
-        assert result['saving'] == 0.0
+        assert result["spending"] == 0.0
+        assert result["saving"] == 0.0
 
 
 class TestDataSourceInterface:
@@ -144,10 +144,10 @@ class TestDataSourceInterface:
 
         class ConstantDataSource(DataSource):
             def get_baseline_cashflow(self) -> dict[str, float]:
-                return {'income': 1000.0, 'spending': 500.0, 'saving': 100.0}
+                return {"income": 1000.0, "spending": 500.0, "saving": 100.0}
 
         source = ConstantDataSource()
         result = source.get_baseline_cashflow()
 
-        assert result['income'] == 1000.0
+        assert result["income"] == 1000.0
         assert isinstance(source, DataSource)

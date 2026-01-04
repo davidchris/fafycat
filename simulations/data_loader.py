@@ -51,8 +51,13 @@ class FafyCatDataLoader(DataSource):
         """Get database session."""
         return self.SessionLocal()
 
-    def get_monthly_averages(self, year: int | list[int] | None = None, months_back: int = 12,
-                            exclude_outliers: bool = True, outlier_percentiles: tuple = (1, 99)) -> dict[str, float]:
+    def get_monthly_averages(
+        self,
+        year: int | list[int] | None = None,
+        months_back: int = 12,
+        exclude_outliers: bool = True,
+        outlier_percentiles: tuple = (1, 99),
+    ) -> dict[str, float]:
         """Calculate monthly averages by category type from historical data.
 
         Args:
@@ -67,21 +72,13 @@ class FafyCatDataLoader(DataSource):
         with self.get_session() as session:
             # First, get all transactions for the time period
             base_query = (
-                session.query(
-                    CategoryORM.type,
-                    TransactionORM.amount
-                )
+                session.query(CategoryORM.type, TransactionORM.amount)
                 .join(
                     CategoryORM,
-                    CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id)
+                    CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
                 )
                 .filter(CategoryORM.is_active)
-                .filter(
-                    or_(
-                        TransactionORM.category_id.is_not(None),
-                        TransactionORM.predicted_category_id.is_not(None)
-                    )
-                )
+                .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
             )
 
             # Apply time filter
@@ -102,8 +99,9 @@ class FafyCatDataLoader(DataSource):
             else:
                 # Use last N months - fix the date calculation
                 from dateutil.relativedelta import relativedelta
+
                 end_date = date.today()
-                start_date = end_date - relativedelta(months=months_back-1)
+                start_date = end_date - relativedelta(months=months_back - 1)
                 start_date = start_date.replace(day=1)
                 base_query = base_query.filter(TransactionORM.date.between(start_date, end_date))
                 num_months = months_back
@@ -112,7 +110,7 @@ class FafyCatDataLoader(DataSource):
             all_transactions = base_query.all()
 
             # Group by category type and optionally filter outliers
-            totals = {category_type: [] for category_type in ['spending', 'income', 'saving']}
+            totals = {category_type: [] for category_type in ["spending", "income", "saving"]}
 
             for transaction in all_transactions:
                 category_type = transaction.type
@@ -159,21 +157,16 @@ class FafyCatDataLoader(DataSource):
                 session.query(
                     CategoryORM.name,
                     CategoryORM.type,
-                    func.sum(TransactionORM.amount).label('total_amount'),
-                    func.count(TransactionORM.id).label('transaction_count'),
-                    func.avg(TransactionORM.amount).label('avg_amount')
+                    func.sum(TransactionORM.amount).label("total_amount"),
+                    func.count(TransactionORM.id).label("transaction_count"),
+                    func.avg(TransactionORM.amount).label("avg_amount"),
                 )
                 .join(
                     CategoryORM,
-                    CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id)
+                    CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
                 )
                 .filter(CategoryORM.is_active)
-                .filter(
-                    or_(
-                        TransactionORM.category_id.is_not(None),
-                        TransactionORM.predicted_category_id.is_not(None)
-                    )
-                )
+                .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
                 .filter(TransactionORM.date.between(date(year, 1, 1), date(year, 12, 31)))
                 .group_by(CategoryORM.name, CategoryORM.type)
                 .order_by(CategoryORM.type, func.sum(TransactionORM.amount).desc())
@@ -184,19 +177,22 @@ class FafyCatDataLoader(DataSource):
             # Convert to DataFrame
             data = []
             for result in results:
-                data.append({
-                    'category': result.name,
-                    'type': result.type,
-                    'total_amount': abs(float(result.total_amount)),
-                    'monthly_avg': abs(float(result.total_amount)) / 12,
-                    'transaction_count': result.transaction_count,
-                    'avg_per_transaction': abs(float(result.avg_amount)) if result.avg_amount else 0
-                })
+                data.append(
+                    {
+                        "category": result.name,
+                        "type": result.type,
+                        "total_amount": abs(float(result.total_amount)),
+                        "monthly_avg": abs(float(result.total_amount)) / 12,
+                        "transaction_count": result.transaction_count,
+                        "avg_per_transaction": abs(float(result.avg_amount)) if result.avg_amount else 0,
+                    }
+                )
 
             return pd.DataFrame(data)
 
-    def get_baseline_cashflow(self, year: int | list[int] | None = None, months_back: int = 12,
-                             exclude_outliers: bool = True) -> dict[str, float]:
+    def get_baseline_cashflow(
+        self, year: int | list[int] | None = None, months_back: int = 12, exclude_outliers: bool = True
+    ) -> dict[str, float]:
         """Get baseline monthly cash flow data for simulations.
 
         Args:
@@ -210,9 +206,9 @@ class FafyCatDataLoader(DataSource):
         monthly_averages = self.get_monthly_averages(year, months_back, exclude_outliers=exclude_outliers)
 
         return {
-            'income': monthly_averages.get('income', 0.0),
-            'spending': monthly_averages.get('spending', 0.0),
-            'saving': monthly_averages.get('saving', 0.0)
+            "income": monthly_averages.get("income", 0.0),
+            "spending": monthly_averages.get("spending", 0.0),
+            "saving": monthly_averages.get("saving", 0.0),
         }
 
     def get_transaction_summary(self, year: int | None = None) -> dict[str, any]:
@@ -239,34 +235,25 @@ class FafyCatDataLoader(DataSource):
             categorized = (
                 session.query(func.count(TransactionORM.id))
                 .filter(TransactionORM.date.between(date(year, 1, 1), date(year, 12, 31)))
-                .filter(
-                    or_(
-                        TransactionORM.category_id.is_not(None),
-                        TransactionORM.predicted_category_id.is_not(None)
-                    )
-                )
+                .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
                 .scalar()
             )
 
             # Date range of data
             date_range = (
                 session.query(
-                    func.min(TransactionORM.date).label('min_date'),
-                    func.max(TransactionORM.date).label('max_date')
+                    func.min(TransactionORM.date).label("min_date"), func.max(TransactionORM.date).label("max_date")
                 )
                 .filter(TransactionORM.date.between(date(year, 1, 1), date(year, 12, 31)))
                 .first()
             )
 
             return {
-                'year': year,
-                'total_transactions': total_transactions or 0,
-                'categorized_transactions': categorized or 0,
-                'categorization_rate': (categorized / total_transactions * 100) if total_transactions > 0 else 0,
-                'date_range': {
-                    'start': date_range.min_date,
-                    'end': date_range.max_date
-                }
+                "year": year,
+                "total_transactions": total_transactions or 0,
+                "categorized_transactions": categorized or 0,
+                "categorization_rate": (categorized / total_transactions * 100) if total_transactions > 0 else 0,
+                "date_range": {"start": date_range.min_date, "end": date_range.max_date},
             }
 
     def export_data_for_analysis(self, filename: str, year: int | None = None) -> str:
@@ -286,19 +273,14 @@ class FafyCatDataLoader(DataSource):
                     TransactionORM.name,
                     TransactionORM.purpose,
                     TransactionORM.amount,
-                    CategoryORM.name.label('category'),
-                    CategoryORM.type.label('category_type')
+                    CategoryORM.name.label("category"),
+                    CategoryORM.type.label("category_type"),
                 )
                 .join(
                     CategoryORM,
-                    CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id)
+                    CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
                 )
-                .filter(
-                    or_(
-                        TransactionORM.category_id.is_not(None),
-                        TransactionORM.predicted_category_id.is_not(None)
-                    )
-                )
+                .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
             )
 
             if year:
@@ -310,13 +292,17 @@ class FafyCatDataLoader(DataSource):
             # Convert to DataFrame and export
             data = []
             for result in results:
-                data.append({
-                    'date': result.date,
-                    'description': f"{result.name} - {result.purpose}".rstrip(" -") if result.purpose else result.name,
-                    'amount': result.amount,
-                    'category': result.category,
-                    'category_type': result.category_type
-                })
+                data.append(
+                    {
+                        "date": result.date,
+                        "description": f"{result.name} - {result.purpose}".rstrip(" -")
+                        if result.purpose
+                        else result.name,
+                        "amount": result.amount,
+                        "category": result.category,
+                        "category_type": result.category_type,
+                    }
+                )
 
             df = pd.DataFrame(data)
             output_path = Path(filename)
@@ -356,7 +342,7 @@ class FafyCatDataLoader(DataSource):
             raise ValueError("No valid data found for any specified years")
 
         # Calculate weighted averages
-        weighted_baseline = {'income': 0.0, 'spending': 0.0, 'saving': 0.0}
+        weighted_baseline = {"income": 0.0, "spending": 0.0, "saving": 0.0}
 
         for year, data in year_data.items():
             weight = normalized_weights[year]
@@ -380,13 +366,15 @@ class FafyCatDataLoader(DataSource):
         for year in years:
             try:
                 baseline = self.get_baseline_cashflow(year, exclude_outliers=exclude_outliers)
-                comparison_data.append({
-                    'year': year,
-                    'income': baseline['income'],
-                    'spending': baseline['spending'],
-                    'saving': baseline['saving'],
-                    'net_surplus': baseline['income'] - baseline['spending'] - baseline['saving']
-                })
+                comparison_data.append(
+                    {
+                        "year": year,
+                        "income": baseline["income"],
+                        "spending": baseline["spending"],
+                        "saving": baseline["saving"],
+                        "net_surplus": baseline["income"] - baseline["spending"] - baseline["saving"],
+                    }
+                )
             except Exception:
                 continue
 
