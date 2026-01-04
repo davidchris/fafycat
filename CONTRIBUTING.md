@@ -60,7 +60,7 @@ uv run pytest
    uvx ruff check
    
    # Type checking
-   uv run mypy
+   uvx ty
    
    # Run tests
    uv run pytest
