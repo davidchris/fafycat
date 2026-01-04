@@ -294,12 +294,21 @@ def _run_training_sync() -> None:
                 ensemble_categorizer = EnsembleCategorizer(training_session, _config.ml)
                 model_filename = "ensemble_categorizer.pkl"
 
-                # Train ensemble with validation optimization (updates phases internally)
-                update_job_phase(TrainingPhase.TRAINING_LGBM)
-                cv_results = ensemble_categorizer.train_with_validation_optimization()
+                # Create progress callback to update job phases during training
+                def progress_callback(phase_name: str) -> None:
+                    phase_map = {
+                        "training_nb": TrainingPhase.TRAINING_NB,
+                        "optimizing_weights": TrainingPhase.OPTIMIZING_WEIGHTS,
+                    }
+                    if phase_name in phase_map:
+                        update_job_phase(phase_map[phase_name])
 
-                # Note: The ensemble trains both models and optimizes weights internally
-                # We update phases here as approximations since the training is atomic
+                # Train ensemble with validation optimization
+                update_job_phase(TrainingPhase.TRAINING_LGBM)
+                cv_results = ensemble_categorizer.train_with_validation_optimization(
+                    progress_callback=progress_callback
+                )
+
                 update_job_phase(TrainingPhase.SAVING_MODEL)
 
                 result_data = {

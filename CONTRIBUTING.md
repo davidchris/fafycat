@@ -175,4 +175,4 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-Thank you for helping make FafyCat better for everyone! =1
+Thank you for helping make FafyCat better for everyone!

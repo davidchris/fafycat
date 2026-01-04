@@ -1,5 +1,6 @@
 """Background ML training job management."""
 
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -76,56 +77,65 @@ class TrainingJob:
 # Global job storage (single job at a time for simplicity)
 _current_job: TrainingJob | None = None
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ml_training")
+_job_lock = threading.Lock()  # Protects _current_job access across threads
 
 
 def get_current_job() -> TrainingJob | None:
-    return _current_job
+    with _job_lock:
+        return _current_job
 
 
 def get_job_by_id(job_id: str) -> TrainingJob | None:
-    if _current_job and _current_job.job_id == job_id:
-        return _current_job
-    return None
+    with _job_lock:
+        if _current_job and _current_job.job_id == job_id:
+            return _current_job
+        return None
 
 
 def is_training_in_progress() -> bool:
-    return _current_job is not None and _current_job.status == "running"
+    with _job_lock:
+        return _current_job is not None and _current_job.status == "running"
 
 
 def create_training_job() -> TrainingJob:
     global _current_job
-    _current_job = TrainingJob(job_id=str(uuid.uuid4()))
-    return _current_job
+    with _job_lock:
+        _current_job = TrainingJob(job_id=str(uuid.uuid4()))
+        return _current_job
 
 
 def update_job_phase(phase: TrainingPhase) -> None:
-    if _current_job:
-        _current_job.phase = phase
-        _current_job.updated_at = _utc_now()
+    with _job_lock:
+        if _current_job:
+            _current_job.phase = phase
+            _current_job.updated_at = _utc_now()
 
 
 def set_job_running() -> None:
-    if _current_job:
-        _current_job.status = "running"
-        _current_job.updated_at = _utc_now()
+    with _job_lock:
+        if _current_job:
+            _current_job.status = "running"
+            _current_job.updated_at = _utc_now()
 
 
 def complete_job(result: dict[str, Any]) -> None:
-    if _current_job:
-        _current_job.status = "completed"
-        _current_job.phase = TrainingPhase.DONE
-        _current_job.result = result
-        _current_job.completed_at = _utc_now()
-        _current_job.updated_at = _utc_now()
+    with _job_lock:
+        if _current_job:
+            _current_job.status = "completed"
+            _current_job.phase = TrainingPhase.DONE
+            _current_job.result = result
+            _current_job.completed_at = _utc_now()
+            _current_job.updated_at = _utc_now()
 
 
 def fail_job(error: str) -> None:
-    if _current_job:
-        _current_job.status = "failed"
-        _current_job.phase = TrainingPhase.ERROR
-        _current_job.error = error
-        _current_job.completed_at = _utc_now()
-        _current_job.updated_at = _utc_now()
+    with _job_lock:
+        if _current_job:
+            _current_job.status = "failed"
+            _current_job.phase = TrainingPhase.ERROR
+            _current_job.error = error
+            _current_job.completed_at = _utc_now()
+            _current_job.updated_at = _utc_now()
 
 
 def get_executor() -> ThreadPoolExecutor:
