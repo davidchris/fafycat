@@ -154,64 +154,168 @@ def render_empty_categories_state(ml_status):
             alert('Create category functionality will be implemented here');
         }}
 
+        // Training job polling state
+        let trainingJobId = null;
+        let pollInterval = 2000;
+        let pollCount = 0;
+
         function trainModel() {{
             const trainButton = document.getElementById('trainButton');
             if (trainButton) {{
                 trainButton.disabled = true;
-                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Training...';
+                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Starting...';
             }}
 
+            // Start training job
             fetch('/api/ml/retrain', {{
                 method: 'POST',
                 headers: {{ 'Content-Type': 'application/json' }}
             }})
-            .then(response => response.json())
-            .then(data => {{
-                if (data.status === 'success') {{
-                    const accuracy = (data.accuracy * 100).toFixed(1);
-                    const samples = data.training_samples;
-                    
-                    // Update button to show prediction phase
-                    if (trainButton) {{
-                        trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Auto-predicting...';
-                    }}
-                    
-                    // Automatically predict unpredicted transactions
-                    return fetch('/api/ml/predict/batch-unpredicted', {{
-                        method: 'POST',
-                        headers: {{ 'Content-Type': 'application/json' }}
-                    }})
-                    .then(response => response.json())
-                    .then(predictData => {{
-                        if (predictData.status === 'success') {{
-                            const predicted = predictData.predictions_made;
-                            const message = predicted > 0 
-                                ? `🎉 Training and prediction completed!\\n\\n📊 Model Performance:\\n• Accuracy: ${{accuracy}}%\\n• Training samples: ${{samples}}\\n\\n⚡ Auto-Prediction Results:\\n• ${{predicted}} transactions now have predictions\\n• Ready for review on the Review page!`
-                                : `🎉 Model training completed!\\n\\n📊 Model Performance:\\n• Accuracy: ${{accuracy}}%\\n• Training samples: ${{samples}}\\n\\n✨ All transactions already have predictions!`;
-                            alert(message);
-                        }} else {{
-                            // Training succeeded but prediction failed - still show success
-                            alert(`🎉 Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}\\n\\n⚠️ Auto-prediction failed, but you can predict manually from this page.`);
-                        }}
-                        location.reload();
-                    }})
-                    .catch(error => {{
-                        // Training succeeded but prediction failed - still show success
-                        console.error('Auto-prediction failed:', error);
-                        alert(`🎉 Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}\\n\\n⚠️ Auto-prediction failed, but you can predict manually from this page.`);
-                        location.reload();
+            .then(response => {{
+                if (response.status === 409) {{
+                    return response.json().then(data => {{
+                        // Training already in progress - start polling existing job
+                        return {{ job_id: data.detail.job_id, status: 'running' }};
                     }});
+                }}
+                return response.json();
+            }})
+            .then(data => {{
+                if (data.job_id) {{
+                    trainingJobId = data.job_id;
+                    showTrainingProgress();
+                    pollTrainingStatus(data.job_id);
                 }} else {{
-                    throw new Error(data.detail || 'Training failed');
+                    throw new Error(data.detail || 'Failed to start training');
                 }}
             }})
             .catch(error => {{
                 alert('Training failed: ' + error.message);
-                if (trainButton) {{
-                    trainButton.disabled = false;
-                    trainButton.innerHTML = '<svg class="mr-2 h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" /></svg>🚀 Train ML Model Now';
-                }}
+                resetTrainButton();
             }});
+        }}
+
+        function showTrainingProgress() {{
+            // Create progress container if it doesn't exist
+            let container = document.getElementById('training-progress');
+            if (!container) {{
+                container = document.createElement('div');
+                container.id = 'training-progress';
+                const trainButton = document.getElementById('trainButton');
+                if (trainButton && trainButton.parentNode) {{
+                    trainButton.parentNode.insertBefore(container, trainButton.nextSibling);
+                }}
+            }}
+            container.innerHTML = `
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span id="training-phase" class="text-sm font-medium text-blue-800">
+                            Preparing...
+                        </span>
+                        <span id="training-progress-pct" class="text-sm text-blue-600">0%</span>
+                    </div>
+                    <div class="w-full bg-blue-200 rounded-full h-2">
+                        <div id="training-progress-bar"
+                             class="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                             style="width: 0%"></div>
+                    </div>
+                </div>
+            `;
+        }}
+
+        function pollTrainingStatus(jobId) {{
+            fetch(`/api/ml/training-status/${{jobId}}`)
+            .then(response => response.json())
+            .then(data => {{
+                updateTrainingProgress(data);
+
+                if (data.status === 'completed') {{
+                    handleTrainingComplete(data.result);
+                }} else if (data.status === 'failed') {{
+                    handleTrainingFailed(data.error);
+                }} else {{
+                    // Continue polling
+                    pollCount++;
+                    // Adaptive polling: slow down after 30 seconds
+                    if (pollCount > 15) {{
+                        pollInterval = 3000;
+                    }}
+                    setTimeout(() => pollTrainingStatus(jobId), pollInterval);
+                }}
+            }})
+            .catch(error => {{
+                console.error('Error polling status:', error);
+                // Retry on error
+                setTimeout(() => pollTrainingStatus(jobId), pollInterval);
+            }});
+        }}
+
+        function updateTrainingProgress(data) {{
+            const phaseEl = document.getElementById('training-phase');
+            const pctEl = document.getElementById('training-progress-pct');
+            const barEl = document.getElementById('training-progress-bar');
+
+            if (phaseEl) phaseEl.textContent = data.phase_description;
+            if (pctEl) pctEl.textContent = `${{data.progress}}%`;
+            if (barEl) barEl.style.width = `${{data.progress}}%`;
+        }}
+
+        function handleTrainingComplete(result) {{
+            const accuracy = (result.accuracy * 100).toFixed(1);
+            const samples = result.training_samples;
+
+            // Update button to show prediction phase
+            const trainButton = document.getElementById('trainButton');
+            if (trainButton) {{
+                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Auto-predicting...';
+            }}
+
+            // Automatically predict unpredicted transactions
+            fetch('/api/ml/predict/batch-unpredicted', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }}
+            }})
+            .then(response => response.json())
+            .then(predictData => {{
+                if (predictData.status === 'success') {{
+                    const predicted = predictData.predictions_made;
+                    const message = predicted > 0
+                        ? `🎉 Training and prediction completed!\\n\\n📊 Model Performance:\\n• Accuracy: ${{accuracy}}%\\n• Training samples: ${{samples}}\\n\\n⚡ Auto-Prediction Results:\\n• ${{predicted}} transactions now have predictions\\n• Ready for review on the Review page!`
+                        : `🎉 Model training completed!\\n\\n📊 Model Performance:\\n• Accuracy: ${{accuracy}}%\\n• Training samples: ${{samples}}\\n\\n✨ All transactions already have predictions!`;
+                    alert(message);
+                }} else {{
+                    alert(`🎉 Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}\\n\\n⚠️ Auto-prediction failed, but you can predict manually from this page.`);
+                }}
+                location.reload();
+            }})
+            .catch(error => {{
+                console.error('Auto-prediction failed:', error);
+                alert(`🎉 Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}\\n\\n⚠️ Auto-prediction failed, but you can predict manually from this page.`);
+                location.reload();
+            }});
+        }}
+
+        function handleTrainingFailed(error) {{
+            alert('Training failed: ' + error);
+            resetTrainButton();
+            hideTrainingProgress();
+        }}
+
+        function resetTrainButton() {{
+            const trainButton = document.getElementById('trainButton');
+            if (trainButton) {{
+                trainButton.disabled = false;
+                trainButton.innerHTML = '<svg class="mr-2 h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" /></svg>🚀 Train ML Model Now';
+            }}
+            pollCount = 0;
+            pollInterval = 2000;
+        }}
+
+        function hideTrainingProgress() {{
+            const container = document.getElementById('training-progress');
+            if (container) {{
+                container.innerHTML = '';
+            }}
         }}
 
         function retrainModel() {{
@@ -477,33 +581,140 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             }
         }
 
+        // Training job polling state
+        let trainingJobId = null;
+        let pollInterval = 2000;
+        let pollCount = 0;
+
         function trainModel() {
             const trainButton = document.getElementById('trainButton');
             if (trainButton) {
                 trainButton.disabled = true;
-                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Training...';
+                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Starting...';
             }
 
+            // Start training job
             fetch('/api/ml/retrain', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             })
-            .then(response => response.json())
+            .then(response => {
+                if (response.status === 409) {
+                    return response.json().then(data => {
+                        // Training already in progress - start polling existing job
+                        return { job_id: data.detail.job_id, status: 'running' };
+                    });
+                }
+                return response.json();
+            })
             .then(data => {
-                if (data.status === 'success') {
-                    alert(`🎉 Model training completed!\\n\\nAccuracy: ${(data.accuracy * 100).toFixed(1)}%\\nTraining samples: ${data.training_samples}\\n\\nYour model is now ready to predict transactions!`);
-                    location.reload();
+                if (data.job_id) {
+                    trainingJobId = data.job_id;
+                    showTrainingProgress();
+                    pollTrainingStatus(data.job_id);
                 } else {
-                    throw new Error(data.detail || 'Training failed');
+                    throw new Error(data.detail || 'Failed to start training');
                 }
             })
             .catch(error => {
                 alert('Training failed: ' + error.message);
-                if (trainButton) {
-                    trainButton.disabled = false;
-                    trainButton.innerHTML = '<svg class="mr-2 h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" /></svg>🚀 Train ML Model Now';
-                }
+                resetTrainButton();
             });
+        }
+
+        function showTrainingProgress() {
+            // Create progress container if it doesn't exist
+            let container = document.getElementById('training-progress');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'training-progress';
+                const trainButton = document.getElementById('trainButton');
+                if (trainButton && trainButton.parentNode) {
+                    trainButton.parentNode.insertBefore(container, trainButton.nextSibling);
+                }
+            }
+            container.innerHTML = `
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span id="training-phase" class="text-sm font-medium text-blue-800">
+                            Preparing...
+                        </span>
+                        <span id="training-progress-pct" class="text-sm text-blue-600">0%</span>
+                    </div>
+                    <div class="w-full bg-blue-200 rounded-full h-2">
+                        <div id="training-progress-bar"
+                             class="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                             style="width: 0%"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function pollTrainingStatus(jobId) {
+            fetch(`/api/ml/training-status/${jobId}`)
+            .then(response => response.json())
+            .then(data => {
+                updateTrainingProgress(data);
+
+                if (data.status === 'completed') {
+                    handleTrainingComplete(data.result);
+                } else if (data.status === 'failed') {
+                    handleTrainingFailed(data.error);
+                } else {
+                    // Continue polling
+                    pollCount++;
+                    // Adaptive polling: slow down after 30 seconds
+                    if (pollCount > 15) {
+                        pollInterval = 3000;
+                    }
+                    setTimeout(() => pollTrainingStatus(jobId), pollInterval);
+                }
+            })
+            .catch(error => {
+                console.error('Error polling status:', error);
+                // Retry on error
+                setTimeout(() => pollTrainingStatus(jobId), pollInterval);
+            });
+        }
+
+        function updateTrainingProgress(data) {
+            const phaseEl = document.getElementById('training-phase');
+            const pctEl = document.getElementById('training-progress-pct');
+            const barEl = document.getElementById('training-progress-bar');
+
+            if (phaseEl) phaseEl.textContent = data.phase_description;
+            if (pctEl) pctEl.textContent = `${data.progress}%`;
+            if (barEl) barEl.style.width = `${data.progress}%`;
+        }
+
+        function handleTrainingComplete(result) {
+            const accuracy = (result.accuracy * 100).toFixed(1);
+            const samples = result.training_samples;
+            alert(`🎉 Model training completed!\\n\\nAccuracy: ${accuracy}%\\nTraining samples: ${samples}\\n\\nYour model is now ready to predict transactions!`);
+            location.reload();
+        }
+
+        function handleTrainingFailed(error) {
+            alert('Training failed: ' + error);
+            resetTrainButton();
+            hideTrainingProgress();
+        }
+
+        function resetTrainButton() {
+            const trainButton = document.getElementById('trainButton');
+            if (trainButton) {
+                trainButton.disabled = false;
+                trainButton.innerHTML = '<svg class="mr-2 h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" /></svg>🚀 Train ML Model Now';
+            }
+            pollCount = 0;
+            pollInterval = 2000;
+        }
+
+        function hideTrainingProgress() {
+            const container = document.getElementById('training-progress');
+            if (container) {
+                container.innerHTML = '';
+            }
         }
 
         function retrainModel() {
@@ -623,21 +834,26 @@ def render_budget_variance_section():
         </div>
         
         <div class="mt-4 text-xs text-gray-500">
-            Showing current month budget vs actual spending. Set budgets above to see analysis.
+            Showing year-to-date budget vs actual spending. Set budgets above to see analysis.
         </div>
     </div>
     
     <script>
         // Load budget variance data on page load
         document.addEventListener('DOMContentLoaded', function() {
-            fetch('/api/analytics/budget-variance')
+            // Calculate year-to-date date range
+            const currentYear = new Date().getFullYear();
+            const startDate = `${currentYear}-01-01`;
+            const endDate = new Date().toISOString().split('T')[0];
+
+            fetch(`/api/analytics/budget-variance?start_date=${startDate}&end_date=${endDate}`)
                 .then(response => response.json())
                 .then(data => {
                     updateBudgetVarianceSummary(data);
                     updateBudgetVarianceMiniChart(data);
                 })
                 .catch(error => {
-                    document.getElementById('budget-variance-summary').innerHTML = 
+                    document.getElementById('budget-variance-summary').innerHTML =
                         '<div class="text-red-500 text-sm">Error loading budget data</div>';
                 });
         });

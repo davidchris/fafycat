@@ -7,9 +7,13 @@
 let charts = {
     budgetVariance: null,
     monthlyOverview: null,
-    categoryBreakdown: null,
+    spendingCategories: null,
+    incomeCategories: null,
+    savingCategories: null,
     savingsTracking: null,
-    topTransactions: null
+    topTransactions: null,
+    yearOverYear: null,
+    categoryCumulative: null
 };
 
 /**
@@ -331,238 +335,287 @@ function updateMonthlySummaryStats(data) {
 }
 
 /**
- * Initialize or update category breakdown chart with enhanced features
+ * Create horizontal bar chart for spending categories
  */
-function updateCategoryBreakdownChart(data) {
-    const ctx = document.getElementById('category-breakdown-chart');
+function updateSpendingCategoriesChart(data) {
+    const ctx = document.getElementById('spending-categories-chart');
     if (!ctx) return;
 
     // Destroy existing chart
-    if (charts.categoryBreakdown) {
-        charts.categoryBreakdown.destroy();
+    if (charts.spendingCategories) {
+        charts.spendingCategories.destroy();
     }
 
     const categories = data.categories || [];
     const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
     
-    // Separate spending categories and show top 8 for readability
-    const spendingCategories = categories.filter(c => c.category_type === 'spending').slice(0, 8);
-    const incomeCategories = categories.filter(c => c.category_type === 'income').slice(0, 3);
-    const savingCategories = categories.filter(c => c.category_type === 'saving').slice(0, 3);
+    // Get all spending categories, sorted by amount (descending)
+    const spendingCategories = categories
+        .filter(c => c.category_type === 'spending')
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
     
-    // Check if we have data
-    if (categories.length === 0) {
-        ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
+    if (spendingCategories.length === 0) {
+        ctx.style.display = 'none';
         return;
     }
     
-    // Determine chart type based on data
-    const useHorizontalBar = spendingCategories.length > 5;
+    ctx.style.display = 'block';
     
-    if (useHorizontalBar) {
-        // Horizontal bar chart for many categories
-        charts.categoryBreakdown = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: spendingCategories.map(c => c.category_name),
-                datasets: [{
-                    label: 'Amount Spent',
-                    data: spendingCategories.map(c => Math.abs(c.amount)),
-                    backgroundColor: spendingCategories.map((c, i) => {
-                        const colors = [
-                            'rgba(239, 68, 68, 0.8)', 'rgba(245, 158, 11, 0.8)', 'rgba(59, 130, 246, 0.8)',
-                            'rgba(168, 85, 247, 0.8)', 'rgba(236, 72, 153, 0.8)', 'rgba(14, 165, 233, 0.8)',
-                            'rgba(34, 197, 94, 0.8)', 'rgba(156, 163, 175, 0.8)'
-                        ];
-                        return c.budget_variance < 0 ? 'rgba(239, 68, 68, 0.8)' : colors[i % colors.length];
-                    }),
-                    borderColor: spendingCategories.map(c => 
-                        c.budget_variance < 0 ? 'rgb(239, 68, 68)' : 'rgb(59, 130, 246)'
-                    ),
-                    borderWidth: 2
-                }]
+    const labels = spendingCategories.map(c => c.category_name);
+    const amounts = spendingCategories.map(c => Math.abs(c.amount));
+    
+    charts.spendingCategories = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Amount (€)',
+                data: amounts,
+                backgroundColor: 'rgba(239, 68, 68, 0.8)', // Red for spending
+                borderColor: 'rgb(239, 68, 68)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            indexAxis: 'y', // Horizontal bars
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: `Spending Categories (${dateRange})`
+                },
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const category = spendingCategories[context.dataIndex];
+                            return [
+                                `€${context.parsed.x.toLocaleString()}`,
+                                `${category.transaction_count} transactions`,
+                                `Budget: €${category.budget || 'N/A'}`
+                            ];
+                        }
+                    }
+                }
             },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                plugins: {
+            scales: {
+                x: {
+                    beginAtZero: true,
                     title: {
                         display: true,
-                        text: `Top Spending Categories (${dateRange})`,
-                        font: { size: 14 }
+                        text: 'Amount (€)'
                     },
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const category = spendingCategories[context.dataIndex];
-                                const amount = context.parsed.x;
-                                const budget = category.budget || 0;
-                                const variance = budget - amount;
-                                
-                                return [
-                                    `Spent: €${amount.toLocaleString()}`,
-                                    `Budget: €${budget.toLocaleString()}`,
-                                    `Variance: €${variance.toFixed(0)} ${variance < 0 ? '(over)' : '(under)'}`
-                                ];
-                            }
+                    ticks: {
+                        callback: function(value) {
+                            return '€' + value.toLocaleString();
                         }
                     }
                 },
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: 'Amount (€)'
-                        },
-                        ticks: {
-                            callback: function(value) {
-                                return '€' + value.toLocaleString();
-                            }
-                        }
-                    },
-                    y: {
-                        title: {
-                            display: true,
-                            text: 'Categories'
-                        }
-                    }
-                }
-            }
-        });
-    } else {
-        // Doughnut chart for fewer categories
-        const topCategories = categories.slice(0, 8);
-        const labels = topCategories.map(c => c.category_name);
-        const amounts = topCategories.map(c => Math.abs(c.amount));
-        
-        // Generate colors based on category type
-        const colors = topCategories.map(c => {
-            if (c.category_type === 'income') return 'rgba(34, 197, 94, 0.7)';
-            if (c.category_type === 'saving') return 'rgba(59, 130, 246, 0.7)';
-            // Spending - use red for over budget, blue for under budget
-            return c.budget_variance < 0 ? 'rgba(239, 68, 68, 0.7)' : 'rgba(245, 158, 11, 0.7)';
-        });
-        
-        charts.categoryBreakdown = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: labels,
-                datasets: [{
-                    data: amounts,
-                    backgroundColor: colors,
-                    borderColor: colors.map(c => c.replace('0.7', '1')),
-                    borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
+                y: {
                     title: {
                         display: true,
-                        text: `Category Breakdown (${dateRange})`,
-                        font: { size: 14 }
-                    },
-                    legend: {
-                        display: true,
-                        position: 'bottom',
-                        labels: {
-                            generateLabels: function(chart) {
-                                const data = chart.data;
-                                return data.labels.map((label, i) => {
-                                    const category = topCategories[i];
-                                    const amount = data.datasets[0].data[i];
-                                    const percentage = ((amount / amounts.reduce((a, b) => a + b, 0)) * 100).toFixed(1);
-                                    
-                                    return {
-                                        text: `${label} (€${amount.toLocaleString()}, ${percentage}%)`,
-                                        fillStyle: data.datasets[0].backgroundColor[i],
-                                        strokeStyle: data.datasets[0].borderColor[i],
-                                        lineWidth: data.datasets[0].borderWidth,
-                                        hidden: false,
-                                        index: i
-                                    };
-                                });
-                            }
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const category = topCategories[context.dataIndex];
-                                const amount = context.parsed;
-                                const percentage = ((amount / amounts.reduce((a, b) => a + b, 0)) * 100).toFixed(1);
-                                
-                                return [
-                                    `${category.category_name}: €${amount.toLocaleString()} (${percentage}%)`,
-                                    `Type: ${category.category_type}`,
-                                    category.budget_variance !== null ? 
-                                        `Budget variance: €${category.budget_variance.toFixed(0)}` : ''
-                                ].filter(Boolean);
-                            }
-                        }
+                        text: 'Categories'
                     }
                 }
             }
-        });
-    }
-    
-    // Update category summary
-    updateCategorySummary(data);
+        }
+    });
 }
 
 /**
- * Update category analysis summary
+ * Create horizontal bar chart for income categories
  */
-function updateCategorySummary(data) {
-    const categories = data.categories || [];
-    const summary = data.summary || {};
-    
-    // Calculate category statistics
-    const spendingCategories = categories.filter(c => c.category_type === 'spending');
-    const incomeCategories = categories.filter(c => c.category_type === 'income');
-    const savingCategories = categories.filter(c => c.category_type === 'saving');
-    
-    const topSpendingCategory = spendingCategories[0];
-    const overBudgetCount = spendingCategories.filter(c => c.budget_variance < 0).length;
-    
-    const summaryHtml = `
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 p-4 bg-gray-50 rounded-lg">
-            <div class="text-center">
-                <div class="text-lg font-bold text-blue-600">${categories.length}</div>
-                <div class="text-sm text-gray-600" title="Number of categories with transactions in the selected period">Active Categories</div>
-            </div>
-            <div class="text-center">
-                <div class="text-lg font-bold ${overBudgetCount > 0 ? 'text-red-600' : 'text-green-600'}">
-                    ${overBudgetCount}
-                </div>
-                <div class="text-sm text-gray-600" title="Number of spending categories that exceeded their budget">Over Budget</div>
-            </div>
-            <div class="text-center">
-                <div class="text-lg font-bold text-gray-700">
-                    ${topSpendingCategory ? topSpendingCategory.category_name : 'N/A'}
-                </div>
-                <div class="text-sm text-gray-600" title="Category with the highest total spending amount">Top Spending</div>
-            </div>
-        </div>
-    `;
-    
-    // Find or create summary container
-    let summaryContainer = document.getElementById('category-summary-container');
-    if (!summaryContainer) {
-        summaryContainer = document.createElement('div');
-        summaryContainer.id = 'category-summary-container';
-        const chartContainer = document.getElementById('category-breakdown-chart').parentNode;
-        chartContainer.appendChild(summaryContainer);
+function updateIncomeCategoriesChart(data) {
+    const ctx = document.getElementById('income-categories-chart');
+    if (!ctx) return;
+
+    // Destroy existing chart
+    if (charts.incomeCategories) {
+        charts.incomeCategories.destroy();
     }
-    summaryContainer.innerHTML = summaryHtml;
+
+    const categories = data.categories || [];
+    const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
+    
+    // Get all income categories, sorted by amount (descending)
+    const incomeCategories = categories
+        .filter(c => c.category_type === 'income')
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    
+    if (incomeCategories.length === 0) {
+        ctx.style.display = 'none';
+        return;
+    }
+    
+    ctx.style.display = 'block';
+    
+    const labels = incomeCategories.map(c => c.category_name);
+    const amounts = incomeCategories.map(c => Math.abs(c.amount));
+    
+    charts.incomeCategories = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Amount (€)',
+                data: amounts,
+                backgroundColor: 'rgba(34, 197, 94, 0.8)', // Green for income
+                borderColor: 'rgb(34, 197, 94)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            indexAxis: 'y', // Horizontal bars
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: `Income Categories (${dateRange})`
+                },
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const category = incomeCategories[context.dataIndex];
+                            return [
+                                `€${context.parsed.x.toLocaleString()}`,
+                                `${category.transaction_count} transactions`
+                            ];
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Amount (€)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return '€' + value.toLocaleString();
+                        }
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Categories'
+                    }
+                }
+            }
+        }
+    });
 }
 
 /**
- * Initialize or update enhanced savings tracking chart
+ * Create horizontal bar chart for saving categories
+ */
+function updateSavingCategoriesChart(data) {
+    const ctx = document.getElementById('saving-categories-chart');
+    if (!ctx) return;
+
+    // Destroy existing chart
+    if (charts.savingCategories) {
+        charts.savingCategories.destroy();
+    }
+
+    const categories = data.categories || [];
+    const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
+    
+    // Get all saving categories, sorted by amount (descending)
+    const savingCategories = categories
+        .filter(c => c.category_type === 'saving')
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    
+    if (savingCategories.length === 0) {
+        ctx.style.display = 'none';
+        return;
+    }
+    
+    ctx.style.display = 'block';
+    
+    const labels = savingCategories.map(c => c.category_name);
+    const amounts = savingCategories.map(c => Math.abs(c.amount));
+    
+    charts.savingCategories = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Amount (€)',
+                data: amounts,
+                backgroundColor: 'rgba(59, 130, 246, 0.8)', // Blue for saving
+                borderColor: 'rgb(59, 130, 246)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            indexAxis: 'y', // Horizontal bars
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: `Saving Categories (${dateRange})`
+                },
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const category = savingCategories[context.dataIndex];
+                            return [
+                                `€${context.parsed.x.toLocaleString()}`,
+                                `${category.transaction_count} transactions`
+                            ];
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Amount (€)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return '€' + value.toLocaleString();
+                        }
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Categories'
+                    }
+                }
+            }
+        }
+    });
+}
+
+/**
+ * Update all category charts
+ */
+function updateCategoryBreakdownChart(data) {
+    updateSpendingCategoriesChart(data);
+    updateIncomeCategoriesChart(data);
+    updateSavingCategoriesChart(data);
+}
+
+/**
+ * Initialize or update savings tracking chart
  */
 function updateSavingsTrackingChart(data) {
     const ctx = document.getElementById('savings-tracking-chart');
@@ -573,20 +626,24 @@ function updateSavingsTrackingChart(data) {
         charts.savingsTracking.destroy();
     }
 
-    const monthlySavings = data.monthly_savings || [];
-    const statistics = data.statistics || {};
+    const savingsData = data.monthly_savings || [];
     const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
     
-    // Prepare chart data
-    const labels = monthlySavings.map(m => {
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        return monthNames[parseInt(m.month) - 1];
-    });
-    
-    // Calculate target line (median monthly savings extended)
-    const medianSavings = statistics.median_monthly || 0;
-    const targetCumulative = labels.map((_, i) => medianSavings * (i + 1));
+    // Prepare chart data for line chart showing savings trends - handle empty data case
+    let labels, monthlyValues, cumulativeValues;
+    if (savingsData.length === 0) {
+        labels = ['No Data'];
+        monthlyValues = [0];
+        cumulativeValues = [0];
+    } else {
+        labels = savingsData.map(s => {
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            return monthNames[parseInt(s.month) - 1];
+        });
+        monthlyValues = savingsData.map(s => Math.abs(s.amount));
+        cumulativeValues = savingsData.map(s => s.cumulative_amount);
+    }
     
     charts.savingsTracking = new Chart(ctx, {
         type: 'line',
@@ -595,305 +652,51 @@ function updateSavingsTrackingChart(data) {
             datasets: [
                 {
                     label: 'Monthly Savings',
-                    data: monthlySavings.map(m => m.amount),
-                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    data: monthlyValues,
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
                     borderColor: 'rgb(59, 130, 246)',
                     borderWidth: 3,
                     fill: true,
-                    type: 'bar',
-                    yAxisID: 'y',
-                    order: 3
+                    tension: 0.1,
+                    pointBackgroundColor: 'rgb(59, 130, 246)',
+                    pointBorderColor: 'white',
+                    pointBorderWidth: 2,
+                    pointRadius: savingsData.length === 0 ? 0 : 5
                 },
                 {
                     label: 'Cumulative Savings',
-                    data: monthlySavings.map(m => m.cumulative_amount),
+                    data: cumulativeValues,
                     backgroundColor: 'rgba(34, 197, 94, 0.1)',
                     borderColor: 'rgb(34, 197, 94)',
                     borderWidth: 3,
                     fill: false,
-                    yAxisID: 'y1',
+                    tension: 0.1,
                     pointBackgroundColor: 'rgb(34, 197, 94)',
                     pointBorderColor: 'white',
                     pointBorderWidth: 2,
-                    pointRadius: 5,
-                    order: 1
-                },
-                {
-                    label: 'Target (Median Pace)',
-                    data: targetCumulative,
-                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                    borderColor: 'rgb(245, 158, 11)',
-                    borderWidth: 2,
-                    borderDash: [5, 5],
-                    fill: false,
-                    yAxisID: 'y1',
-                    pointRadius: 0,
-                    order: 2
+                    pointRadius: savingsData.length === 0 ? 0 : 5
                 }
             ]
         },
         options: {
             responsive: true,
-            interaction: {
-                mode: 'index',
-                intersect: false,
-            },
             plugins: {
                 title: {
                     display: true,
-                    text: `Savings Tracking (${dateRange})`,
-                    font: { size: 16 }
+                    text: `Savings Tracking (${dateRange})`
                 },
                 legend: {
-                    display: true,
-                    position: 'bottom'
+                    display: true
                 },
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            const datasetLabel = context.dataset.label;
-                            const value = context.parsed.y;
-                            
-                            if (datasetLabel === 'Monthly Savings') {
-                                return `${datasetLabel}: €${value.toLocaleString()}`;
-                            } else {
-                                return `${datasetLabel}: €${value.toLocaleString()}`;
+                            if (savingsData.length === 0) {
+                                return 'No savings data available for selected period';
                             }
-                        },
-                        afterBody: function(tooltipItems) {
-                            const monthIndex = tooltipItems[0].dataIndex;
-                            const monthData = monthlySavings[monthIndex];
-                            if (!monthData) return [];
-                            
-                            const target = targetCumulative[monthIndex];
-                            const actual = monthData.cumulative_amount;
-                            const variance = actual - target;
-                            
-                            return [
-                                '',
-                                `Progress vs Target: €${variance.toFixed(0)} ${variance >= 0 ? 'ahead' : 'behind'}`
-                            ];
-                        }
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Monthly Savings (€)'
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            return '€' + value.toLocaleString();
-                        }
-                    }
-                },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Cumulative Savings (€)'
-                    },
-                    grid: {
-                        drawOnChartArea: false,
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            return '€' + value.toLocaleString();
-                        }
-                    }
-                }
-            }
-        }
-    });
-    
-    // Update savings statistics
-    updateSavingsStatistics(data);
-}
-
-/**
- * Update savings statistics display
- */
-function updateSavingsStatistics(data) {
-    const statistics = data.statistics || {};
-    const monthlySavings = data.monthly_savings || [];
-    
-    // Calculate additional metrics
-    const currentMonth = new Date().getMonth() + 1;
-    const monthsElapsed = currentMonth;
-    const projectedYearEnd = statistics.median_monthly * 12;
-    const currentPace = statistics.total_savings;
-    const onTrackPercentage = monthsElapsed > 0 ? (currentPace / (statistics.median_monthly * monthsElapsed)) * 100 : 0;
-    
-    const statsHtml = `
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 p-4 bg-gray-50 rounded-lg">
-            <div class="text-center">
-                <div class="text-lg font-bold text-blue-600">€${statistics.total_savings?.toLocaleString() || 0}</div>
-                <div class="text-sm text-gray-600" title="Total amount saved across all months">Total Saved</div>
-            </div>
-            <div class="text-center">
-                <div class="text-lg font-bold text-green-600">€${statistics.median_monthly?.toLocaleString() || 0}</div>
-                <div class="text-sm text-gray-600" title="Middle value of monthly savings amounts (50th percentile)">Median Monthly</div>
-            </div>
-            <div class="text-center">
-                <div class="text-lg font-bold text-purple-600">${statistics.months_with_savings || 0}</div>
-                <div class="text-sm text-gray-600" title="Number of months that had savings transactions">Active Months</div>
-            </div>
-            <div class="text-center">
-                <div class="text-lg font-bold ${onTrackPercentage >= 100 ? 'text-green-600' : onTrackPercentage >= 80 ? 'text-yellow-600' : 'text-red-600'}">
-                    ${onTrackPercentage.toFixed(0)}%
-                </div>
-                <div class="text-sm text-gray-600" title="How well you're staying on track with your typical savings pace">On Track</div>
-            </div>
-        </div>
-        
-        <div class="mt-4 p-3 bg-blue-50 rounded-lg">
-            <div class="text-sm text-blue-800">
-                <strong>Projection:</strong> At current median pace (€${statistics.median_monthly?.toLocaleString() || 0}/month), 
-                you're projected to save €${projectedYearEnd.toLocaleString()} by year-end.
-            </div>
-        </div>
-    `;
-    
-    // Find or create stats container
-    let statsContainer = document.getElementById('savings-stats-container');
-    if (!statsContainer) {
-        statsContainer = document.createElement('div');
-        statsContainer.id = 'savings-stats-container';
-        const chartContainer = document.getElementById('savings-tracking-chart').parentNode;
-        chartContainer.appendChild(statsContainer);
-    }
-    statsContainer.innerHTML = statsHtml;
-}
-
-/**
- * HTMX event handlers for analytics data updates
- */
-document.addEventListener('htmx:afterRequest', function(event) {
-    const url = event.detail.requestConfig.url;
-    
-    try {
-        const response = JSON.parse(event.detail.xhr.responseText);
-        
-        if (url.includes('/budget-variance')) {
-            updateBudgetVarianceChart(response);
-        } else if (url.includes('/monthly-summary')) {
-            updateMonthlyOverviewChart(response);
-        } else if (url.includes('/category-breakdown')) {
-            updateCategoryBreakdownChart(response);
-        } else if (url.includes('/savings-tracking')) {
-            updateSavingsTrackingChart(response);
-        }
-    } catch (error) {
-        console.warn('Could not parse analytics response:', error);
-    }
-});
-
-/**
- * Set default date values on page load
- */
-document.addEventListener('DOMContentLoaded', function() {
-    // Set default dates to current month
-    const today = new Date();
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-    
-    const startDateInput = document.getElementById('start-date');
-    const endDateInput = document.getElementById('end-date');
-    
-    if (startDateInput) {
-        startDateInput.value = firstDay.toISOString().split('T')[0];
-    }
-    
-    if (endDateInput) {
-        endDateInput.value = today.toISOString().split('T')[0];
-    }
-    
-    // Set year selector to current year
-    const yearSelector = document.getElementById('year-selector');
-    if (yearSelector) {
-        yearSelector.value = today.getFullYear().toString();
-    }
-});
-
-/**
- * Initialize or update top transactions chart
- */
-function updateTopTransactionsChart(data) {
-    const ctx = document.getElementById('top-transactions-chart');
-    if (!ctx) return;
-
-    // Destroy existing chart
-    if (charts.topTransactions) {
-        charts.topTransactions.destroy();
-    }
-
-    const transactions = data.top_transactions || [];
-    
-    if (transactions.length === 0) {
-        ctx.style.display = 'none';
-        return;
-    }
-    
-    ctx.style.display = 'block';
-    
-    // Prepare chart data
-    const labels = transactions.map(t => t.description.length > 30 ? t.description.substring(0, 30) + '...' : t.description);
-    const amounts = transactions.map(t => t.amount);
-    const percentages = transactions.map(t => t.percentage_of_total);
-    
-    // Generate colors
-    const colors = [
-        'rgba(239, 68, 68, 0.8)',   // Red
-        'rgba(245, 158, 11, 0.8)',  // Amber
-        'rgba(34, 197, 94, 0.8)',   // Green
-        'rgba(59, 130, 246, 0.8)',  // Blue
-        'rgba(147, 51, 234, 0.8)'   // Purple
-    ];
-    
-    charts.topTransactions = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Amount (€)',
-                data: amounts,
-                backgroundColor: colors.slice(0, transactions.length),
-                borderColor: colors.slice(0, transactions.length).map(color => color.replace('0.8', '1')),
-                borderWidth: 2
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                title: {
-                    display: true,
-                    text: `Top ${transactions.length} Spending Transactions - ${data.month_name} ${data.year}`,
-                    font: { size: 16 }
-                },
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            const transaction = transactions[context.dataIndex];
-                            return [
-                                `Amount: €${transaction.amount.toLocaleString()}`,
-                                `Category: ${transaction.category}`,
-                                `${transaction.percentage_of_total.toFixed(1)}% of total spending`
-                            ];
-                        },
-                        title: function(context) {
-                            const transaction = transactions[context[0].dataIndex];
-                            return transaction.description;
+                            const label = context.dataset.label || '';
+                            const value = context.parsed.y;
+                            return label + ': €' + value.toLocaleString();
                         }
                     }
                 }
@@ -910,18 +713,437 @@ function updateTopTransactionsChart(data) {
                             return '€' + value.toLocaleString();
                         }
                     }
+                }
+            }
+        }
+    });
+}
+
+/**
+ * Update top transactions chart (bar chart)
+ */
+function updateTopTransactionsChart(data) {
+    const ctx = document.getElementById('top-transactions-chart');
+    if (!ctx) return;
+
+    // Destroy existing chart
+    if (charts.topTransactions) {
+        charts.topTransactions.destroy();
+    }
+
+    const transactions = data.transactions || [];
+    
+    if (transactions.length === 0) {
+        return;
+    }
+    
+    // Take top 10 transactions by absolute amount
+    const topTransactions = transactions
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+        .slice(0, 10);
+    
+    // Prepare chart data
+    const labels = topTransactions.map(t => {
+        // Truncate long descriptions
+        const desc = t.description || t.name || 'Unknown';
+        return desc.length > 20 ? desc.substring(0, 20) + '...' : desc;
+    });
+    const amounts = topTransactions.map(t => Math.abs(t.amount));
+    
+    charts.topTransactions = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Transaction Amount',
+                data: amounts,
+                backgroundColor: topTransactions.map(t => 
+                    t.amount < 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)'
+                ),
+                borderColor: topTransactions.map(t => 
+                    t.amount < 0 ? 'rgb(239, 68, 68)' : 'rgb(34, 197, 94)'
+                ),
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Top Transactions by Amount'
                 },
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const transaction = topTransactions[context.dataIndex];
+                            return [
+                                `Amount: €${Math.abs(transaction.amount).toLocaleString()}`,
+                                `Date: ${new Date(transaction.date).toLocaleDateString()}`,
+                                `Category: ${transaction.category || 'Uncategorized'}`
+                            ];
+                        }
+                    }
+                }
+            },
+            scales: {
                 x: {
-                    title: {
-                        display: true,
-                        text: 'Transactions'
-                    },
                     ticks: {
                         maxRotation: 45,
                         minRotation: 0
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Amount (€)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return '€' + value.toLocaleString();
+                        }
                     }
                 }
             }
         }
     });
 }
+
+/**
+ * Update dashboard year selector and refresh all charts
+ */
+function updateDashboardYear() {
+    const yearSelector = document.getElementById('global-year-selector');
+    if (!yearSelector) return;
+    
+    const selectedYear = yearSelector.value;
+    
+    // Update all chart sections with new year
+    const sections = [
+        'budget-variance-container',
+        'monthly-overview-container', 
+        'category-breakdown-container',
+        'savings-tracking-container'
+    ];
+    
+    sections.forEach(sectionId => {
+        const container = document.getElementById(sectionId);
+        if (container) {
+            // Trigger HTMX reload with new year parameter
+            const endpoint = container.getAttribute('hx-get');
+            if (endpoint) {
+                const url = new URL(endpoint, window.location.origin);
+                url.searchParams.set('year', selectedYear);
+                container.setAttribute('hx-get', url.toString());
+                htmx.trigger(container, 'htmx:trigger');
+            }
+        }
+    });
+}
+
+/**
+ * Update top transactions for selected month
+ */
+function updateTopTransactions() {
+    const monthSelector = document.getElementById('month-selector');
+    const yearSelector = document.getElementById('global-year-selector');
+    
+    if (!monthSelector || !yearSelector) return;
+    
+    const selectedMonth = monthSelector.value;
+    const selectedYear = yearSelector.value;
+    
+    const container = document.getElementById('top-transactions-container');
+    if (container) {
+        const endpoint = container.getAttribute('hx-get') || '/api/analytics/top-transactions';
+        const url = new URL(endpoint, window.location.origin);
+        url.searchParams.set('month', selectedMonth);
+        url.searchParams.set('year', selectedYear);
+        
+        container.setAttribute('hx-get', url.toString());
+        htmx.trigger(container, 'htmx:trigger');
+    }
+}
+
+/**
+ * Initialize year selector on page load
+ */
+function initializeYearSelector() {
+    fetch('/api/analytics/available-years')
+        .then(response => response.json())
+        .then(data => {
+            const yearSelector = document.getElementById('global-year-selector');
+            if (!yearSelector) return;
+            
+            const years = data.years || [];
+            const currentYear = data.current_year || new Date().getFullYear();
+            
+            yearSelector.innerHTML = '';
+            
+            // If no years available, add current year as fallback
+            if (years.length === 0) {
+                const option = document.createElement('option');
+                option.value = currentYear;
+                option.textContent = currentYear;
+                option.selected = true;
+                yearSelector.appendChild(option);
+            } else {
+                years.forEach(year => {
+                    const option = document.createElement('option');
+                    option.value = year;
+                    option.textContent = year;
+                    if (year === currentYear) {
+                        option.selected = true;
+                    }
+                    yearSelector.appendChild(option);
+                });
+            }
+            
+            // Set current month in month selector
+            const monthSelector = document.getElementById('month-selector');
+            if (monthSelector) {
+                const currentMonth = new Date().getMonth() + 1;
+                monthSelector.value = currentMonth.toString();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading available years:', error);
+            
+            // Fallback: add current year manually
+            const yearSelector = document.getElementById('global-year-selector');
+            if (yearSelector) {
+                const currentYear = new Date().getFullYear();
+                yearSelector.innerHTML = '';
+                const option = document.createElement('option');
+                option.value = currentYear;
+                option.textContent = currentYear;
+                option.selected = true;
+                yearSelector.appendChild(option);
+            }
+        });
+}
+
+/**
+ * Update year-over-year comparison functionality
+ */
+function updateYearOverYearComparison() {
+    const year1Selector = document.getElementById('yoy-year1-selector');
+    const year2Selector = document.getElementById('yoy-year2-selector');
+    const viewModeSelector = document.getElementById('yoy-view-mode');
+    
+    if (!year1Selector || !year2Selector || !viewModeSelector) return;
+    
+    const year1 = year1Selector.value;
+    const year2 = year2Selector.value;
+    const viewMode = viewModeSelector.value;
+    
+    if (!year1 || !year2) return;
+    
+    const container = document.getElementById('yoy-comparison-container');
+    if (container) {
+        const endpoint = '/api/analytics/year-over-year';
+        const url = new URL(endpoint, window.location.origin);
+        url.searchParams.set('years', `${year1},${year2}`);
+        url.searchParams.set('view_mode', viewMode);
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                // Update comparison table
+                updateYearOverYearTable(data, viewMode);
+                
+                // Update charts if functions exist (from analytics_yoy.js)
+                if (typeof updateYearOverYearCharts === 'function') {
+                    updateYearOverYearCharts(data, viewMode);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading year-over-year data:', error);
+            });
+    }
+}
+
+/**
+ * Update year-over-year comparison table
+ */
+function updateYearOverYearTable(data, viewMode) {
+    const container = document.getElementById('yoy-comparison-table');
+    if (!container) return;
+    
+    const categories = data.categories || [];
+    const summary = data.summary || {};
+    const years = summary.years || [];
+    
+    if (years.length < 2) {
+        container.innerHTML = '<p class="text-red-500">Please select two different years for comparison.</p>';
+        return;
+    }
+    
+    let tableHtml = `
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white border border-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">${years[0]}</th>
+                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">${years[1]}</th>
+                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Change</th>
+                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">% Change</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+    `;
+    
+    categories.forEach(category => {
+        const year1Data = category.yearly_data[years[0]] || {};
+        const year2Data = category.yearly_data[years[1]] || {};
+        
+        const year1Value = viewMode === 'monthly_avg' ? year1Data.monthly_avg : year1Data.total;
+        const year2Value = viewMode === 'monthly_avg' ? year2Data.monthly_avg : year2Data.total;
+        
+        const changeKey = `${years[0]}_to_${years[1]}`;
+        const change = category.changes[changeKey] || {};
+        
+        const absoluteChange = viewMode === 'monthly_avg' ? change.absolute_monthly : change.absolute_total;
+        const percentageChange = viewMode === 'monthly_avg' ? change.percentage_monthly : change.percentage_total;
+        
+        const changeClass = absoluteChange >= 0 ? 'text-red-600' : 'text-green-600';
+        const changeSymbol = absoluteChange >= 0 ? '+' : '';
+        
+        tableHtml += `
+            <tr>
+                <td class="px-4 py-2 text-sm font-medium text-gray-900">${category.name}</td>
+                <td class="px-4 py-2 text-sm text-gray-900 text-right">€${Math.abs(year1Value || 0).toLocaleString()}</td>
+                <td class="px-4 py-2 text-sm text-gray-900 text-right">€${Math.abs(year2Value || 0).toLocaleString()}</td>
+                <td class="px-4 py-2 text-sm ${changeClass} text-right">${changeSymbol}€${Math.abs(absoluteChange || 0).toLocaleString()}</td>
+                <td class="px-4 py-2 text-sm ${changeClass} text-right">${changeSymbol}${(percentageChange || 0).toFixed(1)}%</td>
+            </tr>
+        `;
+    });
+    
+    tableHtml += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    container.innerHTML = tableHtml;
+}
+
+/**
+ * Update cumulative category chart
+ */
+function updateCategoryCumulativeChart() {
+    const categorySelector = document.getElementById('cumulative-category-selector');
+    if (!categorySelector) return;
+    
+    const selectedCategory = categorySelector.value;
+    if (!selectedCategory) return;
+    
+    const year1Selector = document.getElementById('yoy-year1-selector');
+    const year2Selector = document.getElementById('yoy-year2-selector');
+    
+    if (!year1Selector || !year2Selector) return;
+    
+    const year1 = year1Selector.value;
+    const year2 = year2Selector.value;
+    
+    const years = [year1, year2].filter(y => y);
+    if (years.length === 0) return;
+    
+    const endpoint = '/api/analytics/category-cumulative';
+    const url = new URL(endpoint, window.location.origin);
+    url.searchParams.set('category', selectedCategory);
+    url.searchParams.set('years', years.join(','));
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (typeof updateCategoryCumulativeChartDisplay === 'function') {
+                updateCategoryCumulativeChartDisplay(data);
+            }
+        })
+        .catch(error => {
+            console.error('Error loading cumulative category data:', error);
+        });
+}
+
+/**
+ * Update category analysis with selected filters
+ */
+function updateCategoryAnalysis() {
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+    const categoryType = document.getElementById('category-type').value;
+    
+    // Build URL with parameters
+    const url = new URL('/api/analytics/category-breakdown', window.location.origin);
+    if (startDate) url.searchParams.set('start_date', startDate);
+    if (endDate) url.searchParams.set('end_date', endDate);
+    if (categoryType) url.searchParams.set('category_type', categoryType);
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            // Update the container with success message
+            const container = document.getElementById('category-breakdown-container');
+            if (container) {
+                container.innerHTML = '<div class="text-green-600">Category analysis updated. Check chart below.</div>';
+            }
+            
+            // Update the chart
+            updateCategoryBreakdownChart(data);
+        })
+        .catch(error => {
+            console.error('Error loading category breakdown data:', error);
+            const container = document.getElementById('category-breakdown-container');
+            if (container) {
+                container.innerHTML = '<div class="text-red-600">Error loading category data: ' + error.message + '</div>';
+            }
+        });
+}
+
+/**
+ * Handle quick month selection buttons
+ */
+function handleQuickMonthSelection() {
+    // Add event listeners to quick month buttons
+    const quickMonthButtons = document.querySelectorAll('.quick-month-btn');
+    const currentYear = new Date().getFullYear();
+    
+    quickMonthButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const month = parseInt(this.dataset.month);
+            
+            // Calculate start and end dates for the month
+            const startDate = new Date(currentYear, month - 1, 1);
+            const endDate = new Date(currentYear, month, 0); // Last day of month
+            
+            // Set the date inputs
+            document.getElementById('start-date').value = startDate.toISOString().split('T')[0];
+            document.getElementById('end-date').value = endDate.toISOString().split('T')[0];
+            
+            // Update button styling
+            quickMonthButtons.forEach(btn => btn.classList.remove('bg-blue-500', 'text-white'));
+            quickMonthButtons.forEach(btn => btn.classList.add('bg-gray-200'));
+            this.classList.remove('bg-gray-200');
+            this.classList.add('bg-blue-500', 'text-white');
+            
+            // Auto-update the analysis
+            updateCategoryAnalysis();
+        });
+    });
+}
+
+// Initialize everything when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    initializeYearSelector();
+    handleQuickMonthSelection();
+    
+    // Load initial category breakdown chart
+    updateCategoryAnalysis();
+});
