@@ -29,7 +29,7 @@ class LightGBMWrapper:
 
     def fit(self, transactions: list[TransactionInput], labels: np.ndarray) -> None:
         self._fit_label_encoder(labels)
-        self.categorizer.train(test_size=0.0)
+        self.categorizer.fit(transactions, labels)
 
     def predict_proba(self, transactions: list[TransactionInput]) -> np.ndarray:
         self._validate_fitted()
@@ -120,7 +120,7 @@ class EnsembleCategorizer:
             )
 
         # Filter out categories with too few samples for cross-validation
-        min_samples_per_category = max(3, self.cv_validator.n_splits)  # Need at least n_splits samples for CV
+        min_samples_per_category = max(5, self.cv_validator.n_splits)  # Need at least 5 (or n_splits) for CV
 
         # Count transactions per category
         category_counts: dict[int, int] = {}
@@ -196,7 +196,7 @@ class EnsembleCategorizer:
         # Train LightGBM component
         print("  Training LightGBM...")
         lgbm_temp = TransactionCategorizer(self.session, self.config)
-        lgbm_temp.train(test_size=0.0)  # Use all available data in the current session
+        lgbm_temp.fit(train_transactions, train_labels)
 
         # Train Naive Bayes component
         if progress_callback:
@@ -253,7 +253,7 @@ class EnsembleCategorizer:
 
         # Train final models on full dataset
         print("🚀 Training final models on full dataset...")
-        self.lgbm_component.train(test_size=0.0)
+        self.lgbm_component.fit(transactions, labels)
         self.nb_component.fit(transactions, labels)
 
         # Save results

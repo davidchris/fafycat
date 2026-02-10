@@ -57,7 +57,7 @@ class TransactionCategorizer:
             )
 
         # Filter out categories with too few samples for cross-validation
-        min_samples_per_category = 3  # Need at least 3 for CV
+        min_samples_per_category = 5  # Need at least 5 for 5-fold CV
 
         # Count transactions per category
         category_counts = {}
@@ -139,16 +139,13 @@ class TransactionCategorizer:
         print("Training LightGBM classifier...")
         self.classifier.fit(X_train_prepared, y_train)
 
-        # Calibrate probabilities using FrozenEstimator (avoids class mismatch in folds)
+        # Calibrate probabilities using FrozenEstimator with internal CV
+        # Uses sigmoid (Platt scaling) — stable with small samples unlike isotonic
+        # Calibrates on train set with 5-fold CV for pseudo-out-of-sample predictions
         print("Calibrating probabilities...")
         frozen = FrozenEstimator(self.classifier)
-        try:
-            self.calibrated_classifier = CalibratedClassifierCV(frozen, method="isotonic")
-            self.calibrated_classifier.fit(X_test_prepared, y_test)
-        except ValueError as e:
-            print(f"Isotonic calibration failed ({e}), using sigmoid method...")
-            self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid")
-            self.calibrated_classifier.fit(X_test_prepared, y_test)
+        self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid", cv=5)
+        self.calibrated_classifier.fit(X_train_prepared, y_train)
 
         # Calculate metrics
         print("Calculating metrics...")
@@ -165,6 +162,24 @@ class TransactionCategorizer:
         print(f"Training complete! Accuracy: {metrics.accuracy:.3f}")
 
         return metrics
+
+    def fit(self, transactions: list[TransactionInput], labels: np.ndarray) -> None:
+        """Train the model on pre-split data without DB access."""
+        features_list = self.feature_extractor.extract_batch_features(transactions)
+        X_df = pd.DataFrame(features_list)
+
+        y_encoded = self.label_encoder.fit_transform(labels)
+        self.classes_ = self.label_encoder.classes_
+
+        X_prepared = self._prepare_features(X_df, fit=True)
+        self.classifier.fit(X_prepared, y_encoded)
+
+        # Calibrate on training data with internal CV
+        frozen = FrozenEstimator(self.classifier)
+        self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid", cv=5)
+        self.calibrated_classifier.fit(X_prepared, y_encoded)
+
+        self.is_trained = True
 
     def _prepare_features(self, X_df: pd.DataFrame, fit: bool = False) -> np.ndarray:
         """Prepare features for ML model."""

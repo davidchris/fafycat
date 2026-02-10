@@ -146,6 +146,11 @@ unresolved-reference = "ignore"
 [tool.ty.terminal]
 output-format = "full"
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.5",
