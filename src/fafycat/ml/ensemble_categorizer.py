@@ -311,7 +311,7 @@ class EnsembleCategorizer:
         for txn in transactions:
             # First try rule-based merchant mapping (high confidence)
             merchant_match = self.lgbm_component.merchant_mapper.get_category(txn.name)
-            if merchant_match and merchant_match.confidence > 0.95:
+            if merchant_match and merchant_match.confidence >= 0.95:
                 predictions.append(
                     TransactionPrediction(
                         transaction_id=txn.generate_id(),

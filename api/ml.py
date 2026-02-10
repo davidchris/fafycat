@@ -28,7 +28,7 @@ from api.models import (
     TransactionPredictResponse,
 )
 from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import CategoryORM
+from src.fafycat.core.database import AppSettingsORM, CategoryORM
 from src.fafycat.core.models import TransactionInput
 from src.fafycat.ml.categorizer import TransactionCategorizer
 from src.fafycat.ml.ensemble_categorizer import EnsembleCategorizer
@@ -90,6 +90,46 @@ def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategor
             )
 
     return _categorizer
+
+
+def get_auto_approve_threshold(db: Session) -> float:
+    """Read auto_approve_threshold from DB, falling back to MLConfig default."""
+    try:
+        setting = db.query(AppSettingsORM).filter(AppSettingsORM.key == "auto_approve_threshold").first()
+        if setting and setting.value is not None:
+            return float(str(setting.value))
+    except Exception:
+        pass
+    return AppConfig().ml.auto_approve_threshold
+
+
+@router.get("/settings")
+async def get_ml_settings(db: Session = Depends(get_db_session)) -> dict:
+    """Get ML settings."""
+    return {
+        "auto_approve_threshold": get_auto_approve_threshold(db),
+    }
+
+
+@router.put("/settings")
+async def update_ml_settings(payload: dict, db: Session = Depends(get_db_session)) -> dict:
+    """Update ML settings."""
+    if "auto_approve_threshold" in payload:
+        value = float(payload["auto_approve_threshold"])
+        if not 0.50 <= value <= 0.99:
+            raise HTTPException(status_code=400, detail="auto_approve_threshold must be between 0.50 and 0.99")
+
+        setting = db.query(AppSettingsORM).filter(AppSettingsORM.key == "auto_approve_threshold").first()
+        if setting:
+            setting.value = str(value)
+        else:
+            setting = AppSettingsORM(key="auto_approve_threshold", value=str(value))
+            db.add(setting)
+        db.commit()
+
+    return {
+        "auto_approve_threshold": get_auto_approve_threshold(db),
+    }
 
 
 @router.post("/predict", response_model=TransactionPredictResponse)
@@ -478,7 +518,7 @@ async def predict_unpredicted_transactions(
         auto_accepted = 0
         high_priority_review = 0
         standard_review = 0
-        confidence_threshold = 0.95  # Conservative threshold for auto-acceptance
+        confidence_threshold = get_auto_approve_threshold(db)
 
         for txn, prediction in zip(unpredicted_txns, predictions, strict=True):
             txn.predicted_category_id = prediction.predicted_category_id
@@ -597,7 +637,7 @@ async def repredict_unreviewed_transactions(
         auto_accepted = 0
         high_priority_review = 0
         standard_review = 0
-        confidence_threshold = 0.95
+        confidence_threshold = get_auto_approve_threshold(db)
 
         for txn, prediction in zip(repredict_txns, predictions, strict=True):
             txn.predicted_category_id = prediction.predicted_category_id

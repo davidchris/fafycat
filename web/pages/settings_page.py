@@ -163,6 +163,9 @@ def render_empty_categories_state(ml_status):
     </div>
 
     <script>
+        window._autoApproveThreshold = 0.95;
+        fetch('/api/ml/settings').then(r => r.json()).then(d => {{ window._autoApproveThreshold = parseFloat(d.auto_approve_threshold); }}).catch(() => {{}});
+
         function showCreateCategoryModal() {{
             alert('Create category functionality will be implemented here');
         }}
@@ -338,10 +341,11 @@ def render_empty_categories_state(ml_status):
         }}
 
         function confirmAndPredictUnpredicted(count) {{
+            const pct = (window._autoApproveThreshold * 100).toFixed(0);
             const confirmMessage = `Run ML predictions on ${{count}} transactions?\\n\\n` +
                 `This will:\\n` +
                 `• Apply ML predictions to all transactions without predictions\\n` +
-                `• Auto-accept high-confidence predictions (95%+)\\n` +
+                `• Auto-accept high-confidence predictions (${{pct}}%+)\\n` +
                 `• Add uncertain predictions to your Review Queue\\n` +
                 `• You may need to review some transactions manually\\n\\n` +
                 `Use this when you've imported transactions before training a model, ` +
@@ -354,11 +358,12 @@ def render_empty_categories_state(ml_status):
         }}
 
         function confirmAndRepredict(count) {{
+            const pct = (window._autoApproveThreshold * 100).toFixed(0);
             const confirmMessage = `Re-predict ${{count}} unreviewed transactions?\\n\\n` +
                 `This will:\\n` +
                 `• Re-run predictions using the current model on transactions you haven't reviewed yet\\n` +
                 `• Useful after retraining to apply the improved model\\n` +
-                `• Auto-accept high-confidence predictions (95%+)\\n` +
+                `• Auto-accept high-confidence predictions (${{pct}}%+)\\n` +
                 `• Add uncertain predictions to your Review Queue\\n\\n` +
                 `Continue?`;
 
@@ -583,6 +588,11 @@ def render_categories_management(category_groups, inactive_categories, ml_status
     </div>
 
     <script>
+        if (!window._autoApproveThreshold) {
+            window._autoApproveThreshold = 0.95;
+            fetch('/api/ml/settings').then(r => r.json()).then(d => { window._autoApproveThreshold = parseFloat(d.auto_approve_threshold); }).catch(() => {});
+        }
+
         function editBudget(categoryId, categoryName, currentBudget) {
             const newBudget = prompt(`Set monthly budget for "${categoryName}":`, currentBudget);
             if (newBudget !== null && !isNaN(newBudget)) {
@@ -788,10 +798,11 @@ def render_categories_management(category_groups, inactive_categories, ml_status
         }
 
         function confirmAndPredictUnpredicted(count) {
+            const pct = (window._autoApproveThreshold * 100).toFixed(0);
             const confirmMessage = `Run ML predictions on ${count} transactions?\\n\\n` +
                 `This will:\\n` +
                 `• Apply ML predictions to all transactions without predictions\\n` +
-                `• Auto-accept high-confidence predictions (95%+)\\n` +
+                `• Auto-accept high-confidence predictions (${pct}%+)\\n` +
                 `• Add uncertain predictions to your Review Queue\\n` +
                 `• You may need to review some transactions manually\\n\\n` +
                 `Use this when you've imported transactions before training a model, ` +
@@ -804,11 +815,12 @@ def render_categories_management(category_groups, inactive_categories, ml_status
         }
 
         function confirmAndRepredict(count) {
+            const pct = (window._autoApproveThreshold * 100).toFixed(0);
             const confirmMessage = `Re-predict ${count} unreviewed transactions?\\n\\n` +
                 `This will:\\n` +
                 `• Re-run predictions using the current model on transactions you haven't reviewed yet\\n` +
                 `• Useful after retraining to apply the improved model\\n` +
-                `• Auto-accept high-confidence predictions (95%+)\\n` +
+                `• Auto-accept high-confidence predictions (${pct}%+)\\n` +
                 `• Add uncertain predictions to your Review Queue\\n\\n` +
                 `Continue?`;
 
@@ -1376,6 +1388,77 @@ def render_yearly_budget_management(current_year):
     """
 
 
+def render_ml_settings_subsection():
+    """Render ML auto-approve threshold slider subsection."""
+    return """
+    <div class="mt-4 pt-4 border-t border-green-200">
+        <h4 class="text-sm font-semibold text-green-800 mb-2">Auto-Approve Threshold</h4>
+        <p class="text-xs text-green-700 mb-3">
+            Predictions with confidence at or above this threshold are automatically accepted.
+            Lower values auto-approve more transactions; higher values require more manual review.
+        </p>
+        <div class="flex items-center gap-4">
+            <input type="range" id="thresholdSlider" min="0.50" max="0.99" step="0.01" value="0.95"
+                   class="flex-1 h-2 bg-green-200 rounded-lg appearance-none cursor-pointer"
+                   oninput="document.getElementById('thresholdValue').textContent = parseFloat(this.value).toFixed(2)">
+            <span id="thresholdValue" class="text-sm font-mono font-bold text-green-800 w-12 text-right">0.95</span>
+        </div>
+        <div class="flex justify-between text-xs text-green-600 mt-1 mb-3">
+            <span>0.50 (more auto-approve)</span>
+            <span>0.99 (stricter)</span>
+        </div>
+        <button onclick="saveThreshold()" id="saveThresholdBtn"
+                class="inline-flex items-center px-3 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200">
+            Save Threshold
+        </button>
+        <span id="thresholdSaveStatus" class="text-xs text-green-600 ml-2"></span>
+    </div>
+
+    <script>
+        // Load current threshold on page load
+        window._autoApproveThreshold = 0.95;
+        document.addEventListener('DOMContentLoaded', function() {
+            fetch('/api/ml/settings')
+                .then(r => r.json())
+                .then(data => {
+                    const val = parseFloat(data.auto_approve_threshold).toFixed(2);
+                    window._autoApproveThreshold = parseFloat(val);
+                    const slider = document.getElementById('thresholdSlider');
+                    const display = document.getElementById('thresholdValue');
+                    if (slider) slider.value = val;
+                    if (display) display.textContent = val;
+                })
+                .catch(() => {});
+        });
+
+        function saveThreshold() {
+            const value = parseFloat(document.getElementById('thresholdSlider').value);
+            const btn = document.getElementById('saveThresholdBtn');
+            const status = document.getElementById('thresholdSaveStatus');
+            btn.disabled = true;
+            status.textContent = 'Saving...';
+
+            fetch('/api/ml/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ auto_approve_threshold: value })
+            })
+            .then(r => r.json())
+            .then(data => {
+                window._autoApproveThreshold = parseFloat(data.auto_approve_threshold);
+                status.textContent = 'Saved! (' + parseFloat(data.auto_approve_threshold).toFixed(2) + ')';
+                btn.disabled = false;
+                setTimeout(() => { status.textContent = ''; }, 3000);
+            })
+            .catch(err => {
+                status.textContent = 'Error: ' + err.message;
+                btn.disabled = false;
+            });
+        }
+    </script>
+    """
+
+
 def render_ml_training_section(ml_status):
     """Render ML model training section based on current status."""
     model_loaded = ml_status.get("model_loaded", False)
@@ -1439,6 +1522,7 @@ def render_ml_training_section(ml_status):
                             🔄 Retrain Model
                         </button>{predict_button}{repredict_button}
                     </div>
+                    {render_ml_settings_subsection()}
                     </div>
                 </div>
             </div>

@@ -56,6 +56,8 @@ class MLConfig(BaseModel):
 
     confidence_thresholds: dict[str, float] = Field(default_factory=lambda: {"high": 0.9, "medium": 0.7, "low": 0.5})
 
+    auto_approve_threshold: float = 0.95
+
     model_dir: Path = Field(default_factory=lambda: Path(os.getenv("FAFYCAT_MODEL_DIR", "data/models")))
     min_training_samples: int = 50
 

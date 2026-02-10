@@ -133,7 +133,7 @@ class MerchantMapper:
                 .count()
             )
 
-            confidence = min(0.95, count / total_for_merchant)
+            confidence = min(0.98, count / total_for_merchant)
 
             # Only add high-confidence mappings
             if confidence >= 0.8:
