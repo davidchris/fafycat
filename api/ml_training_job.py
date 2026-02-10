@@ -5,7 +5,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
@@ -14,7 +14,7 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class TrainingPhase(str, Enum):
+class TrainingPhase(StrEnum):
     PENDING = "pending"
     PREPARING_DATA = "preparing_data"
     TRAINING_LGBM = "training_lgbm"

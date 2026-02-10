@@ -133,12 +133,14 @@ def _categorize_transaction(txn, prediction, strategic_selections, confidence_th
 def _handle_prediction_error(e: Exception):
     """Handle prediction errors gracefully."""
     import logging
+    import traceback
 
     error_msg = str(e)
     if "No trained ML model found" in error_msg:
-        logging.info("No ML model available for predictions during upload - this is expected for new installations")
+        logging.info("No ML model available for predictions during upload")
     else:
-        logging.warning("ML prediction failed during upload: %s", e)
+        logging.error("ML prediction failed during upload: %s", e)
+        traceback.print_exc()
 
 
 @router.post("/csv", response_model=UploadResponse)

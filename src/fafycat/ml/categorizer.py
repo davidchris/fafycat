@@ -10,6 +10,7 @@ import pandas as pd
 from lightgbm import LGBMClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.frozen import FrozenEstimator
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sqlalchemy.orm import Session
@@ -137,17 +138,16 @@ class TransactionCategorizer:
         print("Training LightGBM classifier...")
         self.classifier.fit(X_train_prepared, y_train)
 
-        # Calibrate probabilities
+        # Calibrate probabilities using FrozenEstimator (avoids class mismatch in folds)
         print("Calibrating probabilities...")
-        # Use cv=2 to handle small classes (need at least 2 samples per fold)
-        # and fallback to sigmoid method if isotonic fails
+        frozen = FrozenEstimator(self.classifier)
         try:
-            self.calibrated_classifier = CalibratedClassifierCV(self.classifier, cv=2, method="isotonic")
-            self.calibrated_classifier.fit(X_train_prepared, y_train)
+            self.calibrated_classifier = CalibratedClassifierCV(frozen, method="isotonic")
+            self.calibrated_classifier.fit(X_test_prepared, y_test)
         except ValueError as e:
             print(f"Isotonic calibration failed ({e}), using sigmoid method...")
-            self.calibrated_classifier = CalibratedClassifierCV(self.classifier, cv=2, method="sigmoid")
-            self.calibrated_classifier.fit(X_train_prepared, y_train)
+            self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid")
+            self.calibrated_classifier.fit(X_test_prepared, y_test)
 
         # Calculate metrics
         print("Calculating metrics...")
@@ -213,9 +213,12 @@ class TransactionCategorizer:
             X_prepared = self._prepare_features(features_df, fit=False)
 
             # Get prediction and probability
-            if self.calibrated_classifier:
-                proba = self.calibrated_classifier.predict_proba(X_prepared)[0]
-            else:
+            try:
+                if self.calibrated_classifier:
+                    proba = self.calibrated_classifier.predict_proba(X_prepared)[0]
+                else:
+                    proba = self.classifier.predict_proba(X_prepared)[0]
+            except ValueError:
                 proba = self.classifier.predict_proba(X_prepared)[0]
 
             pred_idx = np.argmax(proba)
