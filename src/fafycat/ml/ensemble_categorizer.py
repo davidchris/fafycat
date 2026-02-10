@@ -351,29 +351,32 @@ class EnsembleCategorizer:
         return predictions
 
     def _convert_lgbm_to_probas(self, lgbm_pred: TransactionPrediction) -> np.ndarray:
-        """Convert LightGBM prediction to probability distribution."""
-        if not hasattr(self.lgbm_component, "classes_") or self.lgbm_component.classes_ is None:
-            # Fallback: create uniform distribution
-            n_classes = len(self.nb_component.classes_) if hasattr(self.nb_component, "classes_") else 5
+        """Convert LightGBM prediction to probability distribution aligned with NB classes."""
+        if not hasattr(self.nb_component, "classes_") or self.nb_component.classes_ is None:
+            # Fallback to lgbm classes
+            if not hasattr(self.lgbm_component, "classes_") or self.lgbm_component.classes_ is None:
+                return np.ones(5) / 5
+            n_classes = len(self.lgbm_component.classes_)
             probas = np.ones(n_classes) / n_classes
             return probas
 
-        n_classes = len(self.lgbm_component.classes_)
+        # Use NB classes as the reference to ensure shapes match for combining
+        nb_classes = self.nb_component.classes_
+        n_classes = len(nb_classes)
         probas = np.zeros(n_classes)
 
-        # Find the predicted class index
-        pred_class_idx = np.where(self.lgbm_component.classes_ == lgbm_pred.predicted_category_id)[0]
+        # Find the predicted class index in NB's class space
+        pred_class_idx = np.where(nb_classes == lgbm_pred.predicted_category_id)[0]
 
         if len(pred_class_idx) > 0:
             probas[pred_class_idx[0]] = lgbm_pred.confidence_score
-            # Distribute remaining probability among other classes
             remaining_prob = 1.0 - lgbm_pred.confidence_score
             other_prob = remaining_prob / (n_classes - 1)
             for i in range(n_classes):
                 if i != pred_class_idx[0]:
                     probas[i] = other_prob
         else:
-            # Uniform distribution if class not found
+            # Category not in NB classes — uniform distribution
             probas[:] = 1.0 / n_classes
 
         return probas
