@@ -2,7 +2,7 @@
 
 import math
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
@@ -40,7 +40,7 @@ def _to_date(value: Any) -> date:
 
 def _to_datetime(value: Any) -> datetime:
     """Cast an ORM column value to datetime."""
-    return datetime(value.year, value.month, value.day, value.hour, value.minute, value.second)
+    return cast(datetime, value)
 
 
 class TransactionService:
