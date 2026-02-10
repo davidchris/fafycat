@@ -2,6 +2,8 @@
 
 import asyncio
 import time
+from datetime import date
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -161,7 +163,7 @@ async def predict_transactions_bulk(
             # Get category name
             try:
                 category = db.query(CategoryORM).filter(CategoryORM.id == prediction.predicted_category_id).first()
-                category_name = category.name if category else "Unknown"
+                category_name = str(category.name) if category else "Unknown"
             except Exception:
                 # Handle case where categories table doesn't exist (e.g., in tests)
                 category_name = "Unknown"
@@ -436,12 +438,12 @@ async def predict_unpredicted_transactions(
         txn_inputs = []
         for txn in unpredicted_txns:
             txn_input = TransactionInput(
-                date=txn.date,
-                value_date=txn.value_date or txn.date,
-                name=txn.name,
-                purpose=txn.purpose or "",
-                amount=txn.amount,
-                currency=txn.currency,
+                date=cast(date, txn.date),
+                value_date=cast(date, txn.value_date or txn.date),
+                name=str(txn.name),
+                purpose=str(txn.purpose or ""),
+                amount=cast(float, txn.amount),
+                currency=str(txn.currency),
             )
             txn_inputs.append(txn_input)
 
@@ -520,3 +522,118 @@ async def predict_unpredicted_transactions(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}") from e
+
+
+@router.post("/predict/batch-repredict")
+async def repredict_unreviewed_transactions(
+    categorizer: TransactionCategorizer = Depends(get_categorizer),
+    db: Session = Depends(get_db_session),
+    limit: int = 1000,
+) -> dict:
+    """Re-run ML predictions on unreviewed transactions that already have predictions."""
+    try:
+        from src.fafycat.core.database import TransactionORM
+        from src.fafycat.core.models import TransactionInput
+
+        # Get unreviewed transactions that already have predictions
+        repredict_txns = (
+            db.query(TransactionORM)
+            .filter(
+                TransactionORM.is_reviewed.is_(False),
+                TransactionORM.predicted_category_id.is_not(None),
+            )
+            .limit(limit)
+            .all()
+        )
+
+        if not repredict_txns:
+            return {
+                "status": "success",
+                "message": "No unreviewed transactions need re-prediction",
+                "predictions_made": 0,
+            }
+
+        # Convert to TransactionInput for prediction
+        txn_inputs = []
+        for txn in repredict_txns:
+            txn_input = TransactionInput(
+                date=cast(date, txn.date),
+                value_date=cast(date, txn.value_date or txn.date),
+                name=str(txn.name),
+                purpose=str(txn.purpose or ""),
+                amount=cast(float, txn.amount),
+                currency=str(txn.currency),
+            )
+            txn_inputs.append(txn_input)
+
+        # Get predictions
+        predictions = categorizer.predict_with_confidence(txn_inputs)
+
+        # Use active learning to set review priorities
+        from src.fafycat.core.models import TransactionPrediction
+        from src.fafycat.ml.active_learning import ActiveLearningSelector
+
+        al_selector = ActiveLearningSelector(db)
+
+        # Convert predictions to TransactionPrediction format for active learning
+        al_predictions = []
+        for txn, prediction in zip(repredict_txns, predictions, strict=True):
+            al_pred = TransactionPrediction(
+                transaction_id=txn.id,
+                predicted_category_id=prediction.predicted_category_id,
+                confidence_score=prediction.confidence_score,
+                feature_contributions=prediction.feature_contributions,
+            )
+            al_predictions.append(al_pred)
+
+        # Get active learning strategic selections
+        max_review_items = min(20, len(al_predictions))
+        strategic_selections = set(
+            al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
+        )
+
+        # Apply hybrid categorization: confidence + active learning priority
+        predictions_made = 0
+        auto_accepted = 0
+        high_priority_review = 0
+        standard_review = 0
+        confidence_threshold = 0.95
+
+        for txn, prediction in zip(repredict_txns, predictions, strict=True):
+            txn.predicted_category_id = prediction.predicted_category_id
+            txn.confidence_score = prediction.confidence_score
+
+            if prediction.confidence_score >= confidence_threshold:
+                if txn.id in strategic_selections:
+                    txn.is_reviewed = False
+                    txn.review_priority = "quality_check"
+                    high_priority_review += 1
+                else:
+                    txn.is_reviewed = True
+                    txn.review_priority = "auto_accepted"
+                    auto_accepted += 1
+            else:
+                txn.is_reviewed = False
+                if txn.id in strategic_selections:
+                    txn.review_priority = "high"
+                    high_priority_review += 1
+                else:
+                    txn.review_priority = "standard"
+                    standard_review += 1
+
+            predictions_made += 1
+
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": f"Re-predicted {predictions_made} transactions",
+            "predictions_made": predictions_made,
+            "auto_accepted": auto_accepted,
+            "high_priority_review": high_priority_review,
+            "standard_review": standard_review,
+            "remaining_unreviewed": max(0, len(repredict_txns) - limit) if len(repredict_txns) == limit else 0,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Batch re-prediction failed: {str(e)}") from e

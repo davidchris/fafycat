@@ -2,8 +2,9 @@
 
 import json
 import pickle
+from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -90,12 +91,12 @@ class TransactionCategorizer:
 
         for txn in filtered_transactions:
             txn_input = TransactionInput(
-                date=txn.date,
-                value_date=txn.value_date,
-                name=txn.name,
-                purpose=txn.purpose or "",
-                amount=txn.amount,
-                currency=txn.currency,
+                date=cast(date, txn.date),
+                value_date=cast(date | None, txn.value_date),
+                name=str(txn.name),
+                purpose=str(txn.purpose or ""),
+                amount=cast(float, txn.amount),
+                currency=str(txn.currency),
             )
             txn_inputs.append(txn_input)
             categories.append(txn.category_id)
@@ -223,10 +224,12 @@ class TransactionCategorizer:
 
             pred_idx = np.argmax(proba)
             confidence = float(proba[pred_idx])
+            if self.classes_ is None:
+                raise ValueError("Model has no classes_ — was it trained?")
             predicted_category_id = int(self.classes_[pred_idx])
 
             # Get feature importance for this prediction
-            feature_contributions = self._get_feature_contributions(X_prepared[0], pred_idx)
+            feature_contributions = self._get_feature_contributions(X_prepared[0], int(pred_idx))
 
             predictions.append(
                 TransactionPrediction(

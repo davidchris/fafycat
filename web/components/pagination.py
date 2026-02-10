@@ -21,7 +21,7 @@ def create_pagination_info(page: int, total_count: int, per_page: int = 50) -> D
 
 
 def create_pagination_button(
-    page: int, text: str, is_disabled: bool, htmx_attrs: dict, additional_classes: str = ""
+    page: int, text: str, is_disabled: bool, htmx_attrs: dict[str, str], additional_classes: str = ""
 ) -> Button:
     """Create a pagination button with HTMX attributes."""
     base_classes = (
@@ -29,13 +29,19 @@ def create_pagination_button(
         "bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
     )
 
-    if is_disabled:
-        base_classes += " cursor-not-allowed opacity-50"
-        attrs = {"disabled": True, "cls": f"{base_classes} {additional_classes}".strip()}
-    else:
-        attrs = {"cls": f"{base_classes} {additional_classes}".strip(), **htmx_attrs}
+    cls = f"{base_classes} {additional_classes}".strip()
 
-    return Button(text, **attrs)
+    if is_disabled:
+        cls += " cursor-not-allowed opacity-50"
+        return Button(text, disabled=True, cls=cls)
+
+    return Button(
+        text,
+        cls=cls,
+        hx_get=htmx_attrs.get("hx_get"),
+        hx_target=htmx_attrs.get("hx_target"),
+        hx_include=htmx_attrs.get("hx_include"),
+    )
 
 
 def create_mobile_pagination(page: int, total_pages: int, has_prev: bool, has_next: bool) -> Div:

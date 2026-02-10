@@ -3,7 +3,7 @@
 import io
 import json
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -96,14 +96,14 @@ class ExportService:
             # Return empty Excel file
             df = pd.DataFrame()
             buffer = io.BytesIO()
-            df.to_excel(buffer, index=False)
+            df.to_excel(cast(Any, buffer), index=False)
             return buffer.getvalue()
 
         df = pd.DataFrame(data)
         buffer = io.BytesIO()
 
         # Create Excel with multiple sheets if we have categories
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        with pd.ExcelWriter(cast(Any, buffer), engine="openpyxl") as writer:
             # Main transactions sheet
             df.to_excel(writer, sheet_name="Transactions", index=False)
 

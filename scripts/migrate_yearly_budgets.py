@@ -5,7 +5,7 @@ Creates budget_plans table and migrates existing category budgets to current yea
 """
 
 import sys
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 # Add project root to path
@@ -52,8 +52,8 @@ def migrate_yearly_budgets():
                 category_id=category.id,
                 year=current_year,
                 monthly_budget=category.budget,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
 
             session.add(budget_plan)

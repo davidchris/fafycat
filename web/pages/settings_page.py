@@ -38,6 +38,16 @@ def _get_ml_model_status():
                 db_session.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None)).count()
             )
 
+            # Check unreviewed transactions that already have predictions (for re-prediction)
+            repredictable_count = (
+                db_session.query(TransactionORM)
+                .filter(
+                    TransactionORM.is_reviewed.is_(False),
+                    TransactionORM.predicted_category_id.is_not(None),
+                )
+                .count()
+            )
+
             if not model_path.exists():
                 return {
                     "model_loaded": False,
@@ -46,6 +56,7 @@ def _get_ml_model_status():
                     "reviewed_transactions": reviewed_count,
                     "min_training_samples": min_training_samples,
                     "unpredicted_transactions": unpredicted_count,
+                    "repredictable_transactions": repredictable_count,
                     "status": "No model found - ready to train" if training_ready else "Not enough training data",
                 }
 
@@ -57,6 +68,7 @@ def _get_ml_model_status():
                 "reviewed_transactions": reviewed_count,
                 "min_training_samples": min_training_samples,
                 "unpredicted_transactions": unpredicted_count,
+                "repredictable_transactions": repredictable_count,
                 "status": "Model loaded and ready",
             }
 
@@ -68,6 +80,7 @@ def _get_ml_model_status():
             "reviewed_transactions": 0,
             "min_training_samples": 50,
             "unpredicted_transactions": 0,
+            "repredictable_transactions": 0,
             "status": "Unable to check model status",
         }
 
@@ -334,10 +347,61 @@ def render_empty_categories_state(ml_status):
                 `Use this when you've imported transactions before training a model, ` +
                 `or after retraining to apply the updated model.\\n\\n` +
                 `Continue?`;
-            
+
             if (confirm(confirmMessage)) {{
                 predictUnpredicted();
             }}
+        }}
+
+        function confirmAndRepredict(count) {{
+            const confirmMessage = `Re-predict ${{count}} unreviewed transactions?\\n\\n` +
+                `This will:\\n` +
+                `• Re-run predictions using the current model on transactions you haven't reviewed yet\\n` +
+                `• Useful after retraining to apply the improved model\\n` +
+                `• Auto-accept high-confidence predictions (95%+)\\n` +
+                `• Add uncertain predictions to your Review Queue\\n\\n` +
+                `Continue?`;
+
+            if (confirm(confirmMessage)) {{
+                repredictUnreviewed();
+            }}
+        }}
+
+        function repredictUnreviewed() {{
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Re-predicting...';
+
+            fetch('/api/ml/predict/batch-repredict', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }}
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                if (data.status === 'success') {{
+                    const autoAccepted = data.auto_accepted || 0;
+                    const highPriority = data.high_priority_review || 0;
+                    const standardReview = data.standard_review || 0;
+
+                    let message = `✅ Re-predicted ${{data.predictions_made}} transactions!\\n\\n`;
+                    message += `🤖 Smart Review Assignment:\\n`;
+                    message += `• ${{autoAccepted}} auto-accepted (high confidence)\\n`;
+                    message += `• ${{highPriority}} high priority for review\\n`;
+                    message += `• ${{standardReview}} standard review needed\\n\\n`;
+                    message += `📋 Check the Review page to see transactions prioritized for your attention!`;
+
+                    alert(message);
+                    location.reload();
+                }} else {{
+                    throw new Error(data.detail || 'Re-prediction failed');
+                }}
+            }})
+            .catch(error => {{
+                alert('Re-prediction failed: ' + error.message);
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }});
         }}
 
         function predictUnpredicted() {{
@@ -733,10 +797,61 @@ def render_categories_management(category_groups, inactive_categories, ml_status
                 `Use this when you've imported transactions before training a model, ` +
                 `or after retraining to apply the updated model.\\n\\n` +
                 `Continue?`;
-            
+
             if (confirm(confirmMessage)) {
                 predictUnpredicted();
             }
+        }
+
+        function confirmAndRepredict(count) {
+            const confirmMessage = `Re-predict ${count} unreviewed transactions?\\n\\n` +
+                `This will:\\n` +
+                `• Re-run predictions using the current model on transactions you haven't reviewed yet\\n` +
+                `• Useful after retraining to apply the improved model\\n` +
+                `• Auto-accept high-confidence predictions (95%+)\\n` +
+                `• Add uncertain predictions to your Review Queue\\n\\n` +
+                `Continue?`;
+
+            if (confirm(confirmMessage)) {
+                repredictUnreviewed();
+            }
+        }
+
+        function repredictUnreviewed() {
+            const button = event.target;
+            const originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Re-predicting...';
+
+            fetch('/api/ml/predict/batch-repredict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    const autoAccepted = data.auto_accepted || 0;
+                    const highPriority = data.high_priority_review || 0;
+                    const standardReview = data.standard_review || 0;
+
+                    let message = `✅ Re-predicted ${data.predictions_made} transactions!\\n\\n`;
+                    message += `🤖 Smart Review Assignment:\\n`;
+                    message += `• ${autoAccepted} auto-accepted (high confidence)\\n`;
+                    message += `• ${highPriority} high priority for review\\n`;
+                    message += `• ${standardReview} standard review needed\\n\\n`;
+                    message += `📋 Check the Review page to see transactions prioritized for your attention!`;
+
+                    alert(message);
+                    location.reload();
+                } else {
+                    throw new Error(data.detail || 'Re-prediction failed');
+                }
+            })
+            .catch(error => {
+                alert('Re-prediction failed: ' + error.message);
+                button.disabled = false;
+                button.innerHTML = originalText;
+            });
         }
 
         function predictUnpredicted() {
@@ -1269,11 +1384,37 @@ def render_ml_training_section(ml_status):
     reviewed_count = ml_status.get("reviewed_transactions", 0)
     min_required = ml_status.get("min_training_samples", 50)
     unpredicted_count = ml_status.get("unpredicted_transactions", 0)
+    repredictable_count = ml_status.get("repredictable_transactions", 0)
 
     # Determine alert type and content based on status
     if model_loaded and can_predict:
         # Model is working - show success status
         classes_count = ml_status.get("classes_count", 0)
+
+        # Build predict button (blue) - only shown when there are unpredicted transactions
+        predict_button = ""
+        if unpredicted_count > 0:
+            predict_button = f"""
+                        <button
+                            onclick="confirmAndPredictUnpredicted({unpredicted_count})"
+                            class="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200"
+                            title="Run ML predictions on transactions without predictions"
+                        >
+                            ⚡ Predict {unpredicted_count} Transactions
+                        </button>"""
+
+        # Build re-predict button (orange) - only shown when there are unreviewed predicted transactions
+        repredict_button = ""
+        if repredictable_count > 0:
+            repredict_button = f"""
+                        <button
+                            onclick="confirmAndRepredict({repredictable_count})"
+                            class="inline-flex items-center px-3 py-2 text-sm font-medium text-orange-700 bg-orange-100 rounded-md hover:bg-orange-200"
+                            title="Re-run predictions on unreviewed transactions with the current model"
+                        >
+                            🔄 Re-predict {repredictable_count} Transactions
+                        </button>"""
+
         return f"""
         <div class="mb-8 bg-green-50 border border-green-200 rounded-lg p-6">
             <div class="flex items-start">
@@ -1286,42 +1427,18 @@ def render_ml_training_section(ml_status):
                     <h3 class="text-lg font-semibold text-green-800">🤖 ML Model Status</h3>
                     <div class="mt-2 text-sm text-green-700">
                         <p class="font-medium">✅ Model is loaded and working!</p>
-                        <p class="mt-1">Trained on {classes_count} categories • {
+                        <p class="mt-1">Trained on {classes_count} categories &bull; {
             unpredicted_count
-        } transactions without predictions</p>
+        } without predictions &bull; {repredictable_count} pending review</p>
                     </div>
                     <div class="mt-4 flex gap-3">
-                        <button 
+                        <button
                             onclick="retrainModel()"
                             class="inline-flex items-center px-3 py-2 text-sm font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200"
                         >
                             🔄 Retrain Model
-                        </button>
-                        {
-            f'''
-                        <button 
-                            onclick="confirmAndPredictUnpredicted({unpredicted_count})"
-                            class="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200"
-                            title="Run ML predictions on all transactions that don't have predictions yet"
-                        >
-                            ⚡ Predict {unpredicted_count} Transactions
-                        </button>
-                        '''
-            if unpredicted_count > 0
-            else ""
-        }
+                        </button>{predict_button}{repredict_button}
                     </div>
-                    {
-            f'''
-                    <div class="mt-3 p-3 bg-blue-50 border-l-4 border-blue-400 text-sm text-blue-700">
-                        <p><strong>About Batch Prediction:</strong> This will run ML predictions on all {unpredicted_count} transactions without predictions. 
-                        Some transactions will be automatically accepted (high confidence), while others will be added to your Review Queue 
-                        for manual verification. Use this when you've imported transactions before training a model, or after retraining.</p>
-                    </div>
-                    '''
-            if unpredicted_count > 0
-            else ""
-        }
                     </div>
                 </div>
             </div>

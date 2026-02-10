@@ -120,7 +120,7 @@ invalid-assignment = "error"
 # Reduce noise from external libraries (fasthtml, pandas have incomplete stubs)
 invalid-argument-type = "warn"
 invalid-type-form = "ignore"
-non-subscriptable = "warn"
+not-subscriptable = "warn"
 possibly-missing-attribute = "warn"
 invalid-parameter-default = "warn"  # Common Python pattern: x: T = None
 
