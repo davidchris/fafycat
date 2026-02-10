@@ -1,6 +1,7 @@
 """Rule-based merchant mapping system."""
 
-from datetime import date
+from datetime import date, datetime
+from typing import cast
 
 from sqlalchemy.orm import Session
 
@@ -38,17 +39,17 @@ class MerchantMapper:
             mapping_data = self._cache[clean_merchant]
             return MerchantMapping(
                 merchant_pattern=clean_merchant,
-                category_id=mapping_data["category_id"],
-                confidence=mapping_data["confidence"],
+                category_id=cast(int, mapping_data["category_id"]),
+                confidence=cast(float, mapping_data["confidence"]),
             )
 
         # Partial matches for common merchants
         for pattern, mapping_data in self._cache.items():
-            if self._is_partial_match(clean_merchant, pattern):
+            if self._is_partial_match(clean_merchant, str(pattern)):
                 return MerchantMapping(
-                    merchant_pattern=pattern,
-                    category_id=mapping_data["category_id"],
-                    confidence=mapping_data["confidence"] * 0.9,  # Slightly lower confidence
+                    merchant_pattern=str(pattern),
+                    category_id=cast(int, mapping_data["category_id"]),
+                    confidence=cast(float, mapping_data["confidence"]) * 0.9,  # Slightly lower confidence
                 )
 
         return None
@@ -145,7 +146,7 @@ class MerchantMapper:
 
         # Find similar merchants in existing mappings
         for pattern, mapping_data in self._cache.items():
-            similarity = self._calculate_similarity(clean_merchant, pattern)
+            similarity = self._calculate_similarity(clean_merchant, str(pattern))
             if similarity > 0.7:
                 # Get category name
                 category = self.session.query(CategoryORM).filter(CategoryORM.id == mapping_data["category_id"]).first()
@@ -186,13 +187,13 @@ class MerchantMapper:
         mappings = self.session.query(MerchantMappingORM).all()
         return [
             MerchantMapping(
-                id=mapping.id,
-                merchant_pattern=mapping.merchant_pattern,
-                category_id=mapping.category_id,
-                confidence=mapping.confidence,
-                occurrence_count=mapping.occurrence_count,
-                last_seen=mapping.last_seen,
-                created_at=mapping.created_at,
+                id=cast(int | None, mapping.id),
+                merchant_pattern=cast(str, mapping.merchant_pattern),
+                category_id=cast(int, mapping.category_id),
+                confidence=cast(float, mapping.confidence),
+                occurrence_count=cast(int, mapping.occurrence_count),
+                last_seen=cast(date | None, mapping.last_seen),
+                created_at=cast(datetime | None, mapping.created_at),
             )
             for mapping in mappings
         ]

@@ -2,6 +2,8 @@
 
 import asyncio
 import time
+from datetime import date
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -161,7 +163,7 @@ async def predict_transactions_bulk(
             # Get category name
             try:
                 category = db.query(CategoryORM).filter(CategoryORM.id == prediction.predicted_category_id).first()
-                category_name = category.name if category else "Unknown"
+                category_name = str(category.name) if category else "Unknown"
             except Exception:
                 # Handle case where categories table doesn't exist (e.g., in tests)
                 category_name = "Unknown"
@@ -436,12 +438,12 @@ async def predict_unpredicted_transactions(
         txn_inputs = []
         for txn in unpredicted_txns:
             txn_input = TransactionInput(
-                date=txn.date,
-                value_date=txn.value_date or txn.date,
-                name=txn.name,
-                purpose=txn.purpose or "",
-                amount=txn.amount,
-                currency=txn.currency,
+                date=cast(date, txn.date),
+                value_date=cast(date, txn.value_date or txn.date),
+                name=str(txn.name),
+                purpose=str(txn.purpose or ""),
+                amount=cast(float, txn.amount),
+                currency=str(txn.currency),
             )
             txn_inputs.append(txn_input)
 

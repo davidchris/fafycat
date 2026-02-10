@@ -23,7 +23,7 @@ async def main_app(request: Request) -> HTMLResponse:
         <p class="text-center">Welcome to the FastAPI + FastHTML version!</p>
     </div>
     """
-    return create_page_layout("FafyCat - Family Finance Categorizer", content)
+    return HTMLResponse(create_page_layout("FafyCat - Family Finance Categorizer", content))
 
 
 @router.get("/import", response_class=HTMLResponse)
@@ -136,8 +136,9 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
                 success_msg = f"ℹ️ No new transactions imported. {duplicate_count} duplicates were skipped."
 
             # Build components
+            filename = file.filename if file.filename is not None else "unknown"
             upload_result = create_upload_result_alert(
-                success_msg, file.filename, len(transactions), new_count, duplicate_count
+                success_msg, filename, len(transactions), new_count, duplicate_count
             )
 
             prediction_component = ""
@@ -167,7 +168,7 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
             </div>
             """
 
-            return create_page_layout("Upload Successful - FafyCat", content)
+            return HTMLResponse(create_page_layout("Upload Successful - FafyCat", content))
 
     except Exception as e:
         # Handle errors
@@ -186,7 +187,7 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
         </div>
         """
 
-        return create_page_layout("Upload Error - FafyCat", content)
+        return HTMLResponse(create_page_layout("Upload Error - FafyCat", content))
 
 
 @router.post("/transactions/{transaction_id}/categorize", response_model=None)
@@ -229,7 +230,7 @@ async def categorize_transaction_web(
         </div>
         """
 
-        return create_page_layout("Categorization Error - FafyCat", content)
+        return HTMLResponse(create_page_layout("Categorization Error - FafyCat", content))
 
 
 @router.post("/api/export/summary", response_class=HTMLResponse)
@@ -241,23 +242,27 @@ async def export_summary_htmx(request: Request) -> str:
     db_manager = get_db_manager(request)
 
     try:
+        from datetime import date, datetime
+
         # Get form data
         form_data = await request.form()
 
-        # Parse form data
-        start_date = form_data.get("start_date") or None
-        end_date = form_data.get("end_date") or None
-        categories = form_data.getlist("categories") or None
+        # Parse form data with proper type narrowing
+        raw_start = form_data.get("start_date")
+        raw_end = form_data.get("end_date")
+        raw_categories = form_data.getlist("categories")
 
         # Convert date strings to date objects
-        if start_date:
-            from datetime import datetime
+        parsed_start_date: date | None = None
+        if isinstance(raw_start, str) and raw_start:
+            parsed_start_date = datetime.fromisoformat(raw_start).date()
 
-            start_date = datetime.fromisoformat(start_date).date()
-        if end_date:
-            from datetime import datetime
+        parsed_end_date: date | None = None
+        if isinstance(raw_end, str) and raw_end:
+            parsed_end_date = datetime.fromisoformat(raw_end).date()
 
-            end_date = datetime.fromisoformat(end_date).date()
+        # Filter categories to only string values
+        parsed_categories: list[str] | None = [c for c in raw_categories if isinstance(c, str)] or None
 
         with db_manager.get_session() as db_session:
             from api.export import ExportService
@@ -271,9 +276,9 @@ async def export_summary_htmx(request: Request) -> str:
                 "category_breakdown": {},
                 "date_range": {},
                 "filters_applied": {
-                    "start_date": start_date.isoformat() if start_date else None,
-                    "end_date": end_date.isoformat() if end_date else None,
-                    "categories": categories,
+                    "start_date": parsed_start_date.isoformat() if parsed_start_date else None,
+                    "end_date": parsed_end_date.isoformat() if parsed_end_date else None,
+                    "categories": parsed_categories,
                 },
             }
 
@@ -281,9 +286,9 @@ async def export_summary_htmx(request: Request) -> str:
             try:
                 data = ExportService.get_export_data(
                     session=db_session,
-                    start_date=start_date,
-                    end_date=end_date,
-                    categories=categories,
+                    start_date=parsed_start_date,
+                    end_date=parsed_end_date,
+                    categories=parsed_categories,
                 )
 
                 # Calculate real summary
@@ -326,9 +331,9 @@ async def export_summary_htmx(request: Request) -> str:
                     "category_breakdown": category_breakdown,
                     "date_range": date_range,
                     "filters_applied": {
-                        "start_date": start_date.isoformat() if start_date else None,
-                        "end_date": end_date.isoformat() if end_date else None,
-                        "categories": categories,
+                        "start_date": parsed_start_date.isoformat() if parsed_start_date else None,
+                        "end_date": parsed_end_date.isoformat() if parsed_end_date else None,
+                        "categories": parsed_categories,
                     },
                 }
             except Exception:

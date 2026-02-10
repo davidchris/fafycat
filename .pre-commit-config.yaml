@@ -6,7 +6,7 @@ repos:
   # Ruff linter and formatter
   # https://github.com/astral-sh/ruff-pre-commit
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.10
+    rev: v0.15.0
     hooks:
       # Run the linter with auto-fix
       - id: ruff-check

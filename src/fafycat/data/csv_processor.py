@@ -2,7 +2,7 @@
 
 import csv
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -220,7 +220,7 @@ class CSVProcessor:
                 purpose=txn.purpose,
                 amount=txn.amount,
                 currency=txn.currency,
-                imported_at=datetime.utcnow(),
+                imported_at=datetime.now(UTC),
                 import_batch=import_batch,
                 is_reviewed=is_reviewed,
             )

@@ -9,13 +9,13 @@ from pathlib import Path
 os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_prod.db"
 os.environ["FAFYCAT_ENV"] = "production"
 
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fafycat.core.config import AppConfig
-from fafycat.core.database import DatabaseManager
-from fafycat.ml.categorizer import TransactionCategorizer
-from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
+from src.fafycat.core.config import AppConfig
+from src.fafycat.core.database import DatabaseManager
+from src.fafycat.ml.categorizer import TransactionCategorizer
+from src.fafycat.ml.ensemble_categorizer import EnsembleCategorizer
 
 
 def main() -> None:
@@ -26,20 +26,15 @@ def main() -> None:
     db_manager = DatabaseManager(config)
 
     with db_manager.get_session() as session:
-        # Choose between ensemble and single model based on config
-        if config.ml.use_ensemble:
-            print("Initializing ensemble categorizer...")
-            categorizer = EnsembleCategorizer(session, config.ml)
-            model_filename = "ensemble_categorizer.pkl"
-        else:
-            print("Initializing single categorizer...")
-            categorizer = TransactionCategorizer(session, config.ml)
-            model_filename = "categorizer.pkl"
-
         try:
+            # Choose between ensemble and single model based on config
             if config.ml.use_ensemble:
+                print("Initializing ensemble categorizer...")
+                ensemble_categorizer = EnsembleCategorizer(session, config.ml)
+                model_filename = "ensemble_categorizer.pkl"
+
                 print("Starting ensemble training with validation optimization...")
-                cv_results = categorizer.train_with_validation_optimization()
+                cv_results = ensemble_categorizer.train_with_validation_optimization()
 
                 print("\nEnsemble Training Results:")
                 print(f"Validation Accuracy: {cv_results['validation_accuracy']:.3f}")
@@ -49,9 +44,17 @@ def main() -> None:
                 )
                 print(f"Training samples: {cv_results['n_training_samples']}")
                 print(f"Validation samples: {cv_results['n_validation_samples']}")
+
+                # Save model
+                model_path = config.ml.model_dir / model_filename
+                ensemble_categorizer.save_model(model_path)
             else:
+                print("Initializing single categorizer...")
+                single_categorizer = TransactionCategorizer(session, config.ml)
+                model_filename = "categorizer.pkl"
+
                 print("Starting single model training...")
-                metrics = categorizer.train()
+                metrics = single_categorizer.train()
 
                 print("\nTraining Results:")
                 print(f"Overall Accuracy: {metrics.accuracy:.3f}")
@@ -65,9 +68,10 @@ def main() -> None:
                 for feature, importance in sorted_features:
                     print(f"  {feature}: {importance:.3f}")
 
-            # Save model
-            model_path = config.ml.model_dir / model_filename
-            categorizer.save_model(model_path)
+                # Save model
+                model_path = config.ml.model_dir / model_filename
+                single_categorizer.save_model(model_path)
+
             print(f"\nModel saved to: {model_path}")
 
         except ValueError as e:

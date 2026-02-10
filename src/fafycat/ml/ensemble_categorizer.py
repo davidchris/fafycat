@@ -3,8 +3,9 @@
 import json
 import pickle
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from sqlalchemy.orm import Session
@@ -37,6 +38,7 @@ class LightGBMWrapper:
 
     def predict(self, transactions: list[TransactionInput]) -> np.ndarray:
         self._validate_fitted()
+        assert self.label_encoder is not None
         probas = self.predict_proba(transactions)
         predictions = np.argmax(probas, axis=1)
         return self.label_encoder.inverse_transform(predictions)
@@ -55,6 +57,7 @@ class LightGBMWrapper:
 
     def _convert_predictions_to_probabilities(self, predictions) -> np.ndarray:
         """Convert predictions to probability matrix."""
+        assert self.label_encoder is not None
         n_classes = len(self.label_encoder.classes_)
         probas = np.zeros((len(predictions), n_classes))
 
@@ -65,6 +68,7 @@ class LightGBMWrapper:
 
     def _set_prediction_probabilities(self, probas: np.ndarray, i: int, pred, n_classes: int) -> None:
         """Set probabilities for a single prediction."""
+        assert self.label_encoder is not None
         if pred.predicted_category_id in self.label_encoder.classes_:
             class_idx = np.where(self.label_encoder.classes_ == pred.predicted_category_id)[0][0]
             probas[i, class_idx] = pred.confidence_score
@@ -121,7 +125,8 @@ class EnsembleCategorizer:
         # Count transactions per category
         category_counts: dict[int, int] = {}
         for txn in transactions:
-            category_counts[txn.category_id] = category_counts.get(txn.category_id, 0) + 1
+            cat_id = cast(int, txn.category_id)
+            category_counts[cat_id] = category_counts.get(cat_id, 0) + 1
 
         # Filter categories with enough samples
         valid_categories = {cat_id for cat_id, count in category_counts.items() if count >= min_samples_per_category}
@@ -153,12 +158,12 @@ class EnsembleCategorizer:
 
         for txn in filtered_transactions:
             txn_input = TransactionInput(
-                date=txn.date,
-                value_date=txn.value_date,
-                name=txn.name,
-                purpose=txn.purpose or "",
-                amount=txn.amount,
-                currency=txn.currency,
+                date=cast(date, txn.date),
+                value_date=cast(date | None, txn.value_date),
+                name=str(txn.name),
+                purpose=str(txn.purpose or ""),
+                amount=cast(float, txn.amount),
+                currency=str(txn.currency),
             )
             txn_inputs.append(txn_input)
             categories.append(txn.category_id)
@@ -213,6 +218,8 @@ class EnsembleCategorizer:
         nb_val_probas = nb_temp.predict_proba(val_transactions)
 
         # Convert LightGBM predictions to probabilities
+        if nb_temp.classes_ is None:
+            raise ValueError("Naive Bayes model must be fitted before converting predictions")
         lgbm_val_probas = self._convert_lgbm_predictions_to_probas(lgbm_val_preds, nb_temp.classes_)
 
         # Test different weight combinations
@@ -266,6 +273,7 @@ class EnsembleCategorizer:
         self._save_ensemble_metadata()
 
         self.is_trained = True
+        self.classes_ = self.nb_component.classes_
         print(f"✅ Ensemble training complete! Validation accuracy: {best_score:.3f}")
 
         return self.cv_results
@@ -427,14 +435,15 @@ class EnsembleCategorizer:
         # Get fold split information
         split_info = self.cv_validator.get_fold_splits_info(labels)
 
+        cv_results = self.cv_results or {}
         return {
             "individual_models": individual_results,
             "fold_split_info": split_info,
             "ensemble_improvement": {
-                "vs_lgbm": self.cv_results["best_cv_score"] - individual_results["lightgbm"]["cv_accuracy_mean"]
+                "vs_lgbm": cv_results.get("best_cv_score", 0) - individual_results["lightgbm"]["cv_accuracy_mean"]
                 if individual_results
                 else 0,
-                "vs_nb": self.cv_results["best_cv_score"] - individual_results["naive_bayes"]["cv_accuracy_mean"]
+                "vs_nb": cv_results.get("best_cv_score", 0) - individual_results["naive_bayes"]["cv_accuracy_mean"]
                 if individual_results
                 else 0,
             },
@@ -446,9 +455,10 @@ class EnsembleCategorizer:
         self.session.query(ModelMetadataORM).update({"is_active": False})
 
         # Create ensemble metadata
+        cv_results = self.cv_results or {}
         metadata = ModelMetadataORM(
             model_version=self.model_version,
-            accuracy=self.cv_results["validation_accuracy"],
+            accuracy=cv_results.get("validation_accuracy", 0.0),
             feature_importance=json.dumps({"ensemble_weights": self.ensemble_weights, "cv_results": self.cv_results}),
             parameters=json.dumps(
                 {
@@ -549,6 +559,7 @@ class EnsembleCategorizer:
         self.model_version = ensemble_data["model_version"]
 
         self.is_trained = True
+        self.classes_ = self.lgbm_component.classes_
 
     def get_ensemble_explanation(self, transaction: TransactionInput) -> dict[str, Any]:
         """Get detailed explanation for ensemble prediction."""
@@ -568,7 +579,7 @@ class EnsembleCategorizer:
             "lgbm_explanation": lgbm_explanation,
             "nb_explanation": nb_explanation,
             "cv_performance": {
-                "validation_accuracy": self.cv_results["validation_accuracy"],
+                "validation_accuracy": (self.cv_results or {}).get("validation_accuracy", 0.0),
                 "ensemble_weights": self.ensemble_weights,
             },
         }

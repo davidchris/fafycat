@@ -1,6 +1,6 @@
 """Database operations using SQLAlchemy."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -24,6 +24,10 @@ from .config import AppConfig
 Base = declarative_base()
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 class CategoryORM(Base):
     """Category table."""
 
@@ -34,8 +38,8 @@ class CategoryORM(Base):
     name = Column(String(50), nullable=False)
     budget = Column(Float, nullable=False, default=0.0)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
     __table_args__ = (
         CheckConstraint("type IN ('spending', 'income', 'saving')", name="check_category_type"),
@@ -57,8 +61,8 @@ class BudgetPlanORM(Base):
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
     year = Column(Integer, nullable=False)
     monthly_budget = Column(Float, nullable=False, default=0.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
 
     __table_args__ = (
         UniqueConstraint("category_id", "year", name="uq_budget_plan_category_year"),
@@ -88,7 +92,7 @@ class TransactionORM(Base):
     confidence_score = Column(Float)
     is_reviewed = Column(Boolean, default=False)
     review_priority = Column(String(20), default="standard")  # standard, high, quality_check
-    imported_at = Column(DateTime, default=datetime.utcnow)
+    imported_at = Column(DateTime, default=_utc_now)
     import_batch = Column(String, nullable=False)
 
     __table_args__ = (
@@ -119,7 +123,7 @@ class MerchantMappingORM(Base):
     confidence = Column(Float, default=1.0)
     occurrence_count = Column(Integer, default=1)
     last_seen = Column(Date)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
 
     __table_args__ = (Index("idx_merchant_mappings_pattern", "merchant_pattern"),)
 
@@ -133,7 +137,7 @@ class ModelMetadataORM(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     model_version = Column(String, nullable=False)
-    training_date = Column(DateTime, default=datetime.utcnow)
+    training_date = Column(DateTime, default=_utc_now)
     accuracy = Column(Float)
     feature_importance = Column(Text)  # JSON
     parameters = Column(Text)  # JSON

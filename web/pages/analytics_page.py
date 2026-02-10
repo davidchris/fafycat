@@ -1050,4 +1050,4 @@ def render_analytics_page(request: Request, session: Session) -> HTMLResponse:
     </script>
     """
 
-    return create_page_layout("Analytics - FafyCat", content)
+    return HTMLResponse(create_page_layout("Analytics - FafyCat", content))

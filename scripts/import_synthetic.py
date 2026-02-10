@@ -4,12 +4,12 @@
 import sys
 from pathlib import Path
 
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fafycat.core.config import AppConfig
-from fafycat.core.database import DatabaseManager
-from fafycat.data.csv_processor import CSVProcessor, create_synthetic_transactions
+from src.fafycat.core.config import AppConfig
+from src.fafycat.core.database import DatabaseManager
+from src.fafycat.data.csv_processor import CSVProcessor, create_synthetic_transactions
 
 
 def main() -> None:

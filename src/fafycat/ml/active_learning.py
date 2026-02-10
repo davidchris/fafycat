@@ -1,7 +1,7 @@
 """Active learning for efficient human feedback."""
 
 import random
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
@@ -123,10 +123,10 @@ class ActiveLearningSelector:
             return uncertainty_score
 
         # Boost score for high-value transactions
-        amount_score = min(1.0, abs(transaction.amount) / 1000.0)
+        amount_score = min(1.0, abs(cast(float, transaction.amount)) / 1000.0)
 
         # Boost score for new merchants
-        merchant_novelty_score = self._get_merchant_novelty_score(transaction.name)
+        merchant_novelty_score = self._get_merchant_novelty_score(str(transaction.name))
 
         # Combine scores
         priority_score = uncertainty_score * 0.6 + amount_score * 0.2 + merchant_novelty_score * 0.2

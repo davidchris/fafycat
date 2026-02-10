@@ -13,6 +13,36 @@ from src.fafycat.core.database import get_categories as db_get_categories
 from src.fafycat.core.models import CategoryType
 
 
+def _to_int(value: Any) -> int:
+    """Cast an ORM column value to int."""
+    return int(value)
+
+
+def _to_str(value: Any) -> str:
+    """Cast an ORM column value to str."""
+    return str(value)
+
+
+def _to_float(value: Any) -> float:
+    """Cast an ORM column value to float."""
+    return float(value)
+
+
+def _to_bool(value: Any) -> bool:
+    """Cast an ORM column value to bool."""
+    return bool(value)
+
+
+def _to_date(value: Any) -> date:
+    """Cast an ORM column value to date."""
+    return date(value.year, value.month, value.day)
+
+
+def _to_datetime(value: Any) -> datetime:
+    """Cast an ORM column value to datetime."""
+    return datetime(value.year, value.month, value.day, value.hour, value.minute, value.second)
+
+
 class TransactionService:
     """Service for transaction operations."""
 
@@ -53,17 +83,17 @@ class TransactionService:
         # Convert to response models
         return [
             TransactionResponse(
-                id=t.id,
-                date=t.date,
-                description=(f"{t.name} - {t.purpose}".rstrip(" -") if t.purpose else t.name),
-                amount=t.amount,
+                id=_to_str(t.id),
+                date=_to_date(t.date),
+                description=(f"{t.name} - {t.purpose}".rstrip(" -") if t.purpose else _to_str(t.name)),
+                amount=_to_float(t.amount),
                 account="",  # Will be added when we migrate account info
-                predicted_category=t.predicted_category.name if t.predicted_category else None,
-                actual_category=t.category.name if t.category else None,
-                confidence=t.confidence_score,
-                is_reviewed=t.is_reviewed,
-                created_at=t.imported_at,
-                updated_at=t.imported_at,  # Will update when we add updated_at to TransactionORM
+                predicted_category=_to_str(t.predicted_category.name) if t.predicted_category else None,
+                actual_category=_to_str(t.category.name) if t.category else None,
+                confidence=_to_float(t.confidence_score) if t.confidence_score is not None else None,
+                is_reviewed=_to_bool(t.is_reviewed),
+                created_at=_to_datetime(t.imported_at),
+                updated_at=_to_datetime(t.imported_at),  # Will update when we add updated_at to TransactionORM
             )
             for t in transactions
         ]
@@ -180,17 +210,17 @@ class TransactionService:
         # Convert to response models
         transaction_responses = [
             TransactionResponse(
-                id=t.id,
-                date=t.date,
-                description=(f"{t.name} - {t.purpose}".rstrip(" -") if t.purpose else t.name),
-                amount=t.amount,
+                id=_to_str(t.id),
+                date=_to_date(t.date),
+                description=(f"{t.name} - {t.purpose}".rstrip(" -") if t.purpose else _to_str(t.name)),
+                amount=_to_float(t.amount),
                 account="",  # Will be added when we migrate account info
-                predicted_category=t.predicted_category.name if t.predicted_category else None,
-                actual_category=t.category.name if t.category else None,
-                confidence=t.confidence_score,
-                is_reviewed=t.is_reviewed,
-                created_at=t.imported_at,
-                updated_at=t.imported_at,  # Will update when we add updated_at to TransactionORM
+                predicted_category=_to_str(t.predicted_category.name) if t.predicted_category else None,
+                actual_category=_to_str(t.category.name) if t.category else None,
+                confidence=_to_float(t.confidence_score) if t.confidence_score is not None else None,
+                is_reviewed=_to_bool(t.is_reviewed),
+                created_at=_to_datetime(t.imported_at),
+                updated_at=_to_datetime(t.imported_at),  # Will update when we add updated_at to TransactionORM
             )
             for t in transactions
         ]
@@ -230,19 +260,21 @@ class TransactionService:
 
         # Return updated transaction
         return TransactionResponse(
-            id=transaction.id,
-            date=transaction.date,
+            id=_to_str(transaction.id),
+            date=_to_date(transaction.date),
             description=(
-                f"{transaction.name} - {transaction.purpose}".rstrip(" -") if transaction.purpose else transaction.name
+                f"{transaction.name} - {transaction.purpose}".rstrip(" -")
+                if transaction.purpose
+                else _to_str(transaction.name)
             ),
-            amount=transaction.amount,
+            amount=_to_float(transaction.amount),
             account="",
-            predicted_category=transaction.predicted_category.name if transaction.predicted_category else None,
-            actual_category=category.name,
-            confidence=transaction.confidence_score,
-            is_reviewed=transaction.is_reviewed,
-            created_at=transaction.imported_at,
-            updated_at=transaction.imported_at,
+            predicted_category=_to_str(transaction.predicted_category.name) if transaction.predicted_category else None,
+            actual_category=_to_str(category.name),
+            confidence=_to_float(transaction.confidence_score) if transaction.confidence_score is not None else None,
+            is_reviewed=_to_bool(transaction.is_reviewed),
+            created_at=_to_datetime(transaction.imported_at),
+            updated_at=_to_datetime(transaction.imported_at),
         )
 
 
@@ -256,13 +288,13 @@ class CategoryService:
 
         return [
             CategoryResponse(
-                id=c.id,
-                name=c.name,
-                type=c.type,
-                is_active=c.is_active,
-                budget=c.budget,
-                created_at=c.created_at,
-                updated_at=c.updated_at,
+                id=_to_int(c.id),
+                name=_to_str(c.name),
+                type=_to_str(c.type),
+                is_active=_to_bool(c.is_active),
+                budget=_to_float(c.budget) if c.budget is not None else None,
+                created_at=_to_datetime(c.created_at),
+                updated_at=_to_datetime(c.updated_at),
             )
             for c in categories
         ]
@@ -277,13 +309,13 @@ class CategoryService:
         session.refresh(db_category)
 
         return CategoryResponse(
-            id=db_category.id,
-            name=db_category.name,
-            type=db_category.type,
-            is_active=db_category.is_active,
-            budget=db_category.budget,
-            created_at=db_category.created_at,
-            updated_at=db_category.updated_at,
+            id=_to_int(db_category.id),
+            name=_to_str(db_category.name),
+            type=_to_str(db_category.type),
+            is_active=_to_bool(db_category.is_active),
+            budget=_to_float(db_category.budget) if db_category.budget is not None else None,
+            created_at=_to_datetime(db_category.created_at),
+            updated_at=_to_datetime(db_category.updated_at),
         )
 
     @staticmethod
@@ -307,13 +339,13 @@ class CategoryService:
         session.commit()
 
         return CategoryResponse(
-            id=category.id,
-            name=category.name,
-            type=category.type,
-            is_active=category.is_active,
-            budget=category.budget,
-            created_at=category.created_at,
-            updated_at=category.updated_at,
+            id=_to_int(category.id),
+            name=_to_str(category.name),
+            type=_to_str(category.type),
+            is_active=_to_bool(category.is_active),
+            budget=_to_float(category.budget) if category.budget is not None else None,
+            created_at=_to_datetime(category.created_at),
+            updated_at=_to_datetime(category.updated_at),
         )
 
 
@@ -414,14 +446,15 @@ class AnalyticsService:
         )
 
         for category in spending_categories:
-            if category.id not in category_data:
+            cat_id = _to_int(category.id)
+            if cat_id not in category_data:
                 total_budget = AnalyticsService._calculate_total_budget_for_period(
-                    session, category.id, start_date, end_date
+                    session, cat_id, start_date, end_date
                 )
 
                 if total_budget > 0:
-                    category_data[category.id] = {
-                        "category_name": category.name,
+                    category_data[cat_id] = {
+                        "category_name": _to_str(category.name),
                         "yearly_data": {},
                         "total_actual": 0,
                         "total_budget": total_budget,
@@ -529,12 +562,13 @@ class AnalyticsService:
             year = date.today().year
 
         if year and not start_date:
-            start_date = date(year, 1, 1)
-            end_date = date(year, 12, 31)
-        elif not end_date:
-            end_date = date.today()
+            resolved_start = date(year, 1, 1)
+            resolved_end = date(year, 12, 31)
+        else:
+            resolved_start = start_date if start_date else date.today().replace(day=1)
+            resolved_end = end_date if end_date else date.today()
 
-        return start_date, end_date, year
+        return resolved_start, resolved_end, year
 
     @staticmethod
     def _query_monthly_transactions(session: Session, start_date: date, end_date: date):
@@ -700,12 +734,13 @@ class AnalyticsService:
         if not year and not start_date:
             year = date.today().year
 
-        # If only year is provided, set date range
+        # Resolve date range: year-based or explicit start/end
         if year and not start_date:
-            start_date = date(year, 1, 1)
-            end_date = date(year, 12, 31)
-        elif not end_date:
-            end_date = date.today()
+            resolved_start = date(year, 1, 1)
+            resolved_end = date(year, 12, 31)
+        else:
+            resolved_start = start_date if start_date else date.today().replace(day=1)
+            resolved_end = end_date if end_date else date.today()
 
         # Query for monthly savings data
         # Use COALESCE to get effective category (actual takes precedence over predicted)
@@ -719,7 +754,7 @@ class AnalyticsService:
                 CategoryORM.id == func.coalesce(TransactionORM.category_id, TransactionORM.predicted_category_id),
             )
             .filter(CategoryORM.type == CategoryType.SAVING)
-            .filter(TransactionORM.date.between(start_date, end_date))
+            .filter(TransactionORM.date.between(resolved_start, resolved_end))
             .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
             .group_by(func.strftime("%m", TransactionORM.date))
             .order_by(func.strftime("%m", TransactionORM.date))
@@ -731,8 +766,8 @@ class AnalyticsService:
         monthly_savings = {}
 
         # Generate months only within the specified date range
-        current_date = start_date.replace(day=1)  # Start from first day of start month
-        end_month = end_date.replace(day=1)
+        current_date = resolved_start.replace(day=1)  # Start from first day of start month
+        end_month = resolved_end.replace(day=1)
 
         while current_date <= end_month:
             month_str = f"{current_date.month:02d}"
@@ -808,7 +843,7 @@ class AnalyticsService:
                     "description": f"{transaction.name} - {transaction.purpose}".rstrip(" -")
                     if transaction.purpose
                     else transaction.name,
-                    "amount": abs(float(transaction.amount)),  # Show as positive for display
+                    "amount": abs(_to_float(transaction.amount)),  # Show as positive for display
                     "category": category.name if category else "Unknown",
                     "merchant": transaction.name,
                 }
@@ -1128,12 +1163,12 @@ class BudgetService:
         )
 
         if budget_plan:
-            return float(budget_plan.monthly_budget)
+            return _to_float(budget_plan.monthly_budget)
 
         # Fallback to category default budget
         category = session.query(CategoryORM).filter(CategoryORM.id == category_id).first()
         if category:
-            return float(category.budget)
+            return _to_float(category.budget)
 
         return 0.0
 
@@ -1153,10 +1188,10 @@ class BudgetService:
             )
 
             if budget_plan:
-                budget = float(budget_plan.monthly_budget)
+                budget = _to_float(budget_plan.monthly_budget)
                 has_year_specific = True
             else:
-                budget = float(category.budget)
+                budget = _to_float(category.budget)
                 has_year_specific = False
 
             budgets.append(
@@ -1166,7 +1201,7 @@ class BudgetService:
                     "category_type": category.type,
                     "monthly_budget": budget,
                     "has_year_specific": has_year_specific,
-                    "fallback_budget": float(category.budget),
+                    "fallback_budget": _to_float(category.budget),
                 }
             )
 

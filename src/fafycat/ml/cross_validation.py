@@ -26,7 +26,11 @@ class StratifiedKFoldValidator:
         self.skf = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
 
     def validate_single_model(
-        self, transactions: list[TransactionInput], labels: np.ndarray, model_class: type, model_params: dict = None
+        self,
+        transactions: list[TransactionInput],
+        labels: np.ndarray,
+        model_class: type,
+        model_params: dict | None = None,
     ) -> dict[str, Any]:
         """Perform k-fold cross-validation on a single model.
 
@@ -108,8 +112,8 @@ class StratifiedKFoldValidator:
         lgbm_model_class: type,
         nb_model_class: type,
         weight_candidates: list[dict[str, float]],
-        lgbm_params: dict = None,
-        nb_params: dict = None,
+        lgbm_params: dict | None = None,
+        nb_params: dict | None = None,
     ) -> tuple[dict[str, float], float, list[float]]:
         """Find optimal ensemble weights using k-fold cross-validation.
 
@@ -130,8 +134,8 @@ class StratifiedKFoldValidator:
         if nb_params is None:
             nb_params = {}
 
-        best_weights = None
-        best_score = 0
+        best_weights: dict[str, float] = weight_candidates[0] if weight_candidates else {"lgbm": 0.7, "nb": 0.3}
+        best_score = 0.0
         all_weight_scores = []
 
         print(f"Testing {len(weight_candidates)} weight combinations...")
