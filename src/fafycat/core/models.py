@@ -2,13 +2,13 @@
 
 import hashlib
 from datetime import date, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 
-class CategoryType(str, Enum):
+class CategoryType(StrEnum):
     """Category types for transactions."""
 
     SPENDING = "spending"
