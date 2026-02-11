@@ -257,6 +257,21 @@ class TransactionCategorizer:
 
         return predictions
 
+    def predict_proba(self, transactions: list[TransactionInput]) -> np.ndarray:
+        """Get full calibrated probability vectors, bypassing merchant mapper.
+
+        Returns:
+            Array of shape (n_transactions, n_classes) with calibrated probabilities.
+        """
+        if not self.is_trained:
+            raise ValueError("Model must be trained before prediction")
+        features_list = self.feature_extractor.extract_batch_features(transactions)
+        X_df = pd.DataFrame(features_list)
+        X_prepared = self._prepare_features(X_df, fit=False)
+        if self.calibrated_classifier is not None:
+            return self.calibrated_classifier.predict_proba(X_prepared)
+        return self.classifier.predict_proba(X_prepared)
+
     def _get_feature_contributions(self, X_instance: np.ndarray, predicted_class: int) -> dict[str, float]:
         """Get feature contributions for explainability."""
         # Get feature importance from the model
