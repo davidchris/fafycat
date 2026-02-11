@@ -303,8 +303,10 @@ class EnsembleCategorizer:
             # Map back to category ID
             if hasattr(self.nb_component, "classes_") and self.nb_component.classes_ is not None:
                 predicted_category_id = int(self.nb_component.classes_[pred_idx])
-            else:
+            elif self.lgbm_component.classes_ is not None:
                 predicted_category_id = int(self.lgbm_component.classes_[np.argmax(lgbm_probas_raw)])
+            else:
+                raise ValueError("No classes_ available — was the model trained?")
 
             # Combine feature contributions from global importances
             feature_contributions = self._combine_feature_contributions(lgbm_probas, nb_probas)

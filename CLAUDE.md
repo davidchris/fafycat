@@ -12,12 +12,14 @@
 - Dependencies managed via `pyproject.toml`
 - Use `uv pip install -e .` for editable install
 - Use `uv add <dependency>` to add new dependencies
+- use `git`, not `git -C`
 
 ## Coding Style
 
 - Follow Google Python Style Guide, and docstring style
 - After implementing a change, run linter and tests, fix any upcoming issues
 - Always test end-to-end functionality with the dev db
+- Boy Scout Rule: leave code better than you found it
 - Is it about finding FILES? use 'fd'
 - Is it about finding TEXT/strings? use 'rg'
 - Is it about finding CODE STRUCTURE? use 'ast-grep'

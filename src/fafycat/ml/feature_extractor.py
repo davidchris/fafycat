@@ -6,12 +6,14 @@ from typing import Any
 import numpy as np
 
 from ..core.models import TransactionInput
+from .sepa_parser import SepaFieldParser
 
 
 class MerchantCleaner:
     """Clean and normalize merchant names."""
 
     def __init__(self):
+        self.sepa_parser = SepaFieldParser()
         self.patterns = [
             r"\d{4}\.\d{2}\.\d{2}.*",  # Dates
             r"//.*",  # Location info after //
@@ -28,6 +30,7 @@ class MerchantCleaner:
             return ""
 
         cleaned = merchant_name.strip()
+        cleaned = self.sepa_parser.strip_noise(cleaned)
 
         # Remove patterns
         for pattern in self.patterns:
@@ -50,6 +53,7 @@ class TextPreprocessor:
     """Process text fields for NLP features."""
 
     def __init__(self):
+        self.sepa_parser = SepaFieldParser()
         self.stopwords = {
             "und",
             "oder",
@@ -75,6 +79,9 @@ class TextPreprocessor:
         if not text:
             return ""
 
+        # Strip SEPA noise before lowercasing (patterns rely on uppercase markers)
+        text = self.sepa_parser.strip_noise(text)
+
         # Convert to lowercase
         text = text.lower()
 
@@ -97,6 +104,7 @@ class FeatureExtractor:
     def __init__(self):
         self.merchant_cleaner = MerchantCleaner()
         self.text_preprocessor = TextPreprocessor()
+        self.sepa_parser = SepaFieldParser()
 
     def extract_features(self, transaction: TransactionInput) -> dict[str, Any]:
         """Extract all features for ML model."""
@@ -153,6 +161,10 @@ class FeatureExtractor:
             "currency": transaction.currency,
         }
 
+        # SEPA field features
+        sepa_fields = self.sepa_parser.extract_fields(transaction.purpose)
+        features.update(sepa_fields)
+
         return features
 
     def _get_amount_magnitude(self, amount: float) -> int:
@@ -200,11 +212,14 @@ class FeatureExtractor:
             "is_transport",
             "is_tech",
             "is_eur",
+            "has_iban",
+            "has_mandate_ref",
+            "has_creditor_id",
         ]
 
     def get_categorical_feature_names(self) -> list[str]:
         """Get names of categorical features."""
-        return ["merchant_clean", "currency"]
+        return ["merchant_clean", "currency", "creditor_id", "iban_bank_prefix"]
 
     def get_text_feature_names(self) -> list[str]:
         """Get names of text features."""

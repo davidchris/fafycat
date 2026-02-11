@@ -42,6 +42,23 @@ class TestMerchantCleaner:
         assert cleaner.clean("   ") == ""
         assert cleaner.clean(None) == ""
 
+    def test_sepa_field_markers_removed(self):
+        """Test that SEPA field markers are stripped from merchant names."""
+        cleaner = MerchantCleaner()
+
+        result = cleaner.clean("EREF+123456789 KREF+ABC123 CRED+DE98ZZZ09999999999 Netflix GmbH")
+        assert "EREF" not in result
+        assert "KREF" not in result
+        assert "CRED" not in result
+        assert result == "NETFLIX GMBH"
+
+    def test_sepa_prefixes_removed(self):
+        """Test that SEPA transaction type prefixes are stripped."""
+        cleaner = MerchantCleaner()
+
+        assert cleaner.clean("SEPA-LASTSCHRIFT Netflix GmbH") == "NETFLIX GMBH"
+        assert cleaner.clean("KARTENZAHLUNG EDEKA Markt") == "EDEKA MARKT"
+
 
 class TestTextPreprocessor:
     """Test text preprocessing functionality."""
@@ -51,7 +68,7 @@ class TestTextPreprocessor:
         processor = TextPreprocessor()
 
         test_cases = [
-            ("Kartenzahlung Online-Kauf", "kartenzahlung online kauf"),
+            ("Kartenzahlung Online-Kauf", "online kauf"),
             ("Lastschrift mit Referenz", "lastschrift referenz"),
             ("AMAZON MARKETPLACE", "amazon marketplace"),
         ]
@@ -70,7 +87,17 @@ class TestTextPreprocessor:
         assert "eine" not in result
         assert "und" not in result
         assert "lastschrift" in result
-        assert "kartenzahlung" in result
+        assert "kartenzahlung" not in result  # Stripped as SEPA transaction type prefix
+
+    def test_sepa_noise_stripped(self):
+        """Test that SEPA markers are stripped, meaningful words survive."""
+        processor = TextPreprocessor()
+
+        result = processor.process("EREF+12345 SVWZ+Spotify Premium Monthly")
+        assert "eref" not in result
+        assert "spotify" in result
+        assert "premium" in result
+        assert "monthly" in result
 
 
 class TestFeatureExtractor:
@@ -177,6 +204,78 @@ class TestFeatureExtractor:
         assert len(features_list) == 2
         assert features_list[0]["is_supermarket"] == 1
         assert features_list[1]["is_restaurant"] == 1
+
+    def test_sepa_features_present(self):
+        """Test SEPA features are populated for SEPA transactions."""
+        extractor = FeatureExtractor()
+
+        transaction = TransactionInput(
+            date=date(2024, 1, 15),
+            name="Netflix GmbH",
+            purpose="CRED+DE98ZZZ09999999999 MREF+M-NETFLIX-001 IBAN: DE89 3704 0044 0532 0130 00",
+            amount=-12.99,
+        )
+
+        features = extractor.extract_features(transaction)
+
+        assert features["has_creditor_id"] == 1
+        assert features["creditor_id"] == "DE98ZZZ09999999999"
+        assert features["has_iban"] == 1
+        assert features["iban_bank_prefix"] == "DE893704"
+        assert features["has_mandate_ref"] == 1
+
+    def test_sepa_features_absent(self):
+        """Test SEPA features are zero/empty for non-SEPA transactions."""
+        extractor = FeatureExtractor()
+
+        transaction = TransactionInput(
+            date=date(2024, 1, 15),
+            name="EDEKA Markt",
+            purpose="Kartenzahlung",
+            amount=-45.67,
+        )
+
+        features = extractor.extract_features(transaction)
+
+        assert features["has_creditor_id"] == 0
+        assert features["creditor_id"] == ""
+        assert features["has_iban"] == 0
+        assert features["iban_bank_prefix"] == ""
+        assert features["has_mandate_ref"] == 0
+
+    def test_feature_names_include_sepa(self):
+        """Test that feature name lists include SEPA fields."""
+        extractor = FeatureExtractor()
+
+        numerical = extractor.get_numerical_feature_names()
+        assert "has_iban" in numerical
+        assert "has_mandate_ref" in numerical
+        assert "has_creditor_id" in numerical
+
+        categorical = extractor.get_categorical_feature_names()
+        assert "creditor_id" in categorical
+        assert "iban_bank_prefix" in categorical
+
+    def test_text_combined_clean_of_sepa_noise(self):
+        """Test that text_combined is free of SEPA noise."""
+        extractor = FeatureExtractor()
+
+        transaction = TransactionInput(
+            date=date(2024, 1, 15),
+            name="Netflix GmbH",
+            purpose="EREF+R2024 SVWZ+Monthly subscription",
+            amount=-12.99,
+        )
+
+        features = extractor.extract_features(transaction)
+        text = features["text_combined"]
+
+        assert "eref" not in text
+        assert "svwz" not in text
+        assert "r2024" not in text
+        assert "netflix" in text
+        assert "monthly" in text
+        assert "subscription" in text
 
 
 if __name__ == "__main__":
