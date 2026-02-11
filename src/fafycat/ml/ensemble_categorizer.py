@@ -18,72 +18,6 @@ from .cross_validation import StratifiedKFoldValidator
 from .naive_bayes_classifier import NaiveBayesTextClassifier
 
 
-class LightGBMWrapper:
-    """Wrapper for LightGBM that matches the scikit-learn interface expected by cross-validation."""
-
-    def __init__(self, session: Session, config: MLConfig) -> None:
-        from sklearn.preprocessing import LabelEncoder
-
-        self.categorizer = TransactionCategorizer(session, config)
-        self.label_encoder: LabelEncoder | None = None
-
-    def fit(self, transactions: list[TransactionInput], labels: np.ndarray) -> None:
-        self._fit_label_encoder(labels)
-        self.categorizer.train(test_size=0.0)
-
-    def predict_proba(self, transactions: list[TransactionInput]) -> np.ndarray:
-        self._validate_fitted()
-        predictions = self.categorizer.predict_with_confidence(transactions)
-        return self._convert_predictions_to_probabilities(predictions)
-
-    def predict(self, transactions: list[TransactionInput]) -> np.ndarray:
-        self._validate_fitted()
-        assert self.label_encoder is not None
-        probas = self.predict_proba(transactions)
-        predictions = np.argmax(probas, axis=1)
-        return self.label_encoder.inverse_transform(predictions)
-
-    def _fit_label_encoder(self, labels: np.ndarray) -> None:
-        """Fit the label encoder with the provided labels."""
-        from sklearn.preprocessing import LabelEncoder
-
-        self.label_encoder = LabelEncoder()
-        self.label_encoder.fit_transform(labels)
-
-    def _validate_fitted(self) -> None:
-        """Validate that the model has been fitted."""
-        if self.label_encoder is None:
-            raise ValueError("Model must be fitted before making predictions")
-
-    def _convert_predictions_to_probabilities(self, predictions) -> np.ndarray:
-        """Convert predictions to probability matrix."""
-        assert self.label_encoder is not None
-        n_classes = len(self.label_encoder.classes_)
-        probas = np.zeros((len(predictions), n_classes))
-
-        for i, pred in enumerate(predictions):
-            self._set_prediction_probabilities(probas, i, pred, n_classes)
-
-        return probas
-
-    def _set_prediction_probabilities(self, probas: np.ndarray, i: int, pred, n_classes: int) -> None:
-        """Set probabilities for a single prediction."""
-        assert self.label_encoder is not None
-        if pred.predicted_category_id in self.label_encoder.classes_:
-            class_idx = np.where(self.label_encoder.classes_ == pred.predicted_category_id)[0][0]
-            probas[i, class_idx] = pred.confidence_score
-
-            # Distribute remaining probability equally among other classes
-            remaining_prob = 1.0 - pred.confidence_score
-            other_prob = remaining_prob / (n_classes - 1)
-            for j in range(n_classes):
-                if j != class_idx:
-                    probas[i, j] = other_prob
-        else:
-            # Uniform distribution if category not in training set
-            probas[i, :] = 1.0 / n_classes
-
-
 class EnsembleCategorizer:
     """Ensemble categorizer combining LightGBM and Naive Bayes models."""
 
@@ -120,7 +54,7 @@ class EnsembleCategorizer:
             )
 
         # Filter out categories with too few samples for cross-validation
-        min_samples_per_category = max(3, self.cv_validator.n_splits)  # Need at least n_splits samples for CV
+        min_samples_per_category = max(5, self.cv_validator.n_splits)  # Need at least 5 (or n_splits) for CV
 
         # Count transactions per category
         category_counts: dict[int, int] = {}
@@ -196,7 +130,7 @@ class EnsembleCategorizer:
         # Train LightGBM component
         print("  Training LightGBM...")
         lgbm_temp = TransactionCategorizer(self.session, self.config)
-        lgbm_temp.train(test_size=0.0)  # Use all available data in the current session
+        lgbm_temp.fit(train_transactions, train_labels)
 
         # Train Naive Bayes component
         if progress_callback:
@@ -213,14 +147,14 @@ class EnsembleCategorizer:
             progress_callback("optimizing_weights")
         print("🔄 Optimizing ensemble weights on validation set...")
 
-        # Get predictions on validation set
-        lgbm_val_preds = lgbm_temp.predict_with_confidence(val_transactions)
+        # Get probability vectors on validation set
+        lgbm_val_probas_raw = lgbm_temp.predict_proba(val_transactions)
         nb_val_probas = nb_temp.predict_proba(val_transactions)
 
-        # Convert LightGBM predictions to probabilities
+        # Align LightGBM probabilities to NB class order
         if nb_temp.classes_ is None:
             raise ValueError("Naive Bayes model must be fitted before converting predictions")
-        lgbm_val_probas = self._convert_lgbm_predictions_to_probas(lgbm_val_preds, nb_temp.classes_)
+        lgbm_val_probas = self._align_probas(lgbm_val_probas_raw, lgbm_temp.classes_, nb_temp.classes_)
 
         # Test different weight combinations
         weight_candidates = [{"lgbm": w, "nb": 1 - w} for w in np.arange(0.3, 0.9, 0.1)]
@@ -253,7 +187,7 @@ class EnsembleCategorizer:
 
         # Train final models on full dataset
         print("🚀 Training final models on full dataset...")
-        self.lgbm_component.train(test_size=0.0)
+        self.lgbm_component.fit(transactions, labels)
         self.nb_component.fit(transactions, labels)
 
         # Save results
@@ -278,28 +212,56 @@ class EnsembleCategorizer:
 
         return self.cv_results
 
-    def _convert_lgbm_predictions_to_probas(self, lgbm_preds: list, nb_classes: np.ndarray) -> np.ndarray:
-        """Convert LightGBM predictions to probability matrix matching NB classes."""
-        n_samples = len(lgbm_preds)
-        n_classes = len(nb_classes)
-        probas = np.zeros((n_samples, n_classes))
+    def _align_probas(
+        self, probas: np.ndarray, source_classes: np.ndarray | None, target_classes: np.ndarray
+    ) -> np.ndarray:
+        """Align probability matrix columns from source class order to target class order.
 
-        for i, pred in enumerate(lgbm_preds):
-            # Find class index in NB classes
-            class_idx = np.where(nb_classes == pred.predicted_category_id)[0]
-            if len(class_idx) > 0:
-                probas[i, class_idx[0]] = pred.confidence_score
-                # Distribute remaining probability
-                remaining = 1.0 - pred.confidence_score
-                other_prob = remaining / (n_classes - 1)
-                for j in range(n_classes):
-                    if j != class_idx[0]:
-                        probas[i, j] = other_prob
-            else:
-                # Uniform distribution if class not found
-                probas[i, :] = 1.0 / n_classes
+        Args:
+            probas: Probability matrix of shape (n_samples, n_source_classes).
+            source_classes: Class labels corresponding to columns of probas.
+            target_classes: Desired class label order for output columns.
 
-        return probas
+        Returns:
+            Aligned probability matrix of shape (n_samples, n_target_classes),
+            renormalized so rows sum to 1.
+        """
+        if source_classes is None:
+            return np.ones((probas.shape[0], len(target_classes))) / len(target_classes)
+
+        n_samples = probas.shape[0]
+        n_target = len(target_classes)
+        aligned = np.zeros((n_samples, n_target))
+
+        source_class_list = list(source_classes)
+        for i, cls in enumerate(target_classes):
+            if cls in source_class_list:
+                src_idx = source_class_list.index(cls)
+                aligned[:, i] = probas[:, src_idx]
+
+        row_sums = aligned.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1  # avoid division by zero
+        aligned = aligned / row_sums
+        return aligned
+
+    def _align_single_proba(
+        self, probas: np.ndarray, source_classes: np.ndarray | None, target_classes: np.ndarray | None
+    ) -> np.ndarray:
+        """Align a single probability vector from source class order to target class order.
+
+        Args:
+            probas: 1-D probability vector of shape (n_source_classes,).
+            source_classes: Class labels corresponding to entries of probas.
+            target_classes: Desired class label order for output.
+
+        Returns:
+            Aligned 1-D probability vector of shape (n_target_classes,),
+            renormalized so entries sum to 1.
+        """
+        if source_classes is None or target_classes is None:
+            return probas
+        aligned_2d = self._align_probas(probas.reshape(1, -1), source_classes, target_classes)
+        return aligned_2d[0]
 
     def predict_with_confidence(self, transactions: list[TransactionInput]) -> list[TransactionPrediction]:
         """Ensemble prediction combining LightGBM + Naive Bayes."""
@@ -311,7 +273,7 @@ class EnsembleCategorizer:
         for txn in transactions:
             # First try rule-based merchant mapping (high confidence)
             merchant_match = self.lgbm_component.merchant_mapper.get_category(txn.name)
-            if merchant_match and merchant_match.confidence > 0.95:
+            if merchant_match and merchant_match.confidence >= 0.95:
                 predictions.append(
                     TransactionPrediction(
                         transaction_id=txn.generate_id(),
@@ -322,14 +284,14 @@ class EnsembleCategorizer:
                 )
                 continue
 
-            # Get LightGBM prediction
-            lgbm_pred = self.lgbm_component.predict_with_confidence([txn])[0]
-
-            # Get Naive Bayes prediction
+            # Get full probability vectors from both models
+            lgbm_probas_raw = self.lgbm_component.predict_proba([txn])[0]
             nb_probas = self.nb_component.predict_proba([txn])[0]
 
-            # Convert LightGBM prediction to probability distribution
-            lgbm_probas = self._convert_lgbm_to_probas(lgbm_pred)
+            # Align LightGBM probabilities to NB class order
+            lgbm_probas = self._align_single_proba(
+                lgbm_probas_raw, self.lgbm_component.classes_, self.nb_component.classes_
+            )
 
             # Combine predictions using learned weights
             combined_probas = self.ensemble_weights["lgbm"] * lgbm_probas + self.ensemble_weights["nb"] * nb_probas
@@ -342,10 +304,10 @@ class EnsembleCategorizer:
             if hasattr(self.nb_component, "classes_") and self.nb_component.classes_ is not None:
                 predicted_category_id = int(self.nb_component.classes_[pred_idx])
             else:
-                predicted_category_id = lgbm_pred.predicted_category_id
+                predicted_category_id = int(self.lgbm_component.classes_[np.argmax(lgbm_probas_raw)])
 
-            # Combine feature contributions
-            feature_contributions = self._combine_feature_contributions(lgbm_pred, nb_probas)
+            # Combine feature contributions from global importances
+            feature_contributions = self._combine_feature_contributions(lgbm_probas, nb_probas)
 
             ensemble_pred = TransactionPrediction(
                 transaction_id=txn.generate_id(),
@@ -358,50 +320,24 @@ class EnsembleCategorizer:
 
         return predictions
 
-    def _convert_lgbm_to_probas(self, lgbm_pred: TransactionPrediction) -> np.ndarray:
-        """Convert LightGBM prediction to probability distribution aligned with NB classes."""
-        if not hasattr(self.nb_component, "classes_") or self.nb_component.classes_ is None:
-            # Fallback to lgbm classes
-            if not hasattr(self.lgbm_component, "classes_") or self.lgbm_component.classes_ is None:
-                return np.ones(5) / 5
-            n_classes = len(self.lgbm_component.classes_)
-            probas = np.ones(n_classes) / n_classes
-            return probas
+    def _combine_feature_contributions(self, lgbm_probas: np.ndarray, nb_probas: np.ndarray) -> dict[str, float]:
+        """Combine feature contributions from both models using global importances."""
+        contributions: dict[str, float] = {}
 
-        # Use NB classes as the reference to ensure shapes match for combining
-        nb_classes = self.nb_component.classes_
-        n_classes = len(nb_classes)
-        probas = np.zeros(n_classes)
-
-        # Find the predicted class index in NB's class space
-        pred_class_idx = np.where(nb_classes == lgbm_pred.predicted_category_id)[0]
-
-        if len(pred_class_idx) > 0:
-            probas[pred_class_idx[0]] = lgbm_pred.confidence_score
-            remaining_prob = 1.0 - lgbm_pred.confidence_score
-            other_prob = remaining_prob / (n_classes - 1)
-            for i in range(n_classes):
-                if i != pred_class_idx[0]:
-                    probas[i] = other_prob
-        else:
-            # Category not in NB classes — uniform distribution
-            probas[:] = 1.0 / n_classes
-
-        return probas
-
-    def _combine_feature_contributions(
-        self, lgbm_pred: TransactionPrediction, nb_probas: np.ndarray
-    ) -> dict[str, float]:
-        """Combine feature contributions from both models."""
-        contributions = {}
-
-        # Add LightGBM contributions with weight
         lgbm_weight = self.ensemble_weights["lgbm"]
-        for feature, contrib in lgbm_pred.feature_contributions.items():
-            contributions[f"lgbm_{feature}"] = contrib * lgbm_weight
-
-        # Add Naive Bayes contribution
         nb_weight = self.ensemble_weights["nb"]
+
+        # Use LightGBM's global feature importance (top 5)
+        if hasattr(self.lgbm_component.classifier, "feature_importances_"):
+            importances = self.lgbm_component.classifier.feature_importances_
+            top_indices = np.argsort(importances)[-5:]
+            total_imp = float(importances[top_indices].sum()) or 1.0
+            for idx in top_indices:
+                if idx < len(self.lgbm_component.feature_names):
+                    name = self.lgbm_component.feature_names[idx]
+                    contributions[f"lgbm_{name}"] = float(importances[idx]) / total_imp * lgbm_weight
+
+        # Add Naive Bayes contribution summary
         nb_confidence = float(np.max(nb_probas))
         contributions["nb_text_features"] = nb_confidence * nb_weight
 
@@ -410,44 +346,6 @@ class EnsembleCategorizer:
         contributions["ensemble_nb_weight"] = nb_weight
 
         return contributions
-
-    def _calculate_cv_metrics(self, transactions: list[TransactionInput], labels: np.ndarray) -> dict[str, Any]:
-        """Calculate comprehensive cross-validation metrics."""
-        # Compare individual models vs ensemble
-        models_config = {
-            "lightgbm": {
-                "class": LightGBMWrapper,
-                "params": {"session": self.session, "config": self.config},
-            },
-            "naive_bayes": {
-                "class": NaiveBayesTextClassifier,
-                "params": {
-                    "alpha": getattr(self.config, "nb_alpha", 1.0),
-                    "use_complement": getattr(self.config, "nb_use_complement", True),
-                    "max_features": getattr(self.config, "nb_max_features", 2000),
-                },
-            },
-        }
-
-        print("📈 Comparing individual model performance...")
-        individual_results = self.cv_validator.compare_models(transactions, labels, models_config)
-
-        # Get fold split information
-        split_info = self.cv_validator.get_fold_splits_info(labels)
-
-        cv_results = self.cv_results or {}
-        return {
-            "individual_models": individual_results,
-            "fold_split_info": split_info,
-            "ensemble_improvement": {
-                "vs_lgbm": cv_results.get("best_cv_score", 0) - individual_results["lightgbm"]["cv_accuracy_mean"]
-                if individual_results
-                else 0,
-                "vs_nb": cv_results.get("best_cv_score", 0) - individual_results["naive_bayes"]["cv_accuracy_mean"]
-                if individual_results
-                else 0,
-            },
-        }
 
     def _save_ensemble_metadata(self) -> None:
         """Save ensemble model metadata to database."""
