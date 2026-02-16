@@ -1443,7 +1443,10 @@ def render_ml_settings_subsection():
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ auto_approve_threshold: value })
             })
-            .then(r => r.json())
+            .then(r => {
+                if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Save failed'); });
+                return r.json();
+            })
             .then(data => {
                 window._autoApproveThreshold = parseFloat(data.auto_approve_threshold);
                 status.textContent = 'Saved! (' + parseFloat(data.auto_approve_threshold).toFixed(2) + ')';

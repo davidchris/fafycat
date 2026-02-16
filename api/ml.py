@@ -115,7 +115,10 @@ async def get_ml_settings(db: Session = Depends(get_db_session)) -> dict:
 async def update_ml_settings(payload: dict, db: Session = Depends(get_db_session)) -> dict:
     """Update ML settings."""
     if "auto_approve_threshold" in payload:
-        value = float(payload["auto_approve_threshold"])
+        try:
+            value = float(payload["auto_approve_threshold"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="auto_approve_threshold must be a number") from None
         if not 0.50 <= value <= 0.99:
             raise HTTPException(status_code=400, detail="auto_approve_threshold must be between 0.50 and 0.99")
 
