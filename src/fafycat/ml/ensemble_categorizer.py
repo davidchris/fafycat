@@ -264,63 +264,71 @@ class EnsembleCategorizer:
         return aligned_2d[0]
 
     def predict_with_confidence(self, transactions: list[TransactionInput]) -> list[TransactionPrediction]:
-        """Ensemble prediction combining LightGBM + Naive Bayes."""
+        """Ensemble prediction combining LightGBM + Naive Bayes.
+
+        Uses batch inference for all transactions not resolved by merchant
+        mapping, avoiding per-transaction model calls.
+        """
         if not self.is_trained:
             raise ValueError("Ensemble must be trained before prediction")
 
-        predictions = []
+        predictions: list[TransactionPrediction | None] = [None] * len(transactions)
+        ml_indices: list[int] = []
+        ml_transactions: list[TransactionInput] = []
 
-        for txn in transactions:
-            # First try rule-based merchant mapping (high confidence)
+        # Phase 1: Merchant mapper (fast, rule-based)
+        for i, txn in enumerate(transactions):
             merchant_match = self.lgbm_component.merchant_mapper.get_category(txn.name)
             if merchant_match and merchant_match.confidence >= 0.95:
-                predictions.append(
-                    TransactionPrediction(
-                        transaction_id=txn.generate_id(),
-                        predicted_category_id=merchant_match.category_id,
-                        confidence_score=merchant_match.confidence,
-                        feature_contributions={"merchant_rule": 1.0},
-                    )
+                predictions[i] = TransactionPrediction(
+                    transaction_id=txn.generate_id(),
+                    predicted_category_id=merchant_match.category_id,
+                    confidence_score=merchant_match.confidence,
+                    feature_contributions={"merchant_rule": 1.0},
                 )
-                continue
+            else:
+                ml_indices.append(i)
+                ml_transactions.append(txn)
 
-            # Get full probability vectors from both models
-            lgbm_probas_raw = self.lgbm_component.predict_proba([txn])[0]
-            nb_probas = self.nb_component.predict_proba([txn])[0]
+        # Phase 2: Batch ML prediction for remaining
+        if ml_transactions:
+            # Batch predict both components
+            lgbm_probas_all = self.lgbm_component.predict_proba(ml_transactions)
+            nb_probas_all = self.nb_component.predict_proba(ml_transactions)
 
-            # Align LightGBM probabilities to NB class order
-            lgbm_probas = self._align_single_proba(
-                lgbm_probas_raw, self.lgbm_component.classes_, self.nb_component.classes_
-            )
+            # Align LightGBM probabilities to NB class order (batch)
+            nb_classes = self.nb_component.classes_
+            assert nb_classes is not None, "NB component must be trained before prediction"
+            lgbm_probas_aligned = self._align_probas(lgbm_probas_all, self.lgbm_component.classes_, nb_classes)
 
             # Combine predictions using learned weights
-            combined_probas = self.ensemble_weights["lgbm"] * lgbm_probas + self.ensemble_weights["nb"] * nb_probas
-
-            # Get final prediction
-            pred_idx = np.argmax(combined_probas)
-            confidence = float(combined_probas[pred_idx])
-
-            # Map back to category ID
-            if hasattr(self.nb_component, "classes_") and self.nb_component.classes_ is not None:
-                predicted_category_id = int(self.nb_component.classes_[pred_idx])
-            elif self.lgbm_component.classes_ is not None:
-                predicted_category_id = int(self.lgbm_component.classes_[np.argmax(lgbm_probas_raw)])
-            else:
-                raise ValueError("No classes_ available — was the model trained?")
-
-            # Combine feature contributions from global importances
-            feature_contributions = self._combine_feature_contributions(lgbm_probas, nb_probas)
-
-            ensemble_pred = TransactionPrediction(
-                transaction_id=txn.generate_id(),
-                predicted_category_id=predicted_category_id,
-                confidence_score=confidence,
-                feature_contributions=feature_contributions,
+            combined_probas_all = (
+                self.ensemble_weights["lgbm"] * lgbm_probas_aligned + self.ensemble_weights["nb"] * nb_probas_all
             )
 
-            predictions.append(ensemble_pred)
+            for j, idx in enumerate(ml_indices):
+                combined_probas = combined_probas_all[j]
+                pred_idx = np.argmax(combined_probas)
+                confidence = float(combined_probas[pred_idx])
 
-        return predictions
+                # Map back to category ID
+                if hasattr(self.nb_component, "classes_") and self.nb_component.classes_ is not None:
+                    predicted_category_id = int(self.nb_component.classes_[pred_idx])
+                elif self.lgbm_component.classes_ is not None:
+                    predicted_category_id = int(self.lgbm_component.classes_[np.argmax(lgbm_probas_all[j])])
+                else:
+                    raise ValueError("No classes_ available — was the model trained?")
+
+                feature_contributions = self._combine_feature_contributions(lgbm_probas_aligned[j], nb_probas_all[j])
+
+                predictions[idx] = TransactionPrediction(
+                    transaction_id=ml_transactions[j].generate_id(),
+                    predicted_category_id=predicted_category_id,
+                    confidence_score=confidence,
+                    feature_contributions=feature_contributions,
+                )
+
+        return [p for p in predictions if p is not None]
 
     def _combine_feature_contributions(self, lgbm_probas: np.ndarray, nb_probas: np.ndarray) -> dict[str, float]:
         """Combine feature contributions from both models using global importances."""
@@ -386,7 +394,9 @@ class EnsembleCategorizer:
         lgbm_model_data = {
             "classifier": self.lgbm_component.classifier,
             "calibrated_classifier": self.lgbm_component.calibrated_classifier,
-            "text_vectorizer": self.lgbm_component.text_vectorizer,
+            "char_vectorizer": self.lgbm_component.char_vectorizer,
+            "word_vectorizer": self.lgbm_component.word_vectorizer,
+            "svd": self.lgbm_component.svd,
             "label_encoder": self.lgbm_component.label_encoder,
             "feature_names": self.lgbm_component.feature_names,
             "classes_": self.lgbm_component.classes_,
@@ -443,12 +453,15 @@ class EnsembleCategorizer:
             self.lgbm_component = TransactionCategorizer(self.session, self.config)
             self.lgbm_component.classifier = lgbm_data["classifier"]
             self.lgbm_component.calibrated_classifier = lgbm_data["calibrated_classifier"]
-            self.lgbm_component.text_vectorizer = lgbm_data["text_vectorizer"]
             self.lgbm_component.label_encoder = lgbm_data["label_encoder"]
             self.lgbm_component.feature_names = lgbm_data["feature_names"]
             self.lgbm_component.classes_ = lgbm_data["classes_"]
             self.lgbm_component.model_version = lgbm_data["model_version"]
             self.lgbm_component.is_trained = True
+            # Load vectorizers with backward compat for old pickles
+            self.lgbm_component.char_vectorizer = lgbm_data.get("char_vectorizer", lgbm_data.get("text_vectorizer"))
+            self.lgbm_component.word_vectorizer = lgbm_data.get("word_vectorizer", None)
+            self.lgbm_component.svd = lgbm_data.get("svd", None)
         else:
             # Old format - direct assignment (legacy support)
             self.lgbm_component = ensemble_data["lgbm_component"]

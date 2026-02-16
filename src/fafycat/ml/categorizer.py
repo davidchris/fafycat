@@ -9,7 +9,9 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMClassifier
+from scipy.sparse import hstack as sparse_hstack
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.frozen import FrozenEstimator
 from sklearn.model_selection import train_test_split
@@ -32,8 +34,10 @@ class TransactionCategorizer:
         self.feature_extractor = FeatureExtractor()
         self.merchant_mapper = MerchantMapper(session)
 
-        # ML components
-        self.text_vectorizer = TfidfVectorizer(**config.tfidf_params)
+        # ML components — combined char + word TF-IDF with SVD
+        self.char_vectorizer = TfidfVectorizer(**config.tfidf_char_params)
+        self.word_vectorizer: TfidfVectorizer | None = TfidfVectorizer(**config.tfidf_word_params)
+        self.svd: TruncatedSVD | None = TruncatedSVD(n_components=config.svd_n_components, random_state=42)
         self.label_encoder = LabelEncoder()
         self.classifier = LGBMClassifier(**config.lgbm_params)
         self.calibrated_classifier: CalibratedClassifierCV | None = None
@@ -181,6 +185,11 @@ class TransactionCategorizer:
 
         self.is_trained = True
 
+    @property
+    def _has_combined_vectorizer(self) -> bool:
+        """Check if the model uses the combined char+word+SVD pipeline."""
+        return self.word_vectorizer is not None and self.svd is not None
+
     def _prepare_features(self, X_df: pd.DataFrame, fit: bool = False) -> np.ndarray:
         """Prepare features for ML model."""
         # Get numerical features
@@ -190,72 +199,90 @@ class TransactionCategorizer:
         # Get text features
         text_features = X_df["text_combined"].fillna("").values
 
-        if fit:
-            X_text = self.text_vectorizer.fit_transform(text_features)
-            # Store feature names
-            self.feature_names = numerical_features + [f"text_{i}" for i in range(X_text.shape[1])]
+        if self._has_combined_vectorizer:
+            # Combined char + word TF-IDF → SVD (keeps sparse until SVD)
+            if fit:
+                X_char = self.char_vectorizer.fit_transform(text_features)
+                X_word = self.word_vectorizer.fit_transform(text_features)  # type: ignore[union-attr]
+                X_text_sparse = sparse_hstack([X_char, X_word])
+                X_text = self.svd.fit_transform(X_text_sparse)  # type: ignore[union-attr]
+                self.feature_names = numerical_features + [f"svd_{i}" for i in range(X_text.shape[1])]
+            else:
+                X_char = self.char_vectorizer.transform(text_features)
+                X_word = self.word_vectorizer.transform(text_features)  # type: ignore[union-attr]
+                X_text_sparse = sparse_hstack([X_char, X_word])
+                X_text = self.svd.transform(X_text_sparse)  # type: ignore[union-attr]
         else:
-            X_text = self.text_vectorizer.transform(text_features)
+            # Legacy single-vectorizer path (for old saved models)
+            if fit:
+                X_text = self.char_vectorizer.fit_transform(text_features).toarray()
+                self.feature_names = numerical_features + [f"text_{i}" for i in range(X_text.shape[1])]
+            else:
+                X_text = self.char_vectorizer.transform(text_features).toarray()
 
-        # Combine features
-        X_combined = np.hstack([X_numerical, X_text.toarray()])
+        # X_text is dense (SVD output or .toarray()) — safe to hstack
+        X_combined = np.hstack([X_numerical, X_text])
 
         return X_combined
 
     def predict_with_confidence(self, transactions: list[TransactionInput]) -> list[TransactionPrediction]:
-        """Predict categories with confidence scores."""
+        """Predict categories with confidence scores.
+
+        Uses batch ML inference for all transactions not resolved by merchant
+        mapping, avoiding per-transaction feature extraction and model calls.
+        """
         if not self.is_trained:
             raise ValueError("Model must be trained before prediction")
+        if self.classes_ is None:
+            raise ValueError("Model has no classes_ — was it trained?")
 
-        predictions = []
+        predictions: list[TransactionPrediction | None] = [None] * len(transactions)
+        ml_indices: list[int] = []
+        ml_transactions: list[TransactionInput] = []
 
-        for txn in transactions:
-            # First try rule-based merchant mapping
+        # Phase 1: Merchant mapper (fast, rule-based)
+        for i, txn in enumerate(transactions):
             merchant_match = self.merchant_mapper.get_category(txn.name)
             if merchant_match and merchant_match.confidence >= 0.95:
-                predictions.append(
-                    TransactionPrediction(
-                        transaction_id=txn.generate_id(),
-                        predicted_category_id=merchant_match.category_id,
-                        confidence_score=merchant_match.confidence,
-                        feature_contributions={"merchant_rule": 1.0},
-                    )
+                predictions[i] = TransactionPrediction(
+                    transaction_id=txn.generate_id(),
+                    predicted_category_id=merchant_match.category_id,
+                    confidence_score=merchant_match.confidence,
+                    feature_contributions={"merchant_rule": 1.0},
                 )
-                continue
+            else:
+                ml_indices.append(i)
+                ml_transactions.append(txn)
 
-            # Otherwise use ML model
-            features = self.feature_extractor.extract_features(txn)
-            features_df = pd.DataFrame([features])
-            X_prepared = self._prepare_features(features_df, fit=False)
+        # Phase 2: Batch ML prediction for remaining
+        if ml_transactions:
+            features_list = self.feature_extractor.extract_batch_features(ml_transactions)
+            X_df = pd.DataFrame(features_list)
+            X_prepared = self._prepare_features(X_df, fit=False)
 
-            # Get prediction and probability
             try:
                 if self.calibrated_classifier:
-                    proba = self.calibrated_classifier.predict_proba(X_prepared)[0]
+                    probas = self.calibrated_classifier.predict_proba(X_prepared)
                 else:
-                    proba = self.classifier.predict_proba(X_prepared)[0]
+                    probas = self.classifier.predict_proba(X_prepared)
             except ValueError:
-                proba = self.classifier.predict_proba(X_prepared)[0]
+                probas = self.classifier.predict_proba(X_prepared)
 
-            pred_idx = np.argmax(proba)
-            confidence = float(proba[pred_idx])
-            if self.classes_ is None:
-                raise ValueError("Model has no classes_ — was it trained?")
-            predicted_category_id = int(self.classes_[pred_idx])
+            for j, idx in enumerate(ml_indices):
+                proba = probas[j]
+                pred_idx = np.argmax(proba)
+                confidence = float(proba[pred_idx])
+                predicted_category_id = int(self.classes_[pred_idx])
+                feature_contributions = self._get_feature_contributions(X_prepared[j], int(pred_idx))
 
-            # Get feature importance for this prediction
-            feature_contributions = self._get_feature_contributions(X_prepared[0], int(pred_idx))
-
-            predictions.append(
-                TransactionPrediction(
-                    transaction_id=txn.generate_id(),
+                predictions[idx] = TransactionPrediction(
+                    transaction_id=ml_transactions[j].generate_id(),
                     predicted_category_id=predicted_category_id,
                     confidence_score=confidence,
                     feature_contributions=feature_contributions,
                 )
-            )
 
-        return predictions
+        return [p for p in predictions if p is not None]
 
     def predict_proba(self, transactions: list[TransactionInput]) -> np.ndarray:
         """Get full calibrated probability vectors, bypassing merchant mapper.
@@ -379,7 +406,9 @@ class TransactionCategorizer:
         model_data = {
             "classifier": self.classifier,
             "calibrated_classifier": self.calibrated_classifier,
-            "text_vectorizer": self.text_vectorizer,
+            "char_vectorizer": self.char_vectorizer,
+            "word_vectorizer": self.word_vectorizer,
+            "svd": self.svd,
             "label_encoder": self.label_encoder,
             "feature_names": self.feature_names,
             "classes_": self.classes_,
@@ -422,11 +451,15 @@ class TransactionCategorizer:
 
         self.classifier = model_data["classifier"]
         self.calibrated_classifier = model_data["calibrated_classifier"]
-        self.text_vectorizer = model_data["text_vectorizer"]
         self.label_encoder = model_data["label_encoder"]
         self.feature_names = model_data["feature_names"]
         self.classes_ = model_data["classes_"]
         self.model_version = model_data["model_version"]
+
+        # Load vectorizers with backward compat for old pickles
+        self.char_vectorizer = model_data.get("char_vectorizer", model_data.get("text_vectorizer"))
+        self.word_vectorizer = model_data.get("word_vectorizer", None)
+        self.svd = model_data.get("svd", None)
 
         self.is_trained = True
 
