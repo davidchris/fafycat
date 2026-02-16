@@ -98,8 +98,10 @@ def _apply_hybrid_categorization_strategy(db: Session, new_txns, predictions) ->
     )
 
     # Apply categorization logic
+    from api.ml import get_auto_approve_threshold
+
     predictions_made = 0
-    confidence_threshold = 0.95
+    confidence_threshold = get_auto_approve_threshold(db)
 
     for txn, prediction in zip(new_txns, predictions, strict=True):
         _categorize_transaction(txn, prediction, strategic_selections, confidence_threshold)

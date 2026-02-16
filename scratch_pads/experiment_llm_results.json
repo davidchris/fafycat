@@ -1,0 +1,412 @@
+{
+  "metadata": {
+    "date": "2026-02-12",
+    "experiment": "llm_classification",
+    "n_transactions": 1856,
+    "n_categories": 26,
+    "baselines": {
+      "lightgbm_macro_f1": 0.851,
+      "ensemble_macro_f1": 0.855
+    }
+  },
+  "models": {
+    "phi-4-mini": {
+      "model": {
+        "name": "phi-4-mini",
+        "repo": "mlx-community/Phi-4-mini-instruct-4bit",
+        "params": "3.8B dense"
+      },
+      "cv_scheme": "1x5 repeated stratified k-fold",
+      "total_time_minutes": 12.4,
+      "llm_standalone": {
+        "macro_f1": {
+          "mean": 0.5027,
+          "std": 0.0167,
+          "ci_95": [
+            0.4717,
+            0.5337
+          ]
+        },
+        "macro_f1_aggregate": 0.5053,
+        "weighted_f1": 0.471,
+        "fold_scores": [
+          0.5024,
+          0.4993,
+          0.5245,
+          0.5089,
+          0.4785
+        ],
+        "per_category_f1": {
+          "auswaertsessen": 0.4113,
+          "bargeld": 0.9524,
+          "beitragsservice": 0.96,
+          "buecher": 0.7027,
+          "dsl": 0.9851,
+          "david work travel": 0.1538,
+          "einkommen-p2": 0.0,
+          "flora61": 0.3111,
+          "haushalt": 0.8,
+          "investieren": 0.9565,
+          "kind": 0.4565,
+          "kindergeld": 0.4306,
+          "kleidung": 0.2545,
+          "lebensmittel": 0.5538,
+          "media-abos": 0.7143,
+          "miete": 0.5638,
+          "mobilitaet": 0.2895,
+          "sonstiges": 0.0732,
+          "sparen": 0.3908,
+          "steuer": 0.9474,
+          "strom": 0.8409,
+          "taschengeld": 0.9464,
+          "technik": 0.0,
+          "urlaub&freizeit": 0.0465,
+          "wohnung": 0.0471,
+          "sport": 0.3509
+        }
+      },
+      "ensemble_standalone": {
+        "macro_f1": {
+          "mean": 0.8671,
+          "std": 0.0101,
+          "ci_95": [
+            0.8482,
+            0.886
+          ]
+        },
+        "macro_f1_aggregate": 0.8671,
+        "weighted_f1": 0.8851,
+        "fold_scores": [
+          0.8652,
+          0.8503,
+          0.8755,
+          0.8711,
+          0.8734
+        ],
+        "per_category_f1": {
+          "auswaertsessen": 0.7097,
+          "bargeld": 0.9836,
+          "beitragsservice": 1.0,
+          "buecher": 0.6667,
+          "dsl": 1.0,
+          "david work travel": 0.5333,
+          "einkommen-p2": 0.96,
+          "flora61": 0.9167,
+          "haushalt": 0.8841,
+          "investieren": 1.0,
+          "kind": 0.8229,
+          "kindergeld": 1.0,
+          "kleidung": 0.7073,
+          "lebensmittel": 0.9372,
+          "media-abos": 0.9495,
+          "miete": 1.0,
+          "mobilitaet": 0.8485,
+          "sonstiges": 0.8889,
+          "sparen": 0.9206,
+          "steuer": 1.0,
+          "strom": 1.0,
+          "taschengeld": 0.9833,
+          "technik": 0.5,
+          "urlaub&freizeit": 0.5976,
+          "wohnung": 0.935,
+          "sport": 0.8
+        }
+      },
+      "hybrid_0.95": {
+        "macro_f1": {
+          "mean": 0.6697,
+          "std": 0.011,
+          "ci_95": [
+            0.6493,
+            0.6901
+          ]
+        },
+        "macro_f1_aggregate": 0.6726,
+        "weighted_f1": 0.6842,
+        "fold_scores": [
+          0.6792,
+          0.6601,
+          0.6791,
+          0.6742,
+          0.6559
+        ],
+        "per_category_f1": {
+          "auswaertsessen": 0.4331,
+          "bargeld": 0.9524,
+          "beitragsservice": 0.96,
+          "buecher": 0.7027,
+          "dsl": 1.0,
+          "david work travel": 0.1538,
+          "einkommen-p2": 0.9577,
+          "flora61": 0.7333,
+          "haushalt": 0.8099,
+          "investieren": 0.991,
+          "kind": 0.4667,
+          "kindergeld": 0.5439,
+          "kleidung": 0.2545,
+          "lebensmittel": 0.6979,
+          "media-abos": 0.9462,
+          "miete": 0.6667,
+          "mobilitaet": 0.3975,
+          "sonstiges": 0.9014,
+          "sparen": 0.6667,
+          "steuer": 0.9474,
+          "strom": 0.9901,
+          "taschengeld": 0.9828,
+          "technik": 0.0,
+          "urlaub&freizeit": 0.0465,
+          "wohnung": 0.9338,
+          "sport": 0.3509
+        }
+      },
+      "threshold_sweep": {
+        "0.50": {
+          "mean_f1": 0.7888,
+          "std_f1": 0.0533
+        },
+        "0.55": {
+          "mean_f1": 0.777,
+          "std_f1": 0.0402
+        },
+        "0.60": {
+          "mean_f1": 0.7545,
+          "std_f1": 0.0171
+        },
+        "0.65": {
+          "mean_f1": 0.7391,
+          "std_f1": 0.0088
+        },
+        "0.70": {
+          "mean_f1": 0.7261,
+          "std_f1": 0.0064
+        },
+        "0.75": {
+          "mean_f1": 0.7087,
+          "std_f1": 0.0132
+        },
+        "0.80": {
+          "mean_f1": 0.7001,
+          "std_f1": 0.0128
+        },
+        "0.85": {
+          "mean_f1": 0.692,
+          "std_f1": 0.0088
+        },
+        "0.90": {
+          "mean_f1": 0.6835,
+          "std_f1": 0.0135
+        },
+        "0.95": {
+          "mean_f1": 0.6697,
+          "std_f1": 0.011
+        }
+      },
+      "parse_stats": {
+        "total_classifications": 1856,
+        "direct_parse_successes": 1739,
+        "retry_successes": 98,
+        "parse_failures": 19,
+        "overall_parse_rate": 99.0
+      }
+    },
+    "qwen3-8b": {
+      "model": {
+        "name": "qwen3-8b",
+        "repo": "mlx-community/Qwen3-8B-4bit",
+        "params": "8B dense"
+      },
+      "cv_scheme": "1x5 repeated stratified k-fold",
+      "total_time_minutes": 13.2,
+      "llm_standalone": {
+        "macro_f1": {
+          "mean": 0.6735,
+          "std": 0.032,
+          "ci_95": [
+            0.614,
+            0.7331
+          ]
+        },
+        "macro_f1_aggregate": 0.6757,
+        "weighted_f1": 0.6841,
+        "fold_scores": [
+          0.6372,
+          0.682,
+          0.7129,
+          0.6446,
+          0.6911
+        ],
+        "per_category_f1": {
+          "auswaertsessen": 0.642,
+          "bargeld": 0.48,
+          "beitragsservice": 0.8,
+          "buecher": 0.4444,
+          "dsl": 1.0,
+          "david work travel": 0.5,
+          "einkommen-p2": 0.9737,
+          "flora61": 0.3846,
+          "haushalt": 0.4186,
+          "investieren": 1.0,
+          "kind": 0.2414,
+          "kindergeld": 1.0,
+          "kleidung": 0.7143,
+          "lebensmittel": 0.7109,
+          "media-abos": 0.8952,
+          "miete": 0.9231,
+          "mobilitaet": 0.8816,
+          "sonstiges": 0.0978,
+          "sparen": 0.7692,
+          "steuer": 0.8571,
+          "strom": 1.0,
+          "taschengeld": 1.0,
+          "technik": 0.2308,
+          "urlaub&freizeit": 0.2391,
+          "wohnung": 0.8358,
+          "sport": 0.5294
+        }
+      },
+      "ensemble_standalone": {
+        "macro_f1": {
+          "mean": 0.8671,
+          "std": 0.0101,
+          "ci_95": [
+            0.8482,
+            0.886
+          ]
+        },
+        "macro_f1_aggregate": 0.8671,
+        "weighted_f1": 0.8851,
+        "fold_scores": [
+          0.8652,
+          0.8503,
+          0.8755,
+          0.8711,
+          0.8734
+        ],
+        "per_category_f1": {
+          "auswaertsessen": 0.7097,
+          "bargeld": 0.9836,
+          "beitragsservice": 1.0,
+          "buecher": 0.6667,
+          "dsl": 1.0,
+          "david work travel": 0.5333,
+          "einkommen-p2": 0.96,
+          "flora61": 0.9167,
+          "haushalt": 0.8841,
+          "investieren": 1.0,
+          "kind": 0.8229,
+          "kindergeld": 1.0,
+          "kleidung": 0.7073,
+          "lebensmittel": 0.9372,
+          "media-abos": 0.9495,
+          "miete": 1.0,
+          "mobilitaet": 0.8485,
+          "sonstiges": 0.8889,
+          "sparen": 0.9206,
+          "steuer": 1.0,
+          "strom": 1.0,
+          "taschengeld": 0.9833,
+          "technik": 0.5,
+          "urlaub&freizeit": 0.5976,
+          "wohnung": 0.935,
+          "sport": 0.8
+        }
+      },
+      "hybrid_0.95": {
+        "macro_f1": {
+          "mean": 0.7338,
+          "std": 0.0275,
+          "ci_95": [
+            0.6825,
+            0.785
+          ]
+        },
+        "macro_f1_aggregate": 0.7352,
+        "weighted_f1": 0.7446,
+        "fold_scores": [
+          0.7011,
+          0.7374,
+          0.7605,
+          0.7101,
+          0.7597
+        ],
+        "per_category_f1": {
+          "auswaertsessen": 0.6541,
+          "bargeld": 0.9375,
+          "beitragsservice": 0.8,
+          "buecher": 0.4494,
+          "dsl": 1.0,
+          "david work travel": 0.5,
+          "einkommen-p2": 0.9737,
+          "flora61": 0.7463,
+          "haushalt": 0.4599,
+          "investieren": 1.0,
+          "kind": 0.2564,
+          "kindergeld": 1.0,
+          "kleidung": 0.7143,
+          "lebensmittel": 0.7634,
+          "media-abos": 0.9307,
+          "miete": 0.9231,
+          "mobilitaet": 0.8816,
+          "sonstiges": 0.5833,
+          "sparen": 0.7692,
+          "steuer": 0.8571,
+          "strom": 1.0,
+          "taschengeld": 1.0,
+          "technik": 0.2308,
+          "urlaub&freizeit": 0.2391,
+          "wohnung": 0.9162,
+          "sport": 0.5294
+        }
+      },
+      "threshold_sweep": {
+        "0.50": {
+          "mean_f1": 0.8307,
+          "std_f1": 0.0272
+        },
+        "0.55": {
+          "mean_f1": 0.8229,
+          "std_f1": 0.0172
+        },
+        "0.60": {
+          "mean_f1": 0.8043,
+          "std_f1": 0.0238
+        },
+        "0.65": {
+          "mean_f1": 0.7976,
+          "std_f1": 0.0309
+        },
+        "0.70": {
+          "mean_f1": 0.792,
+          "std_f1": 0.0311
+        },
+        "0.75": {
+          "mean_f1": 0.7834,
+          "std_f1": 0.0299
+        },
+        "0.80": {
+          "mean_f1": 0.7803,
+          "std_f1": 0.0333
+        },
+        "0.85": {
+          "mean_f1": 0.7735,
+          "std_f1": 0.0322
+        },
+        "0.90": {
+          "mean_f1": 0.7561,
+          "std_f1": 0.0274
+        },
+        "0.95": {
+          "mean_f1": 0.7338,
+          "std_f1": 0.0275
+        }
+      },
+      "parse_stats": {
+        "total_classifications": 1856,
+        "direct_parse_successes": 1852,
+        "retry_successes": 4,
+        "parse_failures": 0,
+        "overall_parse_rate": 100.0
+      }
+    }
+  }
+}

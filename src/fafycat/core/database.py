@@ -130,6 +130,16 @@ class MerchantMappingORM(Base):
     category = relationship("CategoryORM", back_populates="merchant_mappings")
 
 
+class AppSettingsORM(Base):
+    """Application settings key-value store."""
+
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=_utc_now, onupdate=_utc_now)
+
+
 class ModelMetadataORM(Base):
     """Model metadata table."""
 

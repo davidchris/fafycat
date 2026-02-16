@@ -1,16 +1,25 @@
+## Development setup
+
+- Python 3.13+ required
+- `uv` is the package manager
 - run python commands with `uv run python ...`
-- **Lint**: `uvx ruff check` (configured for line length 120, Python 3.13+)
-- **Format**: `uvx ruff format`
-- **Type Check**: `uvx ty check` (strict typing enabled)
+- **Lint**: `ruff check` (configured for line length 120, Python 3.13+)
+- **Format**: `ruff format`
+- **Type Check**: `ty check` (strict typing enabled)
 - **Run Tests**: `uv run pytest` (when implemented)
 - **Test Coverage**: Tests should be in `tests/` directory
 - use puppeteer to verify UI functionality
-- Python 3.13+ required
 - Dependencies managed via `pyproject.toml`
 - Use `uv pip install -e .` for editable install
 - Use `uv add <dependency>` to add new dependencies
-- Always test end-to-end functionality with the dev db,
-- For complex tasks, you can always use a text file as scratch pad
+- use `git`, not `git -C`
+
+## Coding Style
+
+- Follow Google Python Style Guide, and docstring style
+- After implementing a change, run linter and tests, fix any upcoming issues
+- Always test end-to-end functionality with the dev db
+- Boy Scout Rule: leave code better than you found it
 - Is it about finding FILES? use 'fd'
 - Is it about finding TEXT/strings? use 'rg'
 - Is it about finding CODE STRUCTURE? use 'ast-grep'

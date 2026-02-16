@@ -27,7 +27,6 @@ dependencies = [
     "fastapi>=0.115.12",
     "httpx>=0.28.1",
     "lightgbm>=4.6.0",
-    "matplotlib>=3.10.6",
     "numpy>=2.3.0",
     "pandas>=2.3.0",
     "python-dateutil>=2.9.0.post0",
@@ -43,24 +42,6 @@ Homepage = "https://github.com/davidchris/fafycat"
 Repository = "https://github.com/davidchris/fafycat"
 Issues = "https://github.com/davidchris/fafycat/issues"
 Documentation = "https://github.com/davidchris/fafycat#readme"
-dependencies = [
-    "alembic>=1.16.1",
-    "fastapi>=0.115.12",
-    "jinja2>=3.1.6",
-    "lightgbm>=4.6.0",
-    "numpy>=2.2.6",
-    "openpyxl>=3.1.5",
-    "pandas>=2.2.3",
-    "plotly>=6.1.2",
-    "pydantic>=2.11.5",
-    "python-dateutil>=2.9.0.post0",
-    "python-fasthtml>=0.12.19",
-    "python-multipart>=0.0.20",
-    "requests>=2.32.3",
-    "scikit-learn>=1.6.1",
-    "sqlalchemy>=2.0.41",
-    "uvicorn>=0.34.3",
-]
 
 
 [tool.ruff]
@@ -146,9 +127,28 @@ unresolved-reference = "ignore"
 [tool.ty.terminal]
 output-format = "full"
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.5",
     "pytest-benchmark>=5.1.0",
     "pytest-cov>=6.1.1",
+]
+experiments = [
+    "matplotlib>=3.10.6",
+    "optuna>=4.7.0",
+    "pyarrow>=23.0.0",
+    "sentence-transformers>=5.2.2",
+    "torch>=2.10.0",
+]
+mlx = [
+    "mlx-lm>=0.30.6",
+]
+finetune = [
+    "peft>=0.18.1",
+    {include-group = "experiments"},
 ]
