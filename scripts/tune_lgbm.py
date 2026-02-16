@@ -3,6 +3,8 @@
 
 Precomputes TF-IDF+SVD features per fold, then tunes only LightGBM params.
 Uses early stopping to auto-tune n_estimators. Validates best params with 5x5 CV.
+
+Usage: uv run --group experiments scripts/tune_lgbm.py
 """
 
 import json

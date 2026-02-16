@@ -5,6 +5,8 @@ Connects to prod DB, exports human-reviewed transactions to parquet,
 runs 5x5 repeated stratified k-fold CV, evaluates LightGBM (solo),
 Naive Bayes (solo), and Ensemble (with per-fold weight optimization),
 writes full metrics suite to JSON.
+
+Usage: uv run --group experiments scripts/establish_baseline.py
 """
 
 import json

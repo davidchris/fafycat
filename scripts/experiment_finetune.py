@@ -6,6 +6,8 @@ transaction categorization. Only run if Experiment 1 showed embeddings help.
 
 Architecture: [CLS] → BERT encoder (LoRA) → Classification head (26 classes)
 Training: LoRA rank=4-8, ~300K trainable params out of 110M.
+
+Usage: uv run --group finetune scripts/experiment_finetune.py
 """
 
 import json

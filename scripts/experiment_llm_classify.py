@@ -5,6 +5,8 @@ Tests whether a local generative LLM (prompted with category descriptions and
 few-shot examples) can improve accuracy on the uncertain tail where the
 ML ensemble struggles — particularly for rare/ambiguous categories.
 
+Usage: uv run --group mlx scripts/experiment_llm_classify.py
+
 Models tested (fastest → best):
   - Phi-4-mini-instruct-4bit (3.8B dense)
   - Qwen3-8B-4bit (8B dense, multilingual)
