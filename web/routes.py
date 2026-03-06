@@ -126,13 +126,11 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
             new_count, duplicate_count = processor.save_transactions(transactions)
 
             # Auto-predict categories for new transactions if model is available
-            if new_count > 0:
-                from api.upload import predict_transaction_categories
+            from api.upload import empty_categorization_summary, predict_transaction_categories
 
+            if new_count > 0:
                 cat_summary = predict_transaction_categories(db_session, transactions, new_count)
             else:
-                from api.upload import empty_categorization_summary
-
                 cat_summary = empty_categorization_summary()
             predictions_made = cat_summary["predictions_made"]
 

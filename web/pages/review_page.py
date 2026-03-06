@@ -250,7 +250,7 @@ def render_review_page(request: Request):
         # Fallback in case of database error
         transactions_html = f"""
         <div class="alert alert-error">
-            <p>Error loading transactions: {str(e)}</p>
+            <p>Error loading transactions: {html.escape(str(e))}</p>
         </div>
         """
         transaction_count = 0

@@ -16,6 +16,15 @@ class CategoryType(StrEnum):
     SAVING = "saving"
 
 
+class ReviewPriority(StrEnum):
+    """Review priority levels for transactions after ML prediction."""
+
+    STANDARD = "standard"
+    HIGH = "high"
+    QUALITY_CHECK = "quality_check"
+    AUTO_ACCEPTED = "auto_accepted"
+
+
 class Category(BaseModel):
     """Category model with budget tracking."""
 

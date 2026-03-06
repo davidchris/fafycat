@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from api.dependencies import get_db_session
 from api.models import UploadResponse
+from src.fafycat.core.models import ReviewPriority
 from src.fafycat.data.csv_processor import CSVProcessor
 
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -21,7 +22,12 @@ upload_sessions = {}
 
 def empty_categorization_summary() -> dict:
     """Return a zeroed categorization summary."""
-    return {"predictions_made": 0, "auto_accepted": 0, "needs_review": 0, "quality_check": 0}
+    return {
+        "predictions_made": 0,
+        ReviewPriority.AUTO_ACCEPTED: 0,
+        "needs_review": 0,
+        ReviewPriority.QUALITY_CHECK: 0,
+    }
 
 
 def predict_transaction_categories(db: Session, transactions: list, new_count: int) -> dict:
@@ -130,16 +136,16 @@ def _categorize_transaction(txn, prediction, strategic_selections, confidence_th
         if txn.id in strategic_selections:
             # High confidence but flagged for quality check
             txn.is_reviewed = False
-            txn.review_priority = "quality_check"
-            return "quality_check"
+            txn.review_priority = ReviewPriority.QUALITY_CHECK
+            return ReviewPriority.QUALITY_CHECK
         # High confidence and not flagged - auto accept
         txn.category_id = prediction.predicted_category_id
         txn.is_reviewed = True
-        txn.review_priority = "auto_accepted"
-        return "auto_accepted"
+        txn.review_priority = ReviewPriority.AUTO_ACCEPTED
+        return ReviewPriority.AUTO_ACCEPTED
     # Lower confidence - needs review
     txn.is_reviewed = False
-    txn.review_priority = "high" if txn.id in strategic_selections else "standard"
+    txn.review_priority = ReviewPriority.HIGH if txn.id in strategic_selections else ReviewPriority.STANDARD
     return "needs_review"
 
 

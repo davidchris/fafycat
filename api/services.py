@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
 from src.fafycat.core.database import BudgetPlanORM, CategoryORM, TransactionORM
 from src.fafycat.core.database import get_categories as db_get_categories
-from src.fafycat.core.models import CategoryType
+from src.fafycat.core.models import CategoryType, ReviewPriority
 
 
 def _to_int(value: Any) -> int:
@@ -153,7 +153,9 @@ class TransactionService:
         if review_priority is not None:
             if review_priority == "high_priority":
                 # Show both high priority and quality check transactions
-                query = query.filter(TransactionORM.review_priority.in_(["high", "quality_check"]))
+                query = query.filter(
+                    TransactionORM.review_priority.in_([ReviewPriority.HIGH, ReviewPriority.QUALITY_CHECK])
+                )
             else:
                 query = query.filter(TransactionORM.review_priority == review_priority)
 
@@ -294,7 +296,7 @@ class TransactionService:
     @staticmethod
     def bulk_approve(
         session: Session,
-        review_priority: str = "quality_check",
+        review_priority: str = ReviewPriority.QUALITY_CHECK,
         min_confidence: float | None = None,
     ) -> dict:
         """Bulk approve transactions by trusting their ML predictions."""
