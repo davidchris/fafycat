@@ -294,7 +294,7 @@ class TransactionService:
     @staticmethod
     def bulk_approve(
         session: Session,
-        review_priority: str = "auto_accepted",
+        review_priority: str = "quality_check",
         min_confidence: float | None = None,
     ) -> dict:
         """Bulk approve transactions by trusting their ML predictions."""

@@ -37,11 +37,9 @@ def cmd_import(args: argparse.Namespace) -> None:
         new_count, duplicate_count = processor.save_transactions(transactions)
 
         # Run ML predictions if available
-        from api.upload import _empty_categorization_summary, _predict_transaction_categories
+        from api.upload import predict_transaction_categories
 
-        cat_summary = _predict_transaction_categories(session, transactions, new_count)
-        if cat_summary == _empty_categorization_summary() and new_count > 0:
-            cat_summary = _empty_categorization_summary()
+        cat_summary = predict_transaction_categories(session, transactions, new_count)
 
         result = {
             "filename": csv_path.name,
@@ -61,11 +59,6 @@ def main() -> None:
 
     import_parser = subparsers.add_parser("import", help="Import transactions from a CSV file")
     import_parser.add_argument("file", help="Path to the CSV file")
-    import_parser.add_argument(
-        "--auto-approve",
-        action="store_true",
-        help="Auto-approve high-confidence predictions (enabled by default based on confidence threshold)",
-    )
 
     args = parser.parse_args()
 

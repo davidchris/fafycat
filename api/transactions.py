@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_db_session
-from api.models import BulkCategorizeRequest, TransactionResponse, TransactionUpdate
+from api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
 from api.services import CategoryService, TransactionService
 from web.components.pagination import create_full_pagination
 
@@ -315,14 +315,15 @@ async def bulk_categorize_transactions(request: BulkCategorizeRequest, db: Sessi
 
 @router.post("/bulk-approve")
 async def bulk_approve_transactions(
-    review_priority: str = Query("auto_accepted"),
-    min_confidence: float | None = Query(None, ge=0, le=1),
+    request: BulkApproveRequest = BulkApproveRequest(),
     db: Session = Depends(get_db_session),
 ) -> dict:
-    """Bulk approve auto-accepted transactions by trusting ML predictions.
+    """Bulk approve unreviewed transactions by trusting ML predictions.
 
-    Unlike bulk-categorize which requires specifying a category, this endpoint
-    sets is_reviewed=True and category_id=predicted_category_id for transactions
-    that were auto-accepted by the ML pipeline.
+    Sets is_reviewed=True and category_id=predicted_category_id for transactions
+    matching the given review_priority (default: quality_check) that have not
+    yet been reviewed.
     """
-    return TransactionService.bulk_approve(session=db, review_priority=review_priority, min_confidence=min_confidence)
+    return TransactionService.bulk_approve(
+        session=db, review_priority=request.review_priority, min_confidence=request.min_confidence
+    )

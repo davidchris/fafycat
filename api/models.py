@@ -38,6 +38,13 @@ class BulkCategorizeRequest(BaseModel):
     category: str
 
 
+class BulkApproveRequest(BaseModel):
+    """Request model for bulk approval of auto-accepted transactions."""
+
+    review_priority: str = "quality_check"
+    min_confidence: float | None = Field(None, ge=0, le=1)
+
+
 class CategoryResponse(BaseModel):
     """Response model for category data."""
 

@@ -19,21 +19,21 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 upload_sessions = {}
 
 
-def _empty_categorization_summary() -> dict:
+def empty_categorization_summary() -> dict:
     """Return a zeroed categorization summary."""
     return {"predictions_made": 0, "auto_accepted": 0, "needs_review": 0, "quality_check": 0}
 
 
-def _predict_transaction_categories(db: Session, transactions: list, new_count: int) -> dict:
+def predict_transaction_categories(db: Session, transactions: list, new_count: int) -> dict:
     """Predict categories for newly uploaded transactions with active learning selection."""
     if new_count <= 0:
-        return _empty_categorization_summary()
+        return empty_categorization_summary()
 
     try:
         return _perform_predictions(db, transactions)
     except Exception as e:
         _handle_prediction_error(e)
-        return _empty_categorization_summary()
+        return empty_categorization_summary()
 
 
 def _perform_predictions(db: Session, transactions: list) -> dict:
@@ -53,7 +53,7 @@ def _perform_predictions(db: Session, transactions: list) -> dict:
     )
 
     if not new_txns:
-        return _empty_categorization_summary()
+        return empty_categorization_summary()
 
     # Convert and predict
     txn_inputs = _convert_to_transaction_inputs(new_txns)
@@ -106,7 +106,7 @@ def _apply_hybrid_categorization_strategy(db: Session, new_txns, predictions) ->
     # Apply categorization logic
     from api.ml import get_auto_approve_threshold
 
-    summary = _empty_categorization_summary()
+    summary = empty_categorization_summary()
     confidence_threshold = get_auto_approve_threshold(db)
 
     for txn, prediction in zip(new_txns, predictions, strict=True):
@@ -194,7 +194,7 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
         new_count, duplicate_count = processor.save_transactions(transactions)
 
         # Auto-predict categories for new transactions if model is available
-        cat_summary = _predict_transaction_categories(db, transactions, new_count)
+        cat_summary = predict_transaction_categories(db, transactions, new_count)
 
         upload_id = str(uuid.uuid4())
 
@@ -320,7 +320,7 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
         new_count, duplicate_count = processor.save_transactions(transactions)
 
         # Auto-predict categories for new transactions if model is available
-        cat_summary = _predict_transaction_categories(db, transactions, new_count)
+        cat_summary = predict_transaction_categories(db, transactions, new_count)
 
         # Return success HTML
         return _render_upload_success(
