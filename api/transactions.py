@@ -311,3 +311,18 @@ async def bulk_categorize_transactions(request: BulkCategorizeRequest, db: Sessi
             updated_count += 1
 
     return {"updated": updated_count, "transaction_ids": request.transaction_ids}
+
+
+@router.post("/bulk-approve")
+async def bulk_approve_transactions(
+    review_priority: str = Query("auto_accepted"),
+    min_confidence: float | None = Query(None, ge=0, le=1),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """Bulk approve auto-accepted transactions by trusting ML predictions.
+
+    Unlike bulk-categorize which requires specifying a category, this endpoint
+    sets is_reviewed=True and category_id=predicted_category_id for transactions
+    that were auto-accepted by the ML pipeline.
+    """
+    return TransactionService.bulk_approve(session=db, review_priority=review_priority, min_confidence=min_confidence)

@@ -291,6 +291,33 @@ class TransactionService:
             updated_at=_to_datetime(transaction.imported_at),
         )
 
+    @staticmethod
+    def bulk_approve(
+        session: Session,
+        review_priority: str = "auto_accepted",
+        min_confidence: float | None = None,
+    ) -> dict:
+        """Bulk approve transactions by trusting their ML predictions."""
+        query = session.query(TransactionORM).filter(
+            TransactionORM.review_priority == review_priority,
+            TransactionORM.is_reviewed == False,  # noqa: E712
+            TransactionORM.predicted_category_id.is_not(None),
+        )
+
+        if min_confidence is not None:
+            query = query.filter(TransactionORM.confidence_score >= min_confidence)
+
+        transactions = query.all()
+        approved_ids = []
+
+        for txn in transactions:
+            txn.category_id = txn.predicted_category_id
+            txn.is_reviewed = True
+            approved_ids.append(_to_str(txn.id))
+
+        session.commit()
+        return {"approved": len(approved_ids), "transaction_ids": approved_ids}
+
 
 class CategoryService:
     """Service for category operations."""
