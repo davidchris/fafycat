@@ -37,6 +37,9 @@ dependencies = [
     "uvicorn>=0.34.3",
 ]
 
+[project.scripts]
+fafycat = "cli:main"
+
 [project.urls]
 Homepage = "https://github.com/davidchris/fafycat"
 Repository = "https://github.com/davidchris/fafycat"
@@ -80,6 +83,7 @@ convention = "google"
 "api/*.py" = ["B008"]
 "api/upload.py" = ["E501", "W291"]  # Allow long lines and whitespace for HTML content in upload responses
 "api/transactions.py" = ["E501", "W291"]  # Allow long lines for HTML content in HTMX responses
+"cli.py" = ["T201"]  # Allow print statements in CLI
 "run_*.py" = ["T201"]  # Allow print statements in runner scripts
 "scripts/*.py" = ["T201", "C901"]  # Allow print statements and complex functions in scripts
 "src/fafycat/ml/*.py" = ["T201"]  # Allow print statements in ML modules for training feedback
