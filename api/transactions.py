@@ -23,11 +23,22 @@ async def get_transactions(
     category: str | None = Query(None),
     is_reviewed: bool | None = Query(None),
     confidence_lt: float | None = Query(None, ge=0, le=1),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    review_priority: str | None = Query(None),
     db: Session = Depends(get_db_session),
 ) -> list[TransactionResponse]:
     """Get transactions with filtering and pagination."""
     return TransactionService.get_transactions(
-        session=db, skip=skip, limit=limit, category=category, is_reviewed=is_reviewed, confidence_lt=confidence_lt
+        session=db,
+        skip=skip,
+        limit=limit,
+        category=category,
+        is_reviewed=is_reviewed,
+        confidence_lt=confidence_lt,
+        start_date=start_date,
+        end_date=end_date,
+        review_priority=review_priority,
     )
 
 

@@ -54,6 +54,9 @@ class TransactionService:
         category: str | None = None,
         is_reviewed: bool | None = None,
         confidence_lt: float | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        review_priority: str | None = None,
     ) -> list[TransactionResponse]:
         """Get transactions with filtering."""
         query = session.query(TransactionORM).options(
@@ -73,6 +76,14 @@ class TransactionService:
             query = query.filter(
                 (TransactionORM.confidence_score.is_(None)) | (TransactionORM.confidence_score < confidence_lt)
             )
+
+        if start_date is not None:
+            query = query.filter(TransactionORM.date >= start_date)
+        if end_date is not None:
+            query = query.filter(TransactionORM.date <= end_date)
+
+        if review_priority is not None:
+            query = query.filter(TransactionORM.review_priority == review_priority)
 
         # Apply pagination
         query = query.order_by(TransactionORM.date.desc())
