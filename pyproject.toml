@@ -89,7 +89,7 @@ convention = "google"
 "test_*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for test files
 
 [tool.ty.src]
-exclude = ["tests/", "*.ipynb"]
+exclude = ["tests/", "*.ipynb", ".ipynb_checkpoints/"]
 
 [tool.ty.environment]
 python = ".venv"
@@ -135,6 +135,11 @@ markers = [
 
 [dependency-groups]
 dev = [
+    "ipykernel>=7.2.0",
+    "jupyter>=1.1.1",
+    "jupyterlab>=4.5.4",
+    "matplotlib>=3.10.6",
+    "nbconvert>=7.17.0",
     "pytest>=8.3.5",
     "pytest-benchmark>=5.1.0",
     "pytest-cov>=6.1.1",
