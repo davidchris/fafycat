@@ -78,6 +78,9 @@ class UploadResponse(BaseModel):
     transactions_imported: int
     duplicates_skipped: int
     predictions_made: int = 0
+    auto_accepted: int = 0
+    needs_review: int = 0
+    quality_check: int = 0
 
 
 class ExportRequest(BaseModel):

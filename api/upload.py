@@ -19,19 +19,24 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 upload_sessions = {}
 
 
-def _predict_transaction_categories(db: Session, transactions: list, new_count: int) -> int:
+def _empty_categorization_summary() -> dict:
+    """Return a zeroed categorization summary."""
+    return {"predictions_made": 0, "auto_accepted": 0, "needs_review": 0, "quality_check": 0}
+
+
+def _predict_transaction_categories(db: Session, transactions: list, new_count: int) -> dict:
     """Predict categories for newly uploaded transactions with active learning selection."""
     if new_count <= 0:
-        return 0
+        return _empty_categorization_summary()
 
     try:
         return _perform_predictions(db, transactions)
     except Exception as e:
         _handle_prediction_error(e)
-        return 0
+        return _empty_categorization_summary()
 
 
-def _perform_predictions(db: Session, transactions: list) -> int:
+def _perform_predictions(db: Session, transactions: list) -> dict:
     """Perform ML predictions on transactions."""
     from api.ml import get_categorizer
     from src.fafycat.core.database import TransactionORM
@@ -48,7 +53,7 @@ def _perform_predictions(db: Session, transactions: list) -> int:
     )
 
     if not new_txns:
-        return 0
+        return _empty_categorization_summary()
 
     # Convert and predict
     txn_inputs = _convert_to_transaction_inputs(new_txns)
@@ -76,7 +81,7 @@ def _convert_to_transaction_inputs(new_txns):
     return txn_inputs
 
 
-def _apply_hybrid_categorization_strategy(db: Session, new_txns, predictions) -> int:
+def _apply_hybrid_categorization_strategy(db: Session, new_txns, predictions) -> dict:
     """Apply hybrid categorization using confidence scores and active learning."""
     from src.fafycat.core.models import TransactionPrediction
     from src.fafycat.ml.active_learning import ActiveLearningSelector
@@ -101,19 +106,23 @@ def _apply_hybrid_categorization_strategy(db: Session, new_txns, predictions) ->
     # Apply categorization logic
     from api.ml import get_auto_approve_threshold
 
-    predictions_made = 0
+    summary = _empty_categorization_summary()
     confidence_threshold = get_auto_approve_threshold(db)
 
     for txn, prediction in zip(new_txns, predictions, strict=True):
-        _categorize_transaction(txn, prediction, strategic_selections, confidence_threshold)
-        predictions_made += 1
+        bucket = _categorize_transaction(txn, prediction, strategic_selections, confidence_threshold)
+        summary["predictions_made"] += 1
+        summary[bucket] += 1
 
     db.commit()
-    return predictions_made
+    return summary
 
 
-def _categorize_transaction(txn, prediction, strategic_selections, confidence_threshold):
-    """Categorize a single transaction based on confidence and active learning flags."""
+def _categorize_transaction(txn, prediction, strategic_selections, confidence_threshold) -> str:
+    """Categorize a single transaction based on confidence and active learning flags.
+
+    Returns the bucket name: "auto_accepted", "quality_check", or "needs_review".
+    """
     txn.predicted_category_id = prediction.predicted_category_id
     txn.confidence_score = prediction.confidence_score
 
@@ -122,15 +131,16 @@ def _categorize_transaction(txn, prediction, strategic_selections, confidence_th
             # High confidence but flagged for quality check
             txn.is_reviewed = False
             txn.review_priority = "quality_check"
-        else:
-            # High confidence and not flagged - auto accept
-            txn.category_id = prediction.predicted_category_id
-            txn.is_reviewed = True
-            txn.review_priority = "auto_accepted"
-    else:
-        # Lower confidence - needs review
-        txn.is_reviewed = False
-        txn.review_priority = "high" if txn.id in strategic_selections else "standard"
+            return "quality_check"
+        # High confidence and not flagged - auto accept
+        txn.category_id = prediction.predicted_category_id
+        txn.is_reviewed = True
+        txn.review_priority = "auto_accepted"
+        return "auto_accepted"
+    # Lower confidence - needs review
+    txn.is_reviewed = False
+    txn.review_priority = "high" if txn.id in strategic_selections else "standard"
+    return "needs_review"
 
 
 def _handle_prediction_error(e: Exception):
@@ -184,7 +194,7 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
         new_count, duplicate_count = processor.save_transactions(transactions)
 
         # Auto-predict categories for new transactions if model is available
-        predictions_made = _predict_transaction_categories(db, transactions, new_count)
+        cat_summary = _predict_transaction_categories(db, transactions, new_count)
 
         upload_id = str(uuid.uuid4())
 
@@ -194,7 +204,7 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
             "total_rows": len(transactions),
             "imported": new_count,
             "duplicates": duplicate_count,
-            "predictions_made": predictions_made,
+            "predictions_made": cat_summary["predictions_made"],
             "transaction_ids": [t.generate_id() for t in transactions[:10]],  # Store first 10 for preview
         }
 
@@ -204,7 +214,7 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
             rows_processed=len(transactions),
             transactions_imported=new_count,
             duplicates_skipped=duplicate_count,
-            predictions_made=predictions_made,
+            **cat_summary,
         )
 
     except HTTPException:
@@ -310,7 +320,7 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
         new_count, duplicate_count = processor.save_transactions(transactions)
 
         # Auto-predict categories for new transactions if model is available
-        predictions_made = _predict_transaction_categories(db, transactions, new_count)
+        cat_summary = _predict_transaction_categories(db, transactions, new_count)
 
         # Return success HTML
         return _render_upload_success(
@@ -318,7 +328,7 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
             rows_processed=len(transactions),
             new_count=new_count,
             duplicate_count=duplicate_count,
-            predictions_made=predictions_made,
+            predictions_made=cat_summary["predictions_made"],
         )
 
     except Exception as e:
