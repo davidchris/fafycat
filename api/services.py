@@ -92,6 +92,7 @@ class TransactionService:
                 actual_category=_to_str(t.category.name) if t.category else None,
                 confidence=_to_float(t.confidence_score) if t.confidence_score is not None else None,
                 is_reviewed=_to_bool(t.is_reviewed),
+                review_priority=_to_str(t.review_priority) if t.review_priority else None,
                 created_at=_to_datetime(t.imported_at),
                 updated_at=_to_datetime(t.imported_at),  # Will update when we add updated_at to TransactionORM
             )
@@ -219,6 +220,7 @@ class TransactionService:
                 actual_category=_to_str(t.category.name) if t.category else None,
                 confidence=_to_float(t.confidence_score) if t.confidence_score is not None else None,
                 is_reviewed=_to_bool(t.is_reviewed),
+                review_priority=_to_str(t.review_priority) if t.review_priority else None,
                 created_at=_to_datetime(t.imported_at),
                 updated_at=_to_datetime(t.imported_at),  # Will update when we add updated_at to TransactionORM
             )
@@ -273,6 +275,7 @@ class TransactionService:
             actual_category=_to_str(category.name),
             confidence=_to_float(transaction.confidence_score) if transaction.confidence_score is not None else None,
             is_reviewed=_to_bool(transaction.is_reviewed),
+            review_priority=_to_str(transaction.review_priority) if transaction.review_priority else None,
             created_at=_to_datetime(transaction.imported_at),
             updated_at=_to_datetime(transaction.imported_at),
         )

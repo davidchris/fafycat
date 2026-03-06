@@ -17,6 +17,7 @@ class TransactionResponse(BaseModel):
     actual_category: str | None = None
     confidence: float | None = None
     is_reviewed: bool = False
+    review_priority: str | None = None
     created_at: datetime
     updated_at: datetime
 
