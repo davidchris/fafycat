@@ -16,7 +16,7 @@ def create_pagination_info(page: int, total_count: int, per_page: int = 50) -> D
         " of ",
         Span(str(total_count), cls="font-medium"),
         " results",
-        cls="text-sm text-gray-700",
+        cls="pagination-info",
     )
 
 
@@ -24,15 +24,9 @@ def create_pagination_button(
     page: int, text: str, is_disabled: bool, htmx_attrs: dict[str, str], additional_classes: str = ""
 ) -> Button:
     """Create a pagination button with HTMX attributes."""
-    base_classes = (
-        "relative inline-flex items-center px-2 py-2 border border-gray-300 "
-        "bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
-    )
-
-    cls = f"{base_classes} {additional_classes}".strip()
+    cls = f"pagination-btn {additional_classes}".strip()
 
     if is_disabled:
-        cls += " cursor-not-allowed opacity-50"
         return Button(text, disabled=True, cls=cls)
 
     return Button(
@@ -57,7 +51,6 @@ def create_mobile_pagination(page: int, total_pages: int, has_prev: bool, has_ne
             "hx_target": "#transaction-table",
             "hx_include": htmx_include,
         },
-        "rounded-md px-4",
     )
 
     next_button = create_pagination_button(
@@ -69,7 +62,6 @@ def create_mobile_pagination(page: int, total_pages: int, has_prev: bool, has_ne
             "hx_target": "#transaction-table",
             "hx_include": htmx_include,
         },
-        "ml-3 rounded-md px-4",
     )
 
     return Div(prev_button, next_button, cls="flex-1 flex justify-between sm:hidden")
@@ -79,19 +71,16 @@ def create_desktop_pagination(page: int, total_pages: int, has_prev: bool, has_n
     """Create full desktop pagination with First/Prev/Next/Last buttons."""
     htmx_include = "[name='status']:checked, [name='confidence_lt'], [name='search']"
 
-    # First button
     first_button = create_pagination_button(
         1,
-        "‹‹ First",
+        "First",
         not has_prev,
         {"hx_get": "/api/transactions/table?page=1", "hx_target": "#transaction-table", "hx_include": htmx_include},
-        "rounded-l-md",
     )
 
-    # Previous button
     prev_button = create_pagination_button(
         page - 1 if has_prev else 1,
-        "‹ Prev",
+        "Prev",
         not has_prev,
         {
             "hx_get": f"/api/transactions/table?page={page - 1 if has_prev else 1}",
@@ -100,19 +89,14 @@ def create_desktop_pagination(page: int, total_pages: int, has_prev: bool, has_n
         },
     )
 
-    # Page indicator
     page_indicator = Span(
         f"Page {page} of {total_pages}",
-        cls=(
-            "relative inline-flex items-center px-4 py-2 border border-gray-300 "
-            "bg-white text-sm font-medium text-gray-700"
-        ),
+        cls="pagination-btn active",
     )
 
-    # Next button
     next_button = create_pagination_button(
         page + 1 if has_next else total_pages,
-        "Next ›",
+        "Next",
         not has_next,
         {
             "hx_get": f"/api/transactions/table?page={page + 1 if has_next else total_pages}",
@@ -121,17 +105,15 @@ def create_desktop_pagination(page: int, total_pages: int, has_prev: bool, has_n
         },
     )
 
-    # Last button
     last_button = create_pagination_button(
         total_pages,
-        "Last ››",
+        "Last",
         not has_next,
         {
             "hx_get": f"/api/transactions/table?page={total_pages}",
             "hx_target": "#transaction-table",
             "hx_include": htmx_include,
         },
-        "rounded-r-md",
     )
 
     return Nav(
@@ -140,7 +122,7 @@ def create_desktop_pagination(page: int, total_pages: int, has_prev: bool, has_n
         page_indicator,
         next_button,
         last_button,
-        cls="relative z-0 inline-flex rounded-md shadow-sm -space-x-px",
+        cls="pagination-buttons",
         aria_label="Pagination",
     )
 
@@ -161,5 +143,5 @@ def create_full_pagination(page: int, total_pages: int, total_count: int, per_pa
 
     return Div(
         Div(mobile_pagination, desktop_section, cls="flex items-center justify-between"),
-        cls="bg-white px-4 py-3 border-t border-gray-200 sm:px-6",
+        cls="pagination-container",
     )

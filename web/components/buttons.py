@@ -8,12 +8,12 @@ from fasthtml.common import A
 def create_action_button(text: str, url: str, color: str = "blue") -> A:
     """Create a styled action button."""
     color_classes = {
-        "blue": "bg-blue-500 text-white hover:bg-blue-600",
-        "green": "bg-green-500 text-white hover:bg-green-600",
-        "gray": "bg-gray-500 text-white hover:bg-gray-600",
+        "blue": "btn btn-primary",
+        "green": "btn btn-success",
+        "gray": "btn btn-secondary",
     }
 
-    button_class = f"{color_classes.get(color, color_classes['blue'])} px-4 py-2 rounded"
+    button_class = color_classes.get(color, color_classes["blue"])
 
     return A(text, href=url, cls=button_class)
 

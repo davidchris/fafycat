@@ -46,7 +46,7 @@ class TestSettingsMLTraining:
         assert "Need more training data" in html
         assert "need at least 50" in html
         assert "You have 10 reviewed transactions" in html
-        assert "bg-yellow-50" in html  # Yellow alert
+        assert "alert alert-warning" in html
 
     def test_settings_page_ready_to_train(self, test_client, db_session):
         """Test settings page shows train button when ready."""
@@ -87,7 +87,7 @@ class TestSettingsMLTraining:
         assert "You have 60 reviewed transactions" in html
         assert "Train ML Model Now" in html
         assert "trainModel()" in html  # JavaScript function
-        assert "bg-blue-50" in html  # Blue alert
+        assert "alert alert-info" in html
 
     def test_settings_ml_javascript_functions(self, test_client, db_session):
         """Test that ML training JavaScript functions are included."""

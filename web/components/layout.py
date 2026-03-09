@@ -1,29 +1,63 @@
-"""Layout components for web pages."""
+"""Layout components for web pages — Bauhaus dark mode."""
+
+from web.components.icons import (
+    icon_analytics,
+    icon_cat_brand,
+    icon_export,
+    icon_hamburger,
+    icon_import,
+    icon_review,
+    icon_settings,
+)
 
 
 def create_sidebar() -> str:
     """Create the navigation sidebar HTML."""
-    return """
-    <div class="w-64 bg-gray-50 h-screen p-4 fixed left-0 top-0 flex flex-col">
-        <div class="mb-6">
-            <h2 class="text-xl font-bold mb-2">🐱 FafyCat</h2>
-            <p class="text-sm text-gray-600 mb-4">Family Finance Categorizer</p>
+    return f"""
+    <!-- Mobile hamburger -->
+    <button class="hamburger-btn"
+            id="hamburger-btn"
+            aria-label="Menu"
+            aria-controls="sidebar"
+            aria-expanded="false">
+        {icon_hamburger()}
+    </button>
+
+    <!-- Backdrop -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-brand">
+            <div class="flex items-center gap-2">
+                {icon_cat_brand(28)}
+                <span class="sidebar-brand-name">FAFYCAT</span>
+            </div>
         </div>
-        <nav class="mb-6">
-            <ul class="space-y-1">
-                <li><a href="/import" class="block py-2 px-3 rounded hover:bg-gray-100">Import Transactions</a></li>
-                <li><a href="/review" class="block py-2 px-3 rounded hover:bg-gray-100">Review & Categorize</a></li>
-                <li><a href="/analytics" class="block py-2 px-3 rounded hover:bg-gray-100">📊 Analytics</a></li>
-                <li><a href="/export" class="block py-2 px-3 rounded hover:bg-gray-100">Export Data</a></li>
-                <li><a href="/settings" class="block py-2 px-3 rounded hover:bg-gray-100">Settings & Categories</a></li>
-            </ul>
+
+        <nav class="sidebar-nav">
+            <a href="/import" class="sidebar-link" data-path="/import">
+                {icon_import()}
+                <span>Import</span>
+            </a>
+            <a href="/review" class="sidebar-link" data-path="/review">
+                {icon_review()}
+                <span>Review</span>
+            </a>
+            <a href="/analytics" class="sidebar-link" data-path="/analytics">
+                {icon_analytics()}
+                <span>Analytics</span>
+            </a>
+            <a href="/export" class="sidebar-link" data-path="/export">
+                {icon_export()}
+                <span>Export</span>
+            </a>
+            <a href="/settings" class="sidebar-link" data-path="/settings">
+                {icon_settings()}
+                <span>Settings</span>
+            </a>
         </nav>
-        <hr class="mb-4">
-        <div class="mt-auto">
-            <p class="text-xs text-gray-500 mb-1">Built with ❤️ using FastAPI + FastHTML</p>
-            <p class="text-xs text-gray-500">Local-first • Privacy-focused • ML-powered</p>
-        </div>
-    </div>
+    </aside>
     """
 
 
@@ -31,22 +65,26 @@ def create_page_layout(title: str, content: str) -> str:
     """Create the main page layout with sidebar and content area."""
     return f"""
     <!DOCTYPE html>
-    <html lang="en">
+    <html lang="en" class="no-js">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="color-scheme" content="dark">
         <title>{title}</title>
+        <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
         <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-        <link href="/static/css/main.css" rel="stylesheet">
-        <!-- HTMX for enhanced UX -->
+        <link href="/static/css/theme.css" rel="stylesheet">
+        <link href="/static/css/components.css" rel="stylesheet">
         <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+        <script src="/static/js/main.js" defer></script>
     </head>
-    <body>
+    <body class="antialiased">
         {create_sidebar()}
-        <div class="ml-64 min-h-screen">
-            {content}
+        <div class="main-content lg:ml-56 min-h-screen">
+            <main class="max-w-7xl mx-auto px-6 py-8">
+                {content}
+            </main>
         </div>
-        <script src="/static/js/main.js"></script>
     </body>
     </html>
     """

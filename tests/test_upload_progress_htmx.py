@@ -45,8 +45,8 @@ class TestUploadProgressHTMX:
         assert "Upload Another File" in html
 
         # Check for proper CSS classes
-        assert "bg-green-50" in html  # Success styling
-        assert "border-green-200" in html
+        assert "alert-success" in html  # Success styling
+        assert "upload-result" in html
 
     def test_htmx_upload_error_html_response(self, test_client):
         """Test that upload errors return proper HTML error response."""
@@ -64,8 +64,8 @@ class TestUploadProgressHTMX:
         assert "Try Again" in html
 
         # Check for proper CSS classes
-        assert "bg-red-50" in html  # Error styling
-        assert "border-red-200" in html
+        assert "alert-error" in html  # Error styling
+        assert "upload-result" in html
 
     def test_htmx_upload_with_predictions(self, test_client, db_session):
         """Test that upload shows prediction information when ML model is available."""

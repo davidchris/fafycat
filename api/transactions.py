@@ -1,6 +1,7 @@
 """API routes for transaction operations."""
 
 import contextlib
+import html
 from datetime import date
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query
@@ -64,7 +65,7 @@ async def categorize_transaction_htmx(
     if not result:
         return HTMLResponse(
             content="""
-            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+            <div class="alert alert-error">
                 Transaction not found
             </div>
             """,
@@ -72,7 +73,7 @@ async def categorize_transaction_htmx(
         )
 
     # Generate updated table row
-    status_color = "text-green-600" if result.is_reviewed else "text-yellow-600"
+    status_color = "text-success" if result.is_reviewed else "text-income"
     status_text = "Complete" if result.is_reviewed else "Pending"
     confidence_display = f"{result.confidence:.1%}" if result.confidence else "N/A"
 
@@ -82,38 +83,39 @@ async def categorize_transaction_htmx(
     current_category = result.actual_category or result.predicted_category
     for cat in categories:
         selected = " selected" if cat.name == current_category else ""
-        category_options += f'<option value="{cat.name}"{selected}>{cat.name}</option>'
+        escaped = html.escape(cat.name)
+        category_options += f'<option value="{escaped}"{selected}>{escaped}</option>'
 
     return HTMLResponse(
         content=f"""
-        <tr id="transaction-{transaction_id}" class="border-b hover:bg-gray-50">
-            <td class="px-4 py-3 text-sm">{result.date}</td>
-            <td class="px-4 py-3 text-sm font-medium">{result.description}</td>
-            <td class="px-4 py-3 text-sm text-right">${result.amount:,.2f}</td>
-            <td class="px-4 py-3 text-sm">
-                <span class="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">
-                    {result.actual_category} ✓
+        <tr id="transaction-{transaction_id}">
+            <td>{result.date}</td>
+            <td>{html.escape(str(result.description))}</td>
+            <td class="amount-cell">${result.amount:,.2f}</td>
+            <td>
+                <span class="badge badge-success">
+                    {html.escape(str(result.actual_category))} ✓
                 </span>
             </td>
-            <td class="px-4 py-3 text-sm">
+            <td>
                 <form hx-put="/api/transactions/{transaction_id}/categorize-htmx"
                       hx-target="#transaction-{transaction_id}"
                       hx-swap="outerHTML"
                       hx-indicator="#loading-{transaction_id}"
-                      class="flex gap-2 items-center">
-                    <select name="actual_category" class="text-sm border border-gray-300 rounded px-2 py-1">
+                      class="inline-form">
+                    <select name="actual_category" class="form-select">
                         {category_options}
                     </select>
-                    <button type="submit" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                    <button type="submit" class="btn btn-primary btn-sm">
                         Save
                     </button>
-                    <div id="loading-{transaction_id}" class="htmx-indicator text-xs text-gray-500">
+                    <div id="loading-{transaction_id}" class="htmx-indicator text-secondary">
                         Saving...
                     </div>
                 </form>
             </td>
-            <td class="px-4 py-3 text-sm {status_color}">{status_text}</td>
-            <td class="px-4 py-3 text-sm text-center">{confidence_display}</td>
+            <td class="{status_color}">{status_text}</td>
+            <td class="text-center">{confidence_display}</td>
         </tr>
         """,
         status_code=200,
@@ -190,8 +192,8 @@ def _generate_transaction_table_htmx(transactions, categories, pagination_info=N
     """Generate HTMX-enhanced transaction table HTML."""
     if not transactions:
         return """
-        <div id="transaction-table" class="bg-white rounded-lg shadow p-6">
-            <p class="text-center text-gray-500 py-8">No transactions to review at the moment.</p>
+        <div id="transaction-table" class="card">
+            <p class="text-center text-secondary" style="padding: 2rem 0">No transactions to review at the moment.</p>
         </div>
         """
 
@@ -199,11 +201,11 @@ def _generate_transaction_table_htmx(transactions, categories, pagination_info=N
     table_rows = ""
     for tx in transactions:
         confidence_color = (
-            "text-red-600"
+            "text-spending"
             if tx.confidence and tx.confidence < 0.5
-            else "text-yellow-600"
+            else "text-income"
             if tx.confidence and tx.confidence < 0.8
-            else "text-green-600"
+            else "text-success"
         )
         confidence_display = f"{tx.confidence:.1%}" if tx.confidence else "N/A"
 
@@ -212,41 +214,42 @@ def _generate_transaction_table_htmx(transactions, categories, pagination_info=N
         category_options = '<option value="">Select category...</option>'
         for cat in categories:
             selected = " selected" if cat.name == current_category else ""
-            category_options += f'<option value="{cat.name}"{selected}>{cat.name}</option>'
+            escaped = html.escape(cat.name)
+            category_options += f'<option value="{escaped}"{selected}>{escaped}</option>'
 
         # Status display
-        status_color = "text-green-600" if tx.is_reviewed else "text-yellow-600"
+        status_color = "text-success" if tx.is_reviewed else "text-income"
         status_text = "Complete" if tx.is_reviewed else "Pending"
 
         table_rows += f"""
-        <tr id="transaction-{tx.id}" class="border-b hover:bg-gray-50">
-            <td class="px-4 py-3 text-sm">{tx.date}</td>
-            <td class="px-4 py-3 text-sm font-medium">{tx.description}</td>
-            <td class="px-4 py-3 text-sm text-right">${tx.amount:,.2f}</td>
-            <td class="px-4 py-3 text-sm">
-                <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
-                    {tx.actual_category or tx.predicted_category or "Uncategorized"}
+        <tr id="transaction-{tx.id}">
+            <td>{tx.date}</td>
+            <td>{html.escape(str(tx.description))}</td>
+            <td class="amount-cell">${tx.amount:,.2f}</td>
+            <td>
+                <span class="badge badge-saving">
+                    {html.escape(str(tx.actual_category or tx.predicted_category or "Uncategorized"))}
                 </span>
             </td>
-            <td class="px-4 py-3 text-sm">
+            <td>
                 <form hx-put="/api/transactions/{tx.id}/categorize-htmx"
                       hx-target="#transaction-{tx.id}"
                       hx-swap="outerHTML"
                       hx-indicator="#loading-{tx.id}"
-                      class="flex gap-2 items-center">
-                    <select name="actual_category" class="text-sm border border-gray-300 rounded px-2 py-1">
+                      class="inline-form">
+                    <select name="actual_category" class="form-select">
                         {category_options}
                     </select>
-                    <button type="submit" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                    <button type="submit" class="btn btn-primary btn-sm">
                         Save
                     </button>
-                    <div id="loading-{tx.id}" class="htmx-indicator text-xs text-gray-500">
+                    <div id="loading-{tx.id}" class="htmx-indicator text-secondary">
                         Saving...
                     </div>
                 </form>
             </td>
-            <td class="px-4 py-3 text-sm {status_color}">{status_text}</td>
-            <td class="px-4 py-3 text-sm {confidence_color} font-medium text-center">{confidence_display}</td>
+            <td class="{status_color}">{status_text}</td>
+            <td class="{confidence_color} font-medium text-center">{confidence_display}</td>
         </tr>
         """
 
@@ -261,26 +264,20 @@ def _generate_transaction_table_htmx(transactions, categories, pagination_info=N
         pagination_html = str(pagination_component)
 
     return f"""
-    <div id="transaction-table" class="bg-white rounded-lg shadow overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
+    <div id="transaction-table" class="table-container">
+        <table>
+            <thead>
                 <tr>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Description</th>
-                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Amount</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Current Category</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Categorize</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Status</th>
-                    <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Confidence</th>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th style="text-align: right">Amount</th>
+                    <th>Current Category</th>
+                    <th>Categorize</th>
+                    <th>Status</th>
+                    <th style="text-align: center">Confidence</th>
                 </tr>
             </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
+            <tbody>
                 {table_rows}
             </tbody>
         </table>

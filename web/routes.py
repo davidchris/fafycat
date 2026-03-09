@@ -1,7 +1,9 @@
 """Web routes for HTML pages."""
 
+import html
+
 from fastapi import APIRouter, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from api.dependencies import get_db_manager
 from api.models import TransactionUpdate
@@ -13,17 +15,18 @@ from web.components.layout import create_page_layout
 router = APIRouter()
 
 
+@router.get("/", response_class=HTMLResponse)
+async def home_page(request: Request) -> HTMLResponse:
+    """Home page with workflow navigation."""
+    from web.pages.home_page import render_home_page
+
+    return HTMLResponse(create_page_layout("FafyCat - Family Finance Categorizer", render_home_page()))
+
+
 @router.get("/app", response_class=HTMLResponse)
-async def main_app(request: Request) -> HTMLResponse:
-    """Main application page."""
-    content = """
-    <div class="container mx-auto px-4 py-8">
-        <h1 class="text-3xl font-bold text-center mb-8">🐱 FafyCat</h1>
-        <p class="text-center text-gray-600 mb-8">Family Finance Categorizer</p>
-        <p class="text-center">Welcome to the FastAPI + FastHTML version!</p>
-    </div>
-    """
-    return HTMLResponse(create_page_layout("FafyCat - Family Finance Categorizer", content))
+async def main_app(request: Request) -> Response:
+    """Legacy route kept for backward compatibility."""
+    return RedirectResponse(url="/", status_code=302)
 
 
 @router.get("/import", response_class=HTMLResponse)
@@ -160,12 +163,10 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
             buttons = create_button_group(import_button, review_button)
 
             content = f"""
-            <div class="container mx-auto px-4 py-8">
-                <h1 class="text-2xl font-bold mb-6">Upload Results</h1>
+                <h1 class="card-header">Upload Results</h1>
                 {upload_result}
                 {prediction_component}
                 {buttons}
-            </div>
             """
 
             return HTMLResponse(create_page_layout("Upload Successful - FafyCat", content))
@@ -173,18 +174,16 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
     except Exception as e:
         # Handle errors
         content = f"""
-        <div class="container mx-auto px-4 py-8">
-            <h1 class="text-2xl font-bold mb-6">Upload Error</h1>
+        <h1 class="card-header">Upload Error</h1>
 
-            <div class="bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
-                <h2 class="text-lg font-semibold text-red-800 mb-2">❌ Upload Failed</h2>
-                <p class="text-red-700">Error: {str(e)}</p>
-            </div>
-
-            <a href="/import" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
-                Try Again
-            </a>
+        <div class="alert alert-error">
+            <h2 class="alert-title">❌ Upload Failed</h2>
+            <p class="alert-body">Error: {html.escape(str(e))}</p>
         </div>
+
+        <a href="/import" class="btn btn-primary">
+            Try Again
+        </a>
         """
 
         return HTMLResponse(create_page_layout("Upload Error - FafyCat", content))
@@ -216,18 +215,16 @@ async def categorize_transaction_web(
     except Exception as e:
         # Handle error - could redirect with error message or show error page
         content = f"""
-        <div class="container mx-auto px-4 py-8">
-            <h1 class="text-2xl font-bold mb-6">Categorization Error</h1>
+        <h1 class="card-header">Categorization Error</h1>
 
-            <div class="bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
-                <h2 class="text-lg font-semibold text-red-800 mb-2">❌ Failed to categorize transaction</h2>
-                <p class="text-red-700">Error: {str(e)}</p>
-            </div>
-
-            <a href="/review" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
-                Back to Review
-            </a>
+        <div class="alert alert-error">
+            <h2 class="alert-title">❌ Failed to categorize transaction</h2>
+            <p class="alert-body">Error: {html.escape(str(e))}</p>
         </div>
+
+        <a href="/review" class="btn btn-primary">
+            Back to Review
+        </a>
         """
 
         return HTMLResponse(create_page_layout("Categorization Error - FafyCat", content))
@@ -345,8 +342,6 @@ async def export_summary_htmx(request: Request) -> str:
     except Exception as e:
         # Return error state
         return f"""
-        <h2 class="text-xl font-semibold mb-4">Export Preview</h2>
-        <div class="bg-red-50 p-4 rounded-lg">
-            <div class="text-red-600">Error loading export preview: {str(e)}</div>
-        </div>
+        <h2 class="card-header">Export Preview</h2>
+        <div class="alert alert-error">Error loading export preview: {html.escape(str(e))}</div>
         """
