@@ -1197,6 +1197,15 @@ def render_yearly_budget_management(current_year):
         let currentBudgetYear = {current_year};
         let budgetData = {{}};
 
+        // Local fallback in case main.js hasn't defined it yet
+        if (typeof escapeHtml === 'undefined') {{
+            function escapeHtml(text) {{
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }}
+        }}
+
         // Load budget data when page loads
         document.addEventListener('DOMContentLoaded', function() {{
             loadBudgetsForYear({current_year});

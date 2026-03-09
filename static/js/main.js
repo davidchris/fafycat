@@ -8,8 +8,7 @@ function escapeHtml(text) {
 }
 window.escapeHtml = escapeHtml;
 
-document.documentElement.classList.remove('no-js');
-document.documentElement.classList.add('js-enabled');
+// js-enabled class is set inline in <head> for immediate effect
 
 document.addEventListener('DOMContentLoaded', function() {
     initializeNavigation();

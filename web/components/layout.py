@@ -75,6 +75,7 @@ def create_page_layout(title: str, content: str) -> str:
         <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
         <link href="/static/css/theme.css" rel="stylesheet">
         <link href="/static/css/components.css" rel="stylesheet">
+        <script>document.documentElement.className='js-enabled';</script>
         <script src="https://unpkg.com/htmx.org@1.9.12"></script>
         <script src="/static/js/main.js" defer></script>
     </head>
