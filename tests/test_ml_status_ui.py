@@ -109,7 +109,7 @@ class TestMLStatusAlerts:
         html = response.text
         # Should show building training data message
         assert "Building training data" in html
-        assert "bg-blue-50" in html  # Blue alert
+        assert "alert alert-info" in html
         assert "need 50+" in html
 
     def test_import_page_model_status_alert_ready_to_train(self, test_client, db_session):
@@ -144,7 +144,7 @@ class TestMLStatusAlerts:
         html = response.text
         # Should show ready to train message
         assert "No ML model trained yet" in html
-        assert "bg-yellow-50" in html  # Yellow alert
+        assert "alert alert-warning" in html
         assert "ready for training" in html
 
     @patch("api.ml.get_categorizer")
@@ -164,7 +164,7 @@ class TestMLStatusAlerts:
         html = response.text
         # Should show model ready message
         assert "ML model ready for predictions" in html
-        assert "bg-green-50" in html  # Green alert
+        assert "alert alert-success" in html
 
     def test_review_page_model_status_alert_ready_to_train(self, test_client, db_session):
         """Test review page shows correct alert when ready to train."""
@@ -198,7 +198,7 @@ class TestMLStatusAlerts:
         html = response.text
         # Should show ready to train alert on review page
         assert "Ready to train ML model" in html
-        assert "bg-blue-50" in html  # Blue alert
+        assert "alert alert-info" in html
         assert "Train Model Now" in html
 
 

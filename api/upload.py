@@ -1,5 +1,6 @@
 """API routes for file upload operations."""
 
+import html
 import tempfile
 import uuid
 from pathlib import Path
@@ -328,63 +329,53 @@ def _render_upload_success(
     filename: str, rows_processed: int, new_count: int, duplicate_count: int, predictions_made: int
 ) -> str:
     """Render success message HTML for HTMX response."""
-    # Determine the primary message and style
+    alert_class = "alert-success" if new_count > 0 else "alert-info"
+
     if new_count > 0:
         primary_msg = f"✅ Successfully imported {new_count} new transactions!"
-        bg_color = "bg-green-50"
-        border_color = "border-green-200"
-        text_color = "text-green-800"
-        icon_color = "text-green-400"
-        secondary_color = "text-green-700"
     else:
         primary_msg = f"ℹ️ No new transactions imported. {duplicate_count} duplicates were skipped."
-        bg_color = "bg-blue-50"
-        border_color = "border-blue-200"
-        text_color = "text-blue-800"
-        icon_color = "text-blue-400"
-        secondary_color = "text-blue-700"
 
     # Build prediction info
     prediction_info = ""
     if predictions_made > 0:
         prediction_info = f"""
-            <div class="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
-                <p class="text-sm font-medium text-purple-800">🤖 ML Predictions & Smart Review</p>
-                <p class="text-sm text-purple-700">{predictions_made} transactions got automatic predictions. High-confidence predictions were auto-accepted, while uncertain ones are prioritized for review.</p>
+            <div class="alert alert-ml">
+                <p>🤖 ML Predictions & Smart Review</p>
+                <p>{predictions_made} transactions got automatic predictions. High-confidence predictions were auto-accepted, while uncertain ones are prioritized for review.</p>
             </div>
         """
     elif new_count > 0:
-        # Show info about no predictions when transactions were imported but no model available
         prediction_info = """
-            <div class="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
-                <p class="text-sm font-medium text-blue-800">ℹ️ No ML Predictions</p>
-                <p class="text-sm text-blue-700">No trained model available. <a href="/settings" class="underline hover:text-blue-600">Train a model</a> to get automatic predictions.</p>
+            <div class="alert alert-info">
+                <p>ℹ️ No ML Predictions</p>
+                <p>No trained model available. <a href="/settings">Train a model</a> to get automatic predictions.</p>
             </div>
         """
 
     return f"""
-        <div class="{bg_color} {border_color} border rounded-lg p-6">
-            <div class="flex items-start">
-                <div class="flex-shrink-0">
-                    <svg class="h-6 w-6 {icon_color}" viewBox="0 0 20 20" fill="currentColor">
+        <div class="alert {alert_class} upload-result">
+            <div class="upload-result-header">
+                <div class="upload-result-icon">
+                    <svg class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
                     </svg>
                 </div>
-                <div class="ml-3 flex-1">
-                    <h3 class="text-lg font-semibold {text_color} mb-2">{primary_msg}</h3>
-                    <div class="space-y-1 {secondary_color}">
-                        <p><strong>File:</strong> {filename}</p>
+                <div class="upload-result-body">
+                    <h3 class="upload-result-title">{primary_msg}</h3>
+                    <div class="upload-result-details">
+                        <p><strong>File:</strong> {html.escape(filename)}</p>
                         <p><strong>Rows processed:</strong> {rows_processed}</p>
                         <p><strong>New transactions:</strong> {new_count}</p>
                         <p><strong>Duplicates skipped:</strong> {duplicate_count}</p>
                     </div>
                     {prediction_info}
-                    <div class="mt-4 flex gap-3">
-                        <a href="/review" class="inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">
+                    <div class="upload-result-actions">
+                        <a href="/review" class="btn btn-success btn-sm">
                             Review Transactions
                         </a>
                         <button onclick="document.getElementById('uploadResults').innerHTML = ''"
-                                class="inline-flex items-center px-3 py-2 text-sm font-medium {text_color} bg-transparent border border-current rounded-md hover:bg-current hover:bg-opacity-10">
+                                class="btn btn-secondary btn-sm">
                             Upload Another File
                         </button>
                     </div>
@@ -397,19 +388,19 @@ def _render_upload_success(
 def _render_upload_error(error_message: str) -> str:
     """Render error message HTML for HTMX response."""
     return f"""
-        <div class="bg-red-50 border border-red-200 rounded-lg p-6">
-            <div class="flex items-start">
-                <div class="flex-shrink-0">
-                    <svg class="h-6 w-6 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+        <div class="alert alert-error upload-result">
+            <div class="upload-result-header">
+                <div class="upload-result-icon">
+                    <svg class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
                     </svg>
                 </div>
-                <div class="ml-3 flex-1">
-                    <h3 class="text-lg font-semibold text-red-800 mb-2">❌ Upload Failed</h3>
-                    <p class="text-red-700">{error_message}</p>
-                    <div class="mt-4">
+                <div class="upload-result-body">
+                    <h3 class="upload-result-title">❌ Upload Failed</h3>
+                    <p>{html.escape(error_message)}</p>
+                    <div class="upload-result-actions">
                         <button onclick="document.getElementById('uploadResults').innerHTML = ''"
-                                class="inline-flex items-center px-3 py-2 text-sm font-medium text-red-800 bg-transparent border border-red-300 rounded-md hover:bg-red-50">
+                                class="btn btn-secondary btn-sm">
                             Try Again
                         </button>
                     </div>
