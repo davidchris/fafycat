@@ -9,8 +9,9 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_db_session
-from api.models import BulkCategorizeRequest, TransactionResponse, TransactionUpdate
+from api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
 from api.services import CategoryService, TransactionService
+from src.fafycat.core.models import ReviewPriority
 from web.components.pagination import create_full_pagination
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -23,11 +24,22 @@ async def get_transactions(
     category: str | None = Query(None),
     is_reviewed: bool | None = Query(None),
     confidence_lt: float | None = Query(None, ge=0, le=1),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    review_priority: ReviewPriority | None = Query(None),
     db: Session = Depends(get_db_session),
 ) -> list[TransactionResponse]:
     """Get transactions with filtering and pagination."""
     return TransactionService.get_transactions(
-        session=db, skip=skip, limit=limit, category=category, is_reviewed=is_reviewed, confidence_lt=confidence_lt
+        session=db,
+        skip=skip,
+        limit=limit,
+        category=category,
+        is_reviewed=is_reviewed,
+        confidence_lt=confidence_lt,
+        start_date=start_date,
+        end_date=end_date,
+        review_priority=review_priority,
     )
 
 
@@ -300,3 +312,19 @@ async def bulk_categorize_transactions(request: BulkCategorizeRequest, db: Sessi
             updated_count += 1
 
     return {"updated": updated_count, "transaction_ids": request.transaction_ids}
+
+
+@router.post("/bulk-approve")
+async def bulk_approve_transactions(
+    request: BulkApproveRequest = BulkApproveRequest(),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """Bulk approve unreviewed transactions by trusting ML predictions.
+
+    Sets is_reviewed=True and category_id=predicted_category_id for transactions
+    matching the given review_priority (default: quality_check) that have not
+    yet been reviewed.
+    """
+    return TransactionService.bulk_approve(
+        session=db, review_priority=request.review_priority, min_confidence=request.min_confidence
+    )

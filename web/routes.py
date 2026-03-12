@@ -126,11 +126,13 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
             new_count, duplicate_count = processor.save_transactions(transactions)
 
             # Auto-predict categories for new transactions if model is available
-            predictions_made = 0
-            if new_count > 0:
-                from api.upload import _predict_transaction_categories
+            from api.upload import empty_categorization_summary, predict_transaction_categories
 
-                predictions_made = _predict_transaction_categories(db_session, transactions, new_count)
+            if new_count > 0:
+                cat_summary = predict_transaction_categories(db_session, transactions, new_count)
+            else:
+                cat_summary = empty_categorization_summary()
+            predictions_made = cat_summary["predictions_made"]
 
             # Create success page with results
             if new_count > 0:
@@ -148,13 +150,13 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
             if predictions_made > 0:
                 prediction_component = str(
                     create_purple_alert(
-                        "🤖 ML Predictions Made",
+                        "ML Predictions Made",
                         f"{predictions_made} transactions received automatic category predictions",
                     )
                 )
             elif new_count > 0:
                 prediction_component = str(
-                    create_info_alert("ℹ️ No ML Predictions", "No trained model available", "Train a model", "/settings")
+                    create_info_alert("No ML Predictions", "No trained model available", "Train a model", "/settings")
                 )
 
             # Create action buttons
