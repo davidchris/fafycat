@@ -4,7 +4,7 @@ import math
 from datetime import date, datetime
 from typing import Any, cast
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, update
 from sqlalchemy.orm import Session, joinedload
 
 from api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
@@ -56,7 +56,7 @@ class TransactionService:
         confidence_lt: float | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
-        review_priority: str | None = None,
+        review_priority: ReviewPriority | None = None,
     ) -> list[TransactionResponse]:
         """Get transactions with filtering."""
         query = session.query(TransactionORM).options(
@@ -296,11 +296,11 @@ class TransactionService:
     @staticmethod
     def bulk_approve(
         session: Session,
-        review_priority: str = ReviewPriority.QUALITY_CHECK,
+        review_priority: ReviewPriority = ReviewPriority.QUALITY_CHECK,
         min_confidence: float | None = None,
     ) -> dict:
         """Bulk approve transactions by trusting their ML predictions."""
-        query = session.query(TransactionORM).filter(
+        query = session.query(TransactionORM.id).filter(
             TransactionORM.review_priority == review_priority,
             TransactionORM.is_reviewed == False,  # noqa: E712
             TransactionORM.predicted_category_id.is_not(None),
@@ -309,13 +309,14 @@ class TransactionService:
         if min_confidence is not None:
             query = query.filter(TransactionORM.confidence_score >= min_confidence)
 
-        transactions = query.all()
-        approved_ids = []
+        approved_ids = [_to_str(row[0]) for row in query.all()]
 
-        for txn in transactions:
-            txn.category_id = txn.predicted_category_id
-            txn.is_reviewed = True
-            approved_ids.append(_to_str(txn.id))
+        if approved_ids:
+            session.execute(
+                update(TransactionORM)
+                .where(TransactionORM.id.in_(approved_ids))
+                .values(category_id=TransactionORM.predicted_category_id, is_reviewed=True)
+            )
 
         session.commit()
         return {"approved": len(approved_ids), "transaction_ids": approved_ids}

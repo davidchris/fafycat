@@ -43,7 +43,7 @@ class BulkCategorizeRequest(BaseModel):
 class BulkApproveRequest(BaseModel):
     """Request model for bulk approval of auto-accepted transactions."""
 
-    review_priority: str = ReviewPriority.QUALITY_CHECK
+    review_priority: ReviewPriority = ReviewPriority.QUALITY_CHECK
     min_confidence: float | None = Field(None, ge=0, le=1)
 
 

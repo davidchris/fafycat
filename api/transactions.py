@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from api.dependencies import get_db_session
 from api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
 from api.services import CategoryService, TransactionService
+from src.fafycat.core.models import ReviewPriority
 from web.components.pagination import create_full_pagination
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -25,7 +26,7 @@ async def get_transactions(
     confidence_lt: float | None = Query(None, ge=0, le=1),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
-    review_priority: str | None = Query(None),
+    review_priority: ReviewPriority | None = Query(None),
     db: Session = Depends(get_db_session),
 ) -> list[TransactionResponse]:
     """Get transactions with filtering and pagination."""

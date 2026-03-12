@@ -24,9 +24,9 @@ def empty_categorization_summary() -> dict:
     """Return a zeroed categorization summary."""
     return {
         "predictions_made": 0,
-        ReviewPriority.AUTO_ACCEPTED: 0,
+        "auto_accepted": 0,
         "needs_review": 0,
-        ReviewPriority.QUALITY_CHECK: 0,
+        "quality_check": 0,
     }
 
 
@@ -137,12 +137,12 @@ def _categorize_transaction(txn, prediction, strategic_selections, confidence_th
             # High confidence but flagged for quality check
             txn.is_reviewed = False
             txn.review_priority = ReviewPriority.QUALITY_CHECK
-            return ReviewPriority.QUALITY_CHECK
+            return "quality_check"
         # High confidence and not flagged - auto accept
         txn.category_id = prediction.predicted_category_id
         txn.is_reviewed = True
         txn.review_priority = ReviewPriority.AUTO_ACCEPTED
-        return ReviewPriority.AUTO_ACCEPTED
+        return "auto_accepted"
     # Lower confidence - needs review
     txn.is_reviewed = False
     txn.review_priority = ReviewPriority.HIGH if txn.id in strategic_selections else ReviewPriority.STANDARD

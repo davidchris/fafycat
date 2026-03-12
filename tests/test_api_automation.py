@@ -177,7 +177,7 @@ class TestDateFiltering:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
-        assert data[0]["description"].startswith("Mar")
+        assert data[0]["date"] == "2025-03-15"
 
     def test_start_date_only(self, test_client, db_session):
         """Only start_date filters correctly."""
@@ -189,7 +189,7 @@ class TestDateFiltering:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
-        assert data[0]["description"].startswith("New")
+        assert data[0]["date"] == "2025-06-01"
 
 
 class TestReviewPriorityInResponse:
