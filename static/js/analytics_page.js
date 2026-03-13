@@ -699,7 +699,8 @@
 
         categories.forEach(category => {
             const escapedName = String(category.name || '').replace(/"/g, '""');
-            csv += `"${escapedName}",${category.type || ''}`;
+            const safeName = /^[=+\-@\t\r]/.test(escapedName) ? '\t' + escapedName : escapedName;
+            csv += `"${safeName}",${category.type || ''}`;
 
             years.forEach(year => {
                 const yearData = category.yearly_data?.[year] || {};
