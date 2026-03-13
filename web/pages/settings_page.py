@@ -1,6 +1,7 @@
 """Settings and categories page."""
 
 import html
+import json
 
 from fastapi import Request
 from sqlalchemy.orm import Session
@@ -513,7 +514,7 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             for category in categories:
                 budget_display = f"\u20ac{category.budget:.0f}/month" if category.budget > 0 else "No budget set"
                 budget_style = "color: var(--color-success)" if category.budget > 0 else "color: var(--text-tertiary)"
-                safe_name = html.escape(category.name.replace("\\", "\\\\").replace("'", "\\'"))
+                safe_name_js = html.escape(json.dumps(category.name))
 
                 content += f"""
                     <div class="flex items-center justify-between p-3" style="border: 1px solid var(--border-subtle); border-radius: 4px;">
@@ -523,19 +524,19 @@ def render_categories_management(category_groups, inactive_categories, ml_status
                         </div>
                         <div class="flex space-x-2">
                             <button
-                                onclick="editBudget({category.id}, '{safe_name}', {category.budget})"
+                                onclick="editBudget({category.id}, {safe_name_js}, {category.budget})"
                                 class="btn-ghost text-sm"
                             >
                                 Edit Budget
                             </button>
                             <button
-                                onclick="editCategoryType({category.id}, '{safe_name}', '{category.type}')"
+                                onclick="editCategoryType({category.id}, {safe_name_js}, '{category.type}')"
                                 class="btn-ghost text-sm"
                             >
                                 Edit Type
                             </button>
                             <button
-                                onclick="deactivateCategory({category.id}, '{safe_name}')"
+                                onclick="deactivateCategory({category.id}, {safe_name_js})"
                                 class="btn-ghost text-sm"
                             >
                                 Deactivate
@@ -560,12 +561,12 @@ def render_categories_management(category_groups, inactive_categories, ml_status
         """
 
         for category in inactive_categories[:5]:  # Show max 5 inactive
-            safe_name = html.escape(category.name.replace("\\", "\\\\").replace("'", "\\'"))
+            safe_name_js = html.escape(json.dumps(category.name))
             content += f"""
                 <div class="flex items-center justify-between p-2 text-sm">
                     <span>{html.escape(category.name)}</span>
                     <button
-                        onclick="reactivateCategory({category.id}, '{safe_name}')"
+                        onclick="reactivateCategory({category.id}, {safe_name_js})"
                         class="btn-ghost"
                     >
                         Reactivate

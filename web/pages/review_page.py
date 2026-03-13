@@ -167,7 +167,7 @@ def _generate_transaction_table(transactions, categories):
             <td class="px-4 py-3 text-sm text-right">${tx.amount:,.2f}</td>
             <td class="px-4 py-3 text-sm">
                 <span class="badge badge-neutral">
-                    {tx.actual_category or tx.predicted_category or "Uncategorized"}
+                    {html.escape(tx.actual_category or tx.predicted_category or "Uncategorized")}
                 </span>
             </td>
             <td class="px-4 py-3 text-sm">

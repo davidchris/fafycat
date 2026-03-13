@@ -3,14 +3,7 @@
  * Handles year-over-year comparison charts and cumulative category charts
  */
 
-// Use shared THEME from analytics.js, with fallback
-function toRgba(hex, alpha) {
-    if (!hex || hex.length < 7) return `rgba(128, 128, 128, ${alpha})`;
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
+// Uses shared THEME and toRgba from analytics.js
 
 /**
  * Update year-over-year comparison charts
@@ -203,7 +196,7 @@ function updateCategoryCumulativeChartDisplay(data) {
             label: year.toString(),
             data: yearData.cumulative.map(val => Math.abs(val)),
             borderColor: colors[index % colors.length],
-            backgroundColor: colors[index % colors.length].replace('rgb', 'rgba').replace(')', ', 0.1)'),
+            backgroundColor: toRgba(colors[index % colors.length], 0.1),
             borderWidth: 3,
             fill: false,
             tension: 0.1,

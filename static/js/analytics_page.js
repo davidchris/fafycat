@@ -211,11 +211,11 @@
             const category = transaction.category || 'Unknown';
             const percentage = Number(transaction.percentage_of_total || 0);
 
-            appendCell(row, txDate, 'px-6 py-4 whitespace-nowrap text-sm');
-            appendCell(row, description, 'px-6 py-4 text-sm');
-            appendCell(row, category, 'px-6 py-4 whitespace-nowrap text-sm');
-            appendCell(row, formatCurrency(transaction.amount), 'px-6 py-4 whitespace-nowrap text-sm text-right');
-            appendCell(row, `${percentage.toFixed(1)}%`, 'px-6 py-4 whitespace-nowrap text-sm text-right');
+            appendCell(row, txDate, 'whitespace-nowrap');
+            appendCell(row, description, '');
+            appendCell(row, category, 'whitespace-nowrap');
+            appendCell(row, formatCurrency(transaction.amount), 'text-right');
+            appendCell(row, `${percentage.toFixed(1)}%`, 'text-right');
 
             tbody.appendChild(row);
         });
@@ -573,13 +573,13 @@
 
         categories.forEach(category => {
             html += '<tr>';
-            html += `<td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${escape(category.name || '')}</td>`;
+            html += `<td class="font-medium">${escape(category.name || '')}</td>`;
 
             years.forEach(year => {
                 const yearData = category.yearly_data?.[year] || {};
                 const value = viewMode === 'monthly_avg' ? yearData.monthly_avg : yearData.total;
                 const amount = Math.abs(Number(value || 0));
-                html += `<td class="px-6 py-4 whitespace-nowrap text-sm text-right">${formatCurrency(amount)}</td>`;
+                html += `<td class="text-right">${formatCurrency(amount)}</td>`;
             });
 
             if (years.length > 1) {
@@ -592,15 +592,15 @@
                     const percentageChange = viewMode === 'monthly_avg' ? change.percentage_monthly : change.percentage_total;
                     const shouldShowUpArrow = category.type === 'spending' ? absoluteChange < 0 : absoluteChange > 0;
                     html += `
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-right">
+                        <td class="text-right">
                             ${shouldShowUpArrow ? '↑' : '↓'} ${formatCurrency(Math.abs(absoluteChange || 0))}
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-right">
+                        <td class="text-right">
                             ${Number(percentageChange) > 0 ? '+' : ''}${Number(percentageChange || 0).toFixed(1)}%
                         </td>
                     `;
                 } else {
-                    html += '<td colspan="2" class="px-6 py-4 text-center text-sm">N/A</td>';
+                    html += '<td colspan="2" class="text-center">N/A</td>';
                 }
             }
 

@@ -1,6 +1,6 @@
 """Export configuration page."""
 
-import html as html_mod
+import html
 from datetime import date, timedelta
 
 from fastapi import Request
@@ -128,10 +128,10 @@ def create_export_page(request: Request, db_session: Session):
         "".join(
             [
                 f'''<label class="flex items-center space-x-2 text-sm">
-                                    <input type="checkbox" name="categories" value="{html_mod.escape(str(cat.name))}" class="rounded"
+                                    <input type="checkbox" name="categories" value="{html.escape(str(cat.name))}" class="rounded"
                                            hx-trigger="change" hx-post="/api/export/summary" hx-target="#export-summary" hx-include="#export-form">
-                                    <span class="truncate" title="{html_mod.escape(str(cat.name))}">{html_mod.escape(str(cat.name))}</span>
-                                    <span class="text-xs text-tertiary">({html_mod.escape(str(cat.type))})</span>
+                                    <span class="truncate" title="{html.escape(str(cat.name))}">{html.escape(str(cat.name))}</span>
+                                    <span class="text-xs text-tertiary">({html.escape(str(cat.type))})</span>
                                 </label>'''
                 for cat in categories
             ]

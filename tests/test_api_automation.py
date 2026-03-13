@@ -6,6 +6,7 @@ from datetime import date, datetime, UTC
 import pytest
 
 from src.fafycat.core.database import CategoryORM, TransactionORM
+from src.fafycat.core.models import ReviewPriority
 
 
 def _make_txn_id(name: str, d: date, amount: float) -> str:
@@ -30,7 +31,7 @@ def _insert_transaction(
     predicted_category_id: int | None = None,
     confidence_score: float | None = None,
     is_reviewed: bool = False,
-    review_priority: str = "standard",
+    review_priority: ReviewPriority = ReviewPriority.STANDARD,
     category_id: int | None = None,
 ) -> TransactionORM:
     txn_id = _make_txn_id(name, txn_date, amount)
@@ -66,7 +67,7 @@ class TestBulkApproveEndpoint:
             predicted_category_id=cat.id,
             confidence_score=0.95,
             is_reviewed=False,
-            review_priority="quality_check",
+            review_priority=ReviewPriority.QUALITY_CHECK,
         )
         db_session.commit()
 
@@ -91,7 +92,7 @@ class TestBulkApproveEndpoint:
             amount=-50.0,
             predicted_category_id=cat.id,
             confidence_score=0.92,
-            review_priority="quality_check",
+            review_priority=ReviewPriority.QUALITY_CHECK,
         )
         low = _insert_transaction(
             db_session,
@@ -99,7 +100,7 @@ class TestBulkApproveEndpoint:
             amount=-30.0,
             predicted_category_id=cat.id,
             confidence_score=0.65,
-            review_priority="quality_check",
+            review_priority=ReviewPriority.QUALITY_CHECK,
         )
         db_session.commit()
 
@@ -120,7 +121,7 @@ class TestBulkApproveEndpoint:
             db_session,
             predicted_category_id=cat.id,
             confidence_score=0.9,
-            review_priority="quality_check",
+            review_priority=ReviewPriority.QUALITY_CHECK,
         )
         db_session.commit()
 
@@ -136,7 +137,7 @@ class TestBulkApproveEndpoint:
             predicted_category_id=cat.id,
             confidence_score=0.95,
             is_reviewed=True,
-            review_priority="auto_accepted",
+            review_priority=ReviewPriority.AUTO_ACCEPTED,
         )
         db_session.commit()
 
@@ -153,7 +154,7 @@ class TestBulkApproveEndpoint:
             predicted_category_id=cat.id,
             confidence_score=0.9,
             is_reviewed=True,
-            review_priority="quality_check",
+            review_priority=ReviewPriority.QUALITY_CHECK,
         )
         db_session.commit()
 
@@ -197,7 +198,7 @@ class TestReviewPriorityInResponse:
 
     def test_review_priority_field_present(self, test_client, db_session):
         """review_priority is included in GET /api/transactions/ response."""
-        _insert_transaction(db_session, review_priority="quality_check")
+        _insert_transaction(db_session, review_priority=ReviewPriority.QUALITY_CHECK)
         db_session.commit()
 
         resp = test_client.get("/api/transactions/")

@@ -749,7 +749,9 @@ input[type="range"]::-moz-range-thumb {
 /* ================================================
    UTILITY OVERRIDES for Tailwind CDN compatibility
    ================================================ */
-/* TODO: Remove Tailwind CDN once layout utilities are migrated */
+/* These utilities intentionally override Tailwind's text-primary / text-secondary
+   with design-system tokens. They win because components.css loads after the
+   Tailwind CDN in layout.py.  Remove this section when Tailwind CDN is removed. */
 
 /* Text color utilities */
 .text-primary { color: var(--text-primary); }

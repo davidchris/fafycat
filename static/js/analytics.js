@@ -27,8 +27,11 @@ function loadThemeColors() {
     THEME.textSecondary = style.getPropertyValue('--text-secondary').trim();
     THEME.borderSubtle = style.getPropertyValue('--border-subtle').trim();
     THEME.borderDefault = style.getPropertyValue('--border-default').trim();
+    THEME.fontHeading = style.getPropertyValue('--font-heading').trim();
+    THEME.fontBody = style.getPropertyValue('--font-body').trim();
 }
 window.THEME = THEME;
+window.toRgba = toRgba;
 
 // Chart instances storage
 let charts = {
@@ -49,8 +52,8 @@ let charts = {
 function initChartTheme() {
     Chart.defaults.color = THEME.textSecondary;
     Chart.defaults.borderColor = THEME.borderSubtle;
-    Chart.defaults.font.family = "'DM Sans', sans-serif";
-    Chart.defaults.plugins.title.font = { family: "'Syne', sans-serif", weight: 600 };
+    Chart.defaults.font.family = THEME.fontBody || "'Segoe UI', sans-serif";
+    Chart.defaults.plugins.title.font = { family: THEME.fontHeading || "'Avenir Next', sans-serif", weight: 600 };
     Chart.defaults.plugins.tooltip.backgroundColor = THEME.bgHover;
     Chart.defaults.plugins.tooltip.titleColor = THEME.textPrimary;
     Chart.defaults.plugins.tooltip.bodyColor = THEME.textSecondary;

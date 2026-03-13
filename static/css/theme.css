@@ -27,6 +27,7 @@
     --color-info: #1E5FAF;
     --color-purple: #9B59B6;
     --color-amber: #F59E0B;
+    --color-link-hover: #4A8FDF;
 
     /* Light tints */
     --color-success-light: #8AEDB8;
@@ -119,5 +120,5 @@ a {
 }
 
 a:hover {
-    color: #4A8FDF;
+    color: var(--color-link-hover);
 }
