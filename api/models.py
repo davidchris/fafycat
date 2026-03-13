@@ -4,6 +4,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.fafycat.core.models import ReviewPriority
+
 
 class TransactionResponse(BaseModel):
     """Response model for transaction data."""
@@ -17,6 +19,7 @@ class TransactionResponse(BaseModel):
     actual_category: str | None = None
     confidence: float | None = None
     is_reviewed: bool = False
+    review_priority: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -35,6 +38,13 @@ class BulkCategorizeRequest(BaseModel):
 
     transaction_ids: list[str]
     category: str
+
+
+class BulkApproveRequest(BaseModel):
+    """Request model for bulk approval of auto-accepted transactions."""
+
+    review_priority: ReviewPriority = ReviewPriority.QUALITY_CHECK
+    min_confidence: float | None = Field(None, ge=0, le=1)
 
 
 class CategoryResponse(BaseModel):
@@ -77,6 +87,9 @@ class UploadResponse(BaseModel):
     transactions_imported: int
     duplicates_skipped: int
     predictions_made: int = 0
+    auto_accepted: int = 0
+    needs_review: int = 0
+    quality_check: int = 0
 
 
 class ExportRequest(BaseModel):

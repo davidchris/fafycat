@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from src.fafycat.core.config import AppConfig
@@ -72,11 +72,6 @@ def create_app() -> FastAPI:
     from web.routes import router as web_router
 
     app.include_router(web_router)
-
-    # Root redirect to main app
-    @app.get("/")
-    async def root() -> RedirectResponse:
-        return RedirectResponse(url="/app", status_code=302)
 
     return app
 

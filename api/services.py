@@ -4,13 +4,13 @@ import math
 from datetime import date, datetime
 from typing import Any, cast
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, update
 from sqlalchemy.orm import Session, joinedload
 
 from api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
 from src.fafycat.core.database import BudgetPlanORM, CategoryORM, TransactionORM
 from src.fafycat.core.database import get_categories as db_get_categories
-from src.fafycat.core.models import CategoryType
+from src.fafycat.core.models import CategoryType, ReviewPriority
 
 
 def _to_int(value: Any) -> int:
@@ -54,6 +54,9 @@ class TransactionService:
         category: str | None = None,
         is_reviewed: bool | None = None,
         confidence_lt: float | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        review_priority: ReviewPriority | None = None,
     ) -> list[TransactionResponse]:
         """Get transactions with filtering."""
         query = session.query(TransactionORM).options(
@@ -74,6 +77,14 @@ class TransactionService:
                 (TransactionORM.confidence_score.is_(None)) | (TransactionORM.confidence_score < confidence_lt)
             )
 
+        if start_date is not None:
+            query = query.filter(TransactionORM.date >= start_date)
+        if end_date is not None:
+            query = query.filter(TransactionORM.date <= end_date)
+
+        if review_priority is not None:
+            query = query.filter(TransactionORM.review_priority == review_priority)
+
         # Apply pagination
         query = query.order_by(TransactionORM.date.desc())
         query = query.offset(skip).limit(limit)
@@ -92,6 +103,7 @@ class TransactionService:
                 actual_category=_to_str(t.category.name) if t.category else None,
                 confidence=_to_float(t.confidence_score) if t.confidence_score is not None else None,
                 is_reviewed=_to_bool(t.is_reviewed),
+                review_priority=_to_str(t.review_priority) if t.review_priority else None,
                 created_at=_to_datetime(t.imported_at),
                 updated_at=_to_datetime(t.imported_at),  # Will update when we add updated_at to TransactionORM
             )
@@ -141,7 +153,9 @@ class TransactionService:
         if review_priority is not None:
             if review_priority == "high_priority":
                 # Show both high priority and quality check transactions
-                query = query.filter(TransactionORM.review_priority.in_(["high", "quality_check"]))
+                query = query.filter(
+                    TransactionORM.review_priority.in_([ReviewPriority.HIGH, ReviewPriority.QUALITY_CHECK])
+                )
             else:
                 query = query.filter(TransactionORM.review_priority == review_priority)
 
@@ -219,6 +233,7 @@ class TransactionService:
                 actual_category=_to_str(t.category.name) if t.category else None,
                 confidence=_to_float(t.confidence_score) if t.confidence_score is not None else None,
                 is_reviewed=_to_bool(t.is_reviewed),
+                review_priority=_to_str(t.review_priority) if t.review_priority else None,
                 created_at=_to_datetime(t.imported_at),
                 updated_at=_to_datetime(t.imported_at),  # Will update when we add updated_at to TransactionORM
             )
@@ -273,9 +288,38 @@ class TransactionService:
             actual_category=_to_str(category.name),
             confidence=_to_float(transaction.confidence_score) if transaction.confidence_score is not None else None,
             is_reviewed=_to_bool(transaction.is_reviewed),
+            review_priority=_to_str(transaction.review_priority) if transaction.review_priority else None,
             created_at=_to_datetime(transaction.imported_at),
             updated_at=_to_datetime(transaction.imported_at),
         )
+
+    @staticmethod
+    def bulk_approve(
+        session: Session,
+        review_priority: ReviewPriority = ReviewPriority.QUALITY_CHECK,
+        min_confidence: float | None = None,
+    ) -> dict:
+        """Bulk approve transactions by trusting their ML predictions."""
+        query = session.query(TransactionORM.id).filter(
+            TransactionORM.review_priority == review_priority,
+            TransactionORM.is_reviewed == False,  # noqa: E712
+            TransactionORM.predicted_category_id.is_not(None),
+        )
+
+        if min_confidence is not None:
+            query = query.filter(TransactionORM.confidence_score >= min_confidence)
+
+        approved_ids = [_to_str(row[0]) for row in query.all()]
+
+        if approved_ids:
+            session.execute(
+                update(TransactionORM)
+                .where(TransactionORM.id.in_(approved_ids))
+                .values(category_id=TransactionORM.predicted_category_id, is_reviewed=True)
+            )
+
+        session.commit()
+        return {"approved": len(approved_ids), "transaction_ids": approved_ids}
 
 
 class CategoryService:

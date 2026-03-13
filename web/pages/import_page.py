@@ -85,22 +85,9 @@ def _get_import_model_status_alert():
         # If model is working, show success message
         if status.get("model_loaded", False) and status.get("can_predict", False):
             return """
-            <div class="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
-                <div class="flex items-center">
-                    <div class="flex-shrink-0">
-                        <svg class="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                        </svg>
-                    </div>
-                    <div class="ml-3">
-                        <h3 class="text-sm font-medium text-green-800">
-                            ML model ready for predictions
-                        </h3>
-                        <div class="mt-1 text-sm text-green-700">
-                            <p>Imported transactions will receive automatic category predictions.</p>
-                        </div>
-                    </div>
-                </div>
+            <div class="alert alert-success">
+                <h3>ML model ready for predictions</h3>
+                <p>Imported transactions will receive automatic category predictions.</p>
             </div>
             """
 
@@ -110,50 +97,19 @@ def _get_import_model_status_alert():
 
         if training_ready:
             return f"""
-            <div class="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <div class="flex items-start">
-                    <div class="flex-shrink-0">
-                        <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                        </svg>
-                    </div>
-                    <div class="ml-3 flex-1">
-                        <h3 class="text-sm font-medium text-yellow-800">
-                            No ML model trained yet
-                        </h3>
-                        <div class="mt-2 text-sm text-yellow-700">
-                            <p>Imported transactions won't get automatic predictions. You have {reviewed_count} transactions ready for training.</p>
-                        </div>
-                        <div class="mt-3">
-                            <a href="/settings" class="inline-flex items-center text-sm font-medium text-yellow-600 hover:text-yellow-500">
-                                Train model first
-                                <svg class="ml-1 h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" />
-                                </svg>
-                            </a>
-                        </div>
-                    </div>
+            <div class="alert alert-warning">
+                <h3>No ML model trained yet</h3>
+                <p>Imported transactions won't get automatic predictions. You have {reviewed_count} transactions ready for training.</p>
+                <div class="mt-3">
+                    <a href="/settings" class="btn btn-ghost">Train model first &rarr;</a>
                 </div>
             </div>
             """
 
         return f"""
-        <div class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div class="flex items-center">
-                <div class="flex-shrink-0">
-                    <svg class="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
-                    </svg>
-                </div>
-                <div class="ml-3">
-                    <h3 class="text-sm font-medium text-blue-800">
-                        Building training data
-                    </h3>
-                    <div class="mt-1 text-sm text-blue-700">
-                        <p>Import and manually categorize transactions to build training data. You have {reviewed_count} so far (need 50+).</p>
-                    </div>
-                </div>
-            </div>
+        <div class="alert alert-info">
+            <h3>Building training data</h3>
+            <p>Import and manually categorize transactions to build training data. You have {reviewed_count} so far (need 50+).</p>
         </div>
         """
     except Exception:
@@ -174,45 +130,45 @@ def render_import_page(request: Request):
 
         <div class="mb-8">
             <h2 class="text-lg font-semibold mb-4">Upload CSV File</h2>
-            
+
             <!-- Upload Form with HTMX -->
-            <div class="bg-white p-6 rounded-lg shadow">
-                <form id="uploadForm" 
-                      hx-post="/api/upload/csv-htmx" 
+            <div class="card">
+                <form id="uploadForm"
+                      hx-post="/api/upload/csv-htmx"
                       hx-target="#uploadResults"
                       hx-encoding="multipart/form-data"
                       hx-indicator="#uploadProgress"
                       class="space-y-4">
-                    
+
                     <div>
-                        <label class="block text-sm font-medium mb-2">Select CSV file:</label>
-                        <input type="file" 
-                               name="file" 
+                        <label class="form-label">Select CSV file:</label>
+                        <input type="file"
+                               name="file"
                                id="fileInput"
-                               accept=".csv" 
-                               class="block w-full border rounded p-2"
+                               accept=".csv"
+                               class="form-input"
                                onchange="updateUploadButton()">
                     </div>
-                    
-                    <button type="submit" 
+
+                    <button type="submit"
                             id="uploadButton"
                             disabled
-                            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                            class="btn btn-primary">
                         Upload and Process
                     </button>
                 </form>
 
                 <!-- Upload Progress Indicator -->
                 <div id="uploadProgress" class="htmx-indicator mt-4">
-                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div class="alert alert-info" style="margin-bottom: 0;">
                         <div class="flex items-center">
-                            <svg class="animate-spin mr-3 h-5 w-5 text-blue-500" viewBox="0 0 24 24">
+                            <svg class="spinner mr-3 h-5 w-5 text-info" viewBox="0 0 24 24">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
                             <div>
-                                <p class="font-medium text-blue-800">Processing your file...</p>
-                                <p class="text-sm text-blue-600">This may take a few moments for large files</p>
+                                <p class="font-medium">Processing your file...</p>
+                                <p class="text-sm text-secondary">This may take a few moments for large files</p>
                             </div>
                         </div>
                     </div>
@@ -223,9 +179,9 @@ def render_import_page(request: Request):
             </div>
         </div>
 
-        <div class="bg-gray-50 p-6 rounded-lg">
+        <div class="card">
             <h2 class="text-lg font-semibold mb-4">Import Instructions</h2>
-            <ul class="list-disc list-inside space-y-2 text-gray-700">
+            <ul class="list-disc list-inside space-y-2">
                 <li>CSV should contain columns: Date, Description, Amount, Account</li>
                 <li>Date format should be YYYY-MM-DD or MM/DD/YYYY</li>
                 <li>Amount should be numeric (negative for expenses, positive for income)</li>
@@ -233,12 +189,12 @@ def render_import_page(request: Request):
             </ul>
         </div>
     </div>
-    
+
     <script>
         function updateUploadButton() {{
             const fileInput = document.getElementById('fileInput');
             const uploadButton = document.getElementById('uploadButton');
-            
+
             if (fileInput.files.length > 0) {{
                 uploadButton.disabled = false;
                 uploadButton.textContent = 'Upload and Process';

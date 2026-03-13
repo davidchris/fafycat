@@ -1,5 +1,6 @@
 """Analytics API endpoints for FafyCat."""
 
+import html
 import json
 from datetime import date
 from typing import Any
@@ -218,66 +219,58 @@ async def get_budget_variance_html(
         data = AnalyticsService.get_budget_variance(session, start_date, end_date)
 
         # Generate HTML table
-        html = """
-        <div class="overflow-x-auto">
-            <table class="min-w-full bg-white border border-gray-200">
-                <thead class="bg-gray-50">
+        table_html = """
+        <div class="table-container">
+            <table class="min-w-full">
+                <thead>
                     <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Category
-                        </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Budget
-                        </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Actual
-                        </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Variance
-                        </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Status
-                        </th>
+                        <th>Category</th>
+                        <th>Budget</th>
+                        <th>Actual</th>
+                        <th>Variance</th>
+                        <th>Status</th>
                     </tr>
                 </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
+                <tbody>
         """
 
         for variance in data["variances"]:
-            status_color = "text-red-600" if variance["is_overspent"] else "text-green-600"
+            status_style = "color: var(--color-spending)" if variance["is_overspent"] else "color: var(--color-success)"
             status_text = "Over Budget" if variance["is_overspent"] else "Under Budget"
 
-            html += f"""
+            table_html += f"""
                     <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {variance["category_name"]}
+                        <td>
+                            {html.escape(str(variance["category_name"]))}
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">€{variance["budget"]:.2f}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">€{variance["actual"]:.2f}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td>€{variance["budget"]:.2f}</td>
+                        <td>€{variance["actual"]:.2f}</td>
+                        <td>
                             €{variance["variance"]:.2f} ({variance["variance_percentage"]:.1f}%)
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm {status_color}">{status_text}</td>
+                        <td style="{status_style}">{status_text}</td>
                     </tr>
             """
 
         # Add summary row
         summary = data["summary"]
-        summary_color = "text-red-600" if summary["total_variance"] < 0 else "text-green-600"
+        summary_style = (
+            "color: var(--color-spending)" if summary["total_variance"] < 0 else "color: var(--color-success)"
+        )
 
-        html += f"""
-                    <tr class="bg-gray-50 font-bold">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">TOTAL</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        table_html += f"""
+                    <tr class="font-bold" style="background: var(--bg-hover)">
+                        <td>TOTAL</td>
+                        <td>
                             €{summary["total_budget"]:.2f}
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td>
                             €{summary["total_actual"]:.2f}
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm {summary_color}">
+                        <td style="{summary_style}">
                             €{summary["total_variance"]:.2f} ({summary["total_variance_percentage"]:.1f}%)
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm {summary_color}">
+                        <td style="{summary_style}">
                             {"Over Budget" if summary["total_variance"] < 0 else "Under Budget"}
                         </td>
                     </tr>
@@ -290,6 +283,6 @@ async def get_budget_variance_html(
         </script>
         """
 
-        return HTMLResponse(content=html)
+        return HTMLResponse(content=table_html)
     except Exception as e:
-        return HTMLResponse(content=f'<div class="text-red-600">Error: {str(e)}</div>')
+        return HTMLResponse(content=f'<div class="alert alert-error">Error: {html.escape(str(e))}</div>')

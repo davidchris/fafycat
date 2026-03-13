@@ -37,6 +37,9 @@ dependencies = [
     "uvicorn>=0.34.3",
 ]
 
+[project.scripts]
+fafycat = "cli:main"
+
 [project.urls]
 Homepage = "https://github.com/davidchris/fafycat"
 Repository = "https://github.com/davidchris/fafycat"
@@ -79,16 +82,19 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 "api/*.py" = ["B008"]
 "api/upload.py" = ["E501", "W291"]  # Allow long lines and whitespace for HTML content in upload responses
+"api/transactions.py" = ["E501", "W291"]  # Allow long lines for HTML content in HTMX responses
+"cli.py" = ["T201"]  # Allow print statements in CLI
 "run_*.py" = ["T201"]  # Allow print statements in runner scripts
 "scripts/*.py" = ["T201", "C901"]  # Allow print statements and complex functions in scripts
 "src/fafycat/ml/*.py" = ["T201"]  # Allow print statements in ML modules for training feedback
 "src/fafycat/data/*.py" = ["C901", "B007"]  # Allow complex functions and unused loop vars in data processing
+"web/components/*.py" = ["E501", "W291"]  # Allow long lines for HTML content in layout components
 "web/pages/*.py" = ["E501", "W291", "W293"]  # Allow long lines and whitespace for HTML/SVG content
 "tests/*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for tests
 "test_*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for test files
 
 [tool.ty.src]
-exclude = ["tests/", "*.ipynb"]
+exclude = ["tests/", "*.ipynb", ".ipynb_checkpoints/"]
 
 [tool.ty.environment]
 python = ".venv"
@@ -134,6 +140,11 @@ markers = [
 
 [dependency-groups]
 dev = [
+    "ipykernel>=7.2.0",
+    "jupyter>=1.1.1",
+    "jupyterlab>=4.5.4",
+    "matplotlib>=3.10.6",
+    "nbconvert>=7.17.0",
     "pytest>=8.3.5",
     "pytest-benchmark>=5.1.0",
     "pytest-cov>=6.1.1",
