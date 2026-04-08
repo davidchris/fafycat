@@ -4,10 +4,22 @@
  */
 
 function toRgba(hex, alpha) {
-    if (!hex || hex.length < 7) return `rgba(128, 128, 128, ${alpha})`;
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
+    if (!hex) return `rgba(128, 128, 128, ${alpha})`;
+
+    const color = String(hex).trim();
+    const rgbMatch = color.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*[\d.]+\s*)?\)$/i);
+    if (rgbMatch) {
+        const [, r, g, b] = rgbMatch;
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    if (color.length < 7 || !color.startsWith('#')) {
+        return `rgba(128, 128, 128, ${alpha})`;
+    }
+
+    const r = parseInt(color.slice(1, 3), 16);
+    const g = parseInt(color.slice(3, 5), 16);
+    const b = parseInt(color.slice(5, 7), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
@@ -32,6 +44,10 @@ function loadThemeColors() {
 }
 window.THEME = THEME;
 window.toRgba = toRgba;
+
+if (window.__ANALYTICS_TEST_HOOKS__) {
+    window.__ANALYTICS_TEST_HOOKS__.toRgba = toRgba;
+}
 
 // Chart instances storage
 let charts = {
