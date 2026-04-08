@@ -96,3 +96,21 @@ test('getYearSelection uses the latest data date for YTD defaults', () => {
     assert.equal(selection.endDate, '2025-08-15');
     assert.equal(selection.isYtd, true);
 });
+
+test('renderYoyYearCheckboxes preselects the latest three years when more than three exist', () => {
+    const yoyYearsContainer = createElement('div');
+    const hooks = loadAnalyticsPageController({
+        elements: {
+            'yoy-years-container': yoyYearsContainer
+        }
+    });
+
+    hooks.renderYoyYearCheckboxes([2026, 2025, 2024, 2023, 2022]);
+
+    const checkedYears = yoyYearsContainer.children
+        .map(row => row.children[0])
+        .filter(checkbox => checkbox.checked)
+        .map(checkbox => Number(checkbox.value));
+
+    assert.deepEqual(checkedYears, [2026, 2025, 2024]);
+});

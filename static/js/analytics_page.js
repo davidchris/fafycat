@@ -415,6 +415,14 @@
         if (!container) return;
 
         container.replaceChildren();
+        const defaultSelectedYears = new Set(
+            years
+                .slice()
+                .map(year => Number(year))
+                .filter(year => Number.isFinite(year))
+                .sort((a, b) => b - a)
+                .slice(0, 3)
+        );
 
         years.forEach(year => {
             const row = document.createElement('div');
@@ -425,7 +433,7 @@
             checkbox.id = `yoy-year-${year}`;
             checkbox.value = String(year);
             checkbox.className = 'mr-2';
-            checkbox.checked = years.length <= 3;
+            checkbox.checked = defaultSelectedYears.has(Number(year));
 
             const label = document.createElement('label');
             label.htmlFor = checkbox.id;
@@ -849,6 +857,7 @@
 
     if (window.__ANALYTICS_PAGE_TEST_HOOKS__) {
         window.__ANALYTICS_PAGE_TEST_HOOKS__.getYearSelection = getYearSelection;
+        window.__ANALYTICS_PAGE_TEST_HOOKS__.renderYoyYearCheckboxes = renderYoyYearCheckboxes;
         window.__ANALYTICS_PAGE_TEST_HOOKS__.syncAnalyticsPageConfig = syncAnalyticsPageConfig;
     }
 
