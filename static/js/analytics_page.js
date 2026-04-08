@@ -46,6 +46,15 @@
         return analyticsPageConfig.latestTransactionDate || todayLocalISO();
     }
 
+    function getLatestAnalyticsDateParts() {
+        if (!analyticsPageConfig.latestTransactionDate) return null;
+
+        const [year, month] = analyticsPageConfig.latestTransactionDate.split('-').map(value => Number(value));
+        if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+
+        return { year, month };
+    }
+
     syncAnalyticsPageConfig(window.analyticsPageConfig);
 
     function monthEndLocalISO(year, month) {
@@ -339,6 +348,25 @@
         );
 
         await updateTopTransactions();
+    }
+
+    function syncTopTransactionsMonthToYearSelection() {
+        const monthSelector = document.getElementById('month-selector');
+        if (!monthSelector) return;
+
+        const latestDateParts = getLatestAnalyticsDateParts();
+        if (!latestDateParts) return;
+
+        const range = getYearSelection();
+        const selectedMonth = Number(monthSelector.value);
+
+        if (range.actualYear !== latestDateParts.year) {
+            return;
+        }
+
+        if (!Number.isFinite(selectedMonth) || selectedMonth > latestDateParts.month || selectedMonth < 1) {
+            monthSelector.value = String(latestDateParts.month);
+        }
     }
 
     async function updateDashboardYear() {
@@ -799,6 +827,7 @@
 
     function bindEvents() {
         document.getElementById('global-year-selector')?.addEventListener('change', () => {
+            syncTopTransactionsMonthToYearSelection();
             updateDashboardYear();
         });
 
@@ -848,6 +877,7 @@
         }
 
         syncCategoryDateInputsToYear();
+        syncTopTransactionsMonthToYearSelection();
         await loadDashboardData();
         await initializeYearOverYearComparison();
     }
@@ -859,6 +889,8 @@
         window.__ANALYTICS_PAGE_TEST_HOOKS__.getYearSelection = getYearSelection;
         window.__ANALYTICS_PAGE_TEST_HOOKS__.renderYoyYearCheckboxes = renderYoyYearCheckboxes;
         window.__ANALYTICS_PAGE_TEST_HOOKS__.syncAnalyticsPageConfig = syncAnalyticsPageConfig;
+        window.__ANALYTICS_PAGE_TEST_HOOKS__.syncTopTransactionsMonthToYearSelection =
+            syncTopTransactionsMonthToYearSelection;
     }
 
     document.addEventListener('DOMContentLoaded', () => {

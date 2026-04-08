@@ -114,3 +114,21 @@ test('renderYoyYearCheckboxes preselects the latest three years when more than t
 
     assert.deepEqual(checkedYears, [2026, 2025, 2024]);
 });
+
+test('top transactions defaults to the latest month with data for the selected year', () => {
+    const monthSelector = { value: '4' };
+    const hooks = loadAnalyticsPageController({
+        elements: {
+            'global-year-selector': { value: 'ytd' },
+            'month-selector': monthSelector
+        },
+        analyticsPageConfig: {
+            defaultYear: 2026,
+            latestTransactionDate: '2026-03-31'
+        }
+    });
+
+    hooks.syncTopTransactionsMonthToYearSelection();
+
+    assert.equal(monthSelector.value, '3');
+});
