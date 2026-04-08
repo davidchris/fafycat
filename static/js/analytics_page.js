@@ -566,6 +566,43 @@
         return { ...data, categories };
     }
 
+    function formatYoyComparisonEndDate(dateString) {
+        if (!dateString) return '';
+
+        const parsed = new Date(`${dateString}T00:00:00`);
+        if (Number.isNaN(parsed.valueOf())) return '';
+
+        return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    function getYoyComparisonNote(data) {
+        const summary = data.summary || {};
+        if (summary.comparison_basis !== 'aligned_to_current_year_latest_transaction') {
+            return '';
+        }
+
+        const formattedEndDate = formatYoyComparisonEndDate(summary.comparison_end_date);
+        const alignedYear = summary.aligned_to_year;
+        if (!formattedEndDate || !alignedYear) {
+            return '';
+        }
+
+        return `Comparing selected years through ${formattedEndDate} to match partial ${alignedYear} data.`;
+    }
+
+    function getYoyValueColumnLabel(data, viewMode) {
+        const summary = data.summary || {};
+        if (viewMode === 'monthly_avg') {
+            return 'Avg/Mo';
+        }
+
+        if (summary.comparison_basis === 'aligned_to_current_year_latest_transaction') {
+            return 'YTD Total';
+        }
+
+        return 'Total';
+    }
+
     function handleYoyHeaderClick(columnName) {
         if (!sortState.currentData || !sortState.currentViewMode) return;
 
@@ -589,6 +626,8 @@
 
         const categories = Array.isArray(data.categories) ? data.categories : [];
         const years = data.summary?.years || [];
+        const comparisonNote = getYoyComparisonNote(data);
+        const valueColumnLabel = getYoyValueColumnLabel(data, viewMode);
 
         if (categories.length === 0) {
             setContainerMessage('yoy-comparison-container', 'No data available for the selected criteria.');
@@ -599,6 +638,7 @@
         const arrow = column => (sortState.column === column ? (sortState.order === 'asc' ? '▲' : '▼') : '');
 
         let html = `
+            ${comparisonNote ? `<p class="text-sm text-secondary mb-4">${escape(comparisonNote)}</p>` : ''}
             <div class="table-container">
             <div class="overflow-x-auto">
                 <table class="min-w-full">
@@ -613,7 +653,7 @@
             const yearStr = String(year);
             html += `
                 <th class="cursor-pointer select-none" data-sort-column="${yearStr}">
-                    ${yearStr} ${viewMode === 'monthly_avg' ? '(Avg/Mo)' : '(Total)'} ${arrow(yearStr)}
+                    ${yearStr} (${valueColumnLabel}) ${arrow(yearStr)}
                 </th>
             `;
         });
@@ -748,11 +788,12 @@
     function generateYearOverYearCSV(data, viewMode) {
         const categories = Array.isArray(data.categories) ? data.categories : [];
         const years = data.summary?.years || [];
+        const valueColumnLabel = getYoyValueColumnLabel(data, viewMode);
 
         let csv = 'Category,Type';
 
         years.forEach(year => {
-            csv += `,${year} ${viewMode === 'monthly_avg' ? 'Monthly Avg' : 'Total'}`;
+            csv += `,${year} ${valueColumnLabel}`;
         });
 
         if (years.length > 1) {

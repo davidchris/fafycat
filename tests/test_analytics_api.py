@@ -136,6 +136,79 @@ def test_client(test_db_with_yoy_data):
     shutil.rmtree(temp_model_dir, ignore_errors=True)
 
 
+@pytest.fixture
+def test_db_with_partial_current_year_yoy_data(temp_db_file):
+    """Create a test database with a partial current year for YoY comparison tests."""
+    engine = create_engine(f"sqlite:///{temp_db_file}", echo=False)
+    Base.metadata.create_all(engine)
+
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    session = SessionLocal()
+
+    session.add(CategoryORM(id=1, name="kindergeld", type="income", budget=0.0, is_active=True))
+
+    for month in range(1, 13):
+        session.add(
+            TransactionORM(
+                id=f"txn_2025_kindergeld_{month}",
+                date=date(2025, month, 1),
+                value_date=date(2025, month, 1),
+                name="Familienkasse",
+                purpose="Kindergeld",
+                amount=255.0,
+                currency="EUR",
+                category_id=1,
+                is_reviewed=True,
+                imported_at=datetime.now(),
+                import_batch="batch_2025",
+            )
+        )
+
+    for month in range(1, 4):
+        session.add(
+            TransactionORM(
+                id=f"txn_2026_kindergeld_{month}",
+                date=date(2026, month, 1),
+                value_date=date(2026, month, 1),
+                name="Familienkasse",
+                purpose="Kindergeld",
+                amount=259.0,
+                currency="EUR",
+                category_id=1,
+                is_reviewed=True,
+                imported_at=datetime.now(),
+                import_batch="batch_2026",
+            )
+        )
+
+    session.commit()
+    session.close()
+    engine.dispose()
+
+    yield temp_db_file
+
+
+@pytest.fixture
+def partial_current_year_test_client(test_db_with_partial_current_year_yoy_data):
+    """Create a test client for partial-current-year YoY scenarios."""
+    temp_model_dir = tempfile.mkdtemp()
+
+    os.environ["FAFYCAT_DB_URL"] = f"sqlite:///{test_db_with_partial_current_year_yoy_data}"
+    os.environ["FAFYCAT_ENV"] = "testing"
+    os.environ["FAFYCAT_MODEL_DIR"] = temp_model_dir
+
+    from main import create_app
+
+    app = create_app()
+
+    with TestClient(app) as client:
+        yield client
+
+    import shutil
+
+    shutil.rmtree(temp_model_dir, ignore_errors=True)
+
+
 class TestYearOverYearEndpoint:
     """Tests for /api/analytics/year-over-year endpoint."""
 
@@ -196,6 +269,22 @@ class TestYearOverYearEndpoint:
             assert "total" in year_data
             assert "monthly_avg" in year_data
             assert "transactions" in year_data
+
+    def test_yoy_marks_when_totals_are_aligned_to_partial_current_year(self, partial_current_year_test_client):
+        """YoY response should expose when totals are aligned to the current year's latest data date."""
+        response = partial_current_year_test_client.get("/api/analytics/year-over-year?years=2025,2026")
+        assert response.status_code == 200
+
+        data = response.json()
+        kindergeld = next(category for category in data["categories"] if category["name"] == "kindergeld")
+
+        assert kindergeld["yearly_data"]["2025"]["total"] == 765.0
+        assert kindergeld["yearly_data"]["2026"]["total"] == 777.0
+        assert data["summary"]["latest_transaction_date"] == "2026-03-01"
+        assert data["summary"]["current_year_is_partial"] is True
+        assert data["summary"]["comparison_basis"] == "aligned_to_current_year_latest_transaction"
+        assert data["summary"]["comparison_end_date"] == "2026-03-01"
+        assert data["summary"]["aligned_to_year"] == 2026
 
 
 class TestCategoryCumulativeEndpoint:

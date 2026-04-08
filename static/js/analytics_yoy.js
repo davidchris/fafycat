@@ -5,6 +5,23 @@
 
 // Uses shared THEME and toRgba from analytics.js
 
+function getYoyComparisonSuffix(summary, viewMode) {
+    if (!summary || summary.comparison_basis !== 'aligned_to_current_year_latest_transaction') {
+        return viewMode === 'monthly_avg' ? 'Monthly Average' : 'Total';
+    }
+
+    const dateString = summary.comparison_end_date;
+    const alignedYear = summary.aligned_to_year;
+    const parsed = dateString ? new Date(`${dateString}T00:00:00`) : null;
+    const formattedDate = parsed && !Number.isNaN(parsed.valueOf())
+        ? parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : 'current cutoff';
+
+    return viewMode === 'monthly_avg'
+        ? `Monthly Average through ${formattedDate}`
+        : `YTD Total through ${formattedDate} (${alignedYear})`;
+}
+
 /**
  * Update year-over-year comparison charts
  */
@@ -45,7 +62,8 @@ function updateYearOverYearBarChart(data, viewMode) {
     }
 
     const categories = data.categories.slice(0, 10); // Top 10 categories
-    const years = data.summary.years;
+    const summary = data.summary || {};
+    const years = summary.years;
 
     // Prepare datasets for each year
     const datasets = years.map((year, index) => {
@@ -89,7 +107,7 @@ function updateYearOverYearBarChart(data, viewMode) {
             plugins: {
                 title: {
                     display: true,
-                    text: `Year-over-Year Category Comparison (${viewMode === 'monthly_avg' ? 'Monthly Average' : 'Total'})`,
+                    text: `Year-over-Year Category Comparison (${getYoyComparisonSuffix(summary, viewMode)})`,
                     font: { size: 16 }
                 },
                 legend: {

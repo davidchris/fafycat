@@ -982,9 +982,15 @@ class AnalyticsService:
         if not years:
             return {"categories": [], "summary": {"years": [], "total_by_year": {}}}
 
-        # Determine consistent date period when current year is included
         current_year = date.today().year
-        end_date = AnalyticsService._get_current_year_end_date(session, current_year) if current_year in years else None
+        latest_transaction_date = (
+            AnalyticsService._get_current_year_end_date(session, current_year) if current_year in years else None
+        )
+        current_year_is_partial = bool(
+            latest_transaction_date
+            and (latest_transaction_date.month != 12 or latest_transaction_date.day != 31)
+        )
+        comparison_basis = "full_year"
 
         # Build base query
         query = (
@@ -1005,12 +1011,12 @@ class AnalyticsService:
             .filter(func.strftime("%Y", TransactionORM.date).in_([str(y) for y in years]))
         )
 
-        # Apply consistent date filtering when current year is included
-        if end_date:
+        if latest_transaction_date:
+            comparison_basis = "aligned_to_current_year_latest_transaction"
             date_conditions = [
                 and_(
                     func.strftime("%Y", TransactionORM.date) == str(year),
-                    TransactionORM.date <= date(year, end_date.month, end_date.day),
+                    TransactionORM.date <= date(year, latest_transaction_date.month, latest_transaction_date.day),
                 )
                 for year in years
             ]
@@ -1042,8 +1048,8 @@ class AnalyticsService:
                 }
 
             # Calculate months with data for accurate monthly average
-            query_start_date = date(year, 1, 1) if end_date else None
-            query_end_date = date(year, end_date.month, end_date.day) if end_date else None
+            query_start_date = date(year, 1, 1) if latest_transaction_date else None
+            query_end_date = date(year, latest_transaction_date.month, latest_transaction_date.day) if latest_transaction_date else None
             months_with_data = AnalyticsService._get_months_with_data(
                 session, category_id, year, start_date=query_start_date, end_date=query_end_date
             )
@@ -1074,6 +1080,11 @@ class AnalyticsService:
                 "years": sorted(years),
                 "total_by_year": {str(year): total for year, total in yearly_totals.items()},
                 "category_type_filter": category_type,
+                "latest_transaction_date": latest_transaction_date.isoformat() if latest_transaction_date else None,
+                "current_year_is_partial": current_year_is_partial,
+                "comparison_basis": comparison_basis,
+                "comparison_end_date": latest_transaction_date.isoformat() if latest_transaction_date else None,
+                "aligned_to_year": current_year if latest_transaction_date else None,
             },
         }
 
