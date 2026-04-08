@@ -6,6 +6,11 @@
 (function() {
     'use strict';
 
+    const analyticsPageConfig = {
+        defaultYear: new Date().getFullYear(),
+        latestTransactionDate: null
+    };
+
     const sortState = {
         column: null,
         order: 'asc',
@@ -25,6 +30,24 @@
         return formatLocalDate(new Date());
     }
 
+    function syncAnalyticsPageConfig(config) {
+        const normalizedConfig = config || {};
+        const defaultYear = Number(normalizedConfig.defaultYear);
+        analyticsPageConfig.defaultYear = Number.isFinite(defaultYear) ? defaultYear : new Date().getFullYear();
+        analyticsPageConfig.latestTransactionDate = normalizedConfig.latestTransactionDate || null;
+    }
+
+    function getDefaultAnalyticsYear() {
+        const configuredYear = Number(analyticsPageConfig.defaultYear);
+        return Number.isFinite(configuredYear) ? configuredYear : new Date().getFullYear();
+    }
+
+    function getLatestAnalyticsDate() {
+        return analyticsPageConfig.latestTransactionDate || todayLocalISO();
+    }
+
+    syncAnalyticsPageConfig(window.analyticsPageConfig);
+
     function monthEndLocalISO(year, month) {
         const lastDay = new Date(year, month, 0).getDate();
         return `${year}-${pad2(month)}-${pad2(lastDay)}`;
@@ -33,14 +56,14 @@
     function getYearSelection() {
         const yearSelector = document.getElementById('global-year-selector');
         const selectedYear = yearSelector ? yearSelector.value : 'ytd';
-        const currentYear = new Date().getFullYear();
+        const currentYear = getDefaultAnalyticsYear();
 
         if (selectedYear === 'ytd') {
             return {
                 selectedYear,
                 actualYear: currentYear,
                 startDate: `${currentYear}-01-01`,
-                endDate: todayLocalISO(),
+                endDate: getLatestAnalyticsDate(),
                 isYtd: true
             };
         }
@@ -109,9 +132,14 @@
         try {
             const data = await fetchJson('/api/analytics/available-years', 'Loading available years failed');
             years = Array.isArray(data.years) ? data.years : [];
-            currentYear = Number(data.current_year) || currentYear;
+            syncAnalyticsPageConfig({
+                defaultYear: data.default_year,
+                latestTransactionDate: data.latest_transaction_date
+            });
+            currentYear = getDefaultAnalyticsYear();
         } catch (error) {
             console.error(error.message);
+            syncAnalyticsPageConfig({ defaultYear: currentYear });
             years = [currentYear];
         }
 
@@ -818,6 +846,11 @@
 
     // Expose for compatibility with existing chart integration.
     window.updateCategoryCumulativeChart = updateCategoryCumulativeChart;
+
+    if (window.__ANALYTICS_PAGE_TEST_HOOKS__) {
+        window.__ANALYTICS_PAGE_TEST_HOOKS__.getYearSelection = getYearSelection;
+        window.__ANALYTICS_PAGE_TEST_HOOKS__.syncAnalyticsPageConfig = syncAnalyticsPageConfig;
+    }
 
     document.addEventListener('DOMContentLoaded', () => {
         initializePage().catch(error => {

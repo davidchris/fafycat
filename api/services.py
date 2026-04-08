@@ -1187,10 +1187,18 @@ class AnalyticsService:
 
         years = [int(row.year) for row in years_query.all()]
 
+        latest_transaction_date = session.query(func.max(TransactionORM.date)).scalar()
+        default_year = latest_transaction_date.year if latest_transaction_date else date.today().year
+
         # Get current year for default selection
         current_year = date.today().year
 
-        return {"years": years, "current_year": current_year}
+        return {
+            "years": years,
+            "current_year": current_year,
+            "default_year": default_year,
+            "latest_transaction_date": latest_transaction_date.isoformat() if latest_transaction_date else None,
+        }
 
 
 class BudgetService:

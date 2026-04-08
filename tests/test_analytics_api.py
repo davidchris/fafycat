@@ -249,6 +249,8 @@ class TestAvailableYearsEndpoint:
         data = response.json()
         assert "years" in data
         assert isinstance(data["years"], list)
+        assert "latest_transaction_date" in data
+        assert "default_year" in data
 
     def test_available_years_contains_test_data_years(self, test_client):
         """Test that available years includes our test data years."""
@@ -268,3 +270,12 @@ class TestAvailableYearsEndpoint:
         data = response.json()
         years = data["years"]
         assert years == sorted(years, reverse=True)
+
+    def test_available_years_reports_latest_transaction_date(self, test_client):
+        """Test available years returns metadata for the latest imported data point."""
+        response = test_client.get("/api/analytics/available-years")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["latest_transaction_date"] == "2024-12-15"
+        assert data["default_year"] == 2024
