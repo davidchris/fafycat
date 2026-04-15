@@ -18,6 +18,22 @@ def _apply_data_dir_override(data_dir: Path | None) -> None:
     os.environ.setdefault("FAFYCAT_EXPORT_DIR", str(resolved_data_dir / "exports"))
 
 
+def _legacy_database_url(data_dir: Path | None, dev: bool) -> str | None:
+    """Return the legacy repo-local database URL when appropriate.
+
+    Backward compatibility only applies to production `serve` with no explicit
+    database/data-dir override. Development mode retains the mode-specific DB.
+    """
+    if dev or data_dir is not None or "FAFYCAT_DB_URL" in os.environ:
+        return None
+
+    legacy_db = (Path.cwd() / "data" / "fafycat_prod.db").resolve()
+    if legacy_db.exists():
+        return f"sqlite:///{legacy_db}"
+
+    return None
+
+
 def _setup_dev_database() -> None:
     """Seed the dev database with synthetic data if empty."""
     from fafycat.api.services import CategoryService, TransactionService
@@ -55,6 +71,11 @@ def cmd_serve(args: argparse.Namespace) -> None:
     else:
         os.environ.setdefault("FAFYCAT_ENV", "production")
         db_name = "fafycat_prod.db"
+
+    if "FAFYCAT_DB_URL" not in os.environ:
+        legacy_db_url = _legacy_database_url(args.data_dir, args.dev)
+        if legacy_db_url is not None:
+            os.environ["FAFYCAT_DB_URL"] = legacy_db_url
 
     if "FAFYCAT_DB_URL" not in os.environ:
         from platformdirs import user_data_dir
