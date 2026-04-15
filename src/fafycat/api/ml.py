@@ -633,7 +633,7 @@ async def repredict_unreviewed_transactions(
         al_predictions = []
         for txn, prediction in zip(repredict_txns, predictions, strict=True):
             al_pred = TransactionPrediction(
-                transaction_id=txn.id,
+                transaction_id=str(txn.id),
                 predicted_category_id=prediction.predicted_category_id,
                 confidence_score=prediction.confidence_score,
                 feature_contributions=prediction.feature_contributions,

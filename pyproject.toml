@@ -52,6 +52,8 @@ Repository = "https://github.com/davidchris/fafycat"
 Issues = "https://github.com/davidchris/fafycat/issues"
 Documentation = "https://github.com/davidchris/fafycat#readme"
 
+[tool.uv]
+exclude-newer = "7 days"
 
 [tool.ruff]
 line-length = 120
@@ -125,7 +127,11 @@ unused-ignore-comment = "warn"
 # datetime.utcnow in SQLAlchemy Column defaults is acceptable pattern
 deprecated = "warn"
 
-# Exclude simulation notebooks and scripts from type checking
+# Relax type checking for experimental scripts and simulation notebooks.
+# These directories import optional ML deps (torch, sentence_transformers, transformers,
+# peft, mlx_lm, optuna, ...) declared in [dependency-groups] (experiments, mlx, finetune)
+# that are intentionally absent from the default .venv. Install with
+# `uv sync --group <name>` before running such a script.
 [[tool.ty.overrides]]
 include = ["simulations/", "scripts/"]
 
@@ -134,6 +140,8 @@ invalid-return-type = "ignore"
 invalid-assignment = "ignore"
 invalid-argument-type = "ignore"
 unresolved-reference = "ignore"
+unresolved-import = "ignore"
+not-subscriptable = "ignore"
 
 [tool.ty.terminal]
 output-format = "full"
