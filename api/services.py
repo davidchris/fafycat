@@ -987,8 +987,7 @@ class AnalyticsService:
             AnalyticsService._get_current_year_end_date(session, current_year) if current_year in years else None
         )
         current_year_is_partial = bool(
-            latest_transaction_date
-            and (latest_transaction_date.month != 12 or latest_transaction_date.day != 31)
+            latest_transaction_date and (latest_transaction_date.month != 12 or latest_transaction_date.day != 31)
         )
         comparison_basis = "full_year"
 
@@ -1049,7 +1048,11 @@ class AnalyticsService:
 
             # Calculate months with data for accurate monthly average
             query_start_date = date(year, 1, 1) if latest_transaction_date else None
-            query_end_date = date(year, latest_transaction_date.month, latest_transaction_date.day) if latest_transaction_date else None
+            query_end_date = (
+                date(year, latest_transaction_date.month, latest_transaction_date.day)
+                if latest_transaction_date
+                else None
+            )
             months_with_data = AnalyticsService._get_months_with_data(
                 session, category_id, year, start_date=query_start_date, end_date=query_end_date
             )
