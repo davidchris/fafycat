@@ -4,7 +4,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from web.components.layout import create_page_layout
+from fafycat.web.components.layout import create_page_layout
 
 
 def render_analytics_page(request: Request, session: Session) -> HTMLResponse:

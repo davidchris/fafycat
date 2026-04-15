@@ -4,7 +4,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.fafycat.core.database import CategoryORM
+from fafycat.core.database import CategoryORM
 
 
 XSS_PAYLOAD = "<img src=x onerror=alert(1)>"
@@ -76,7 +76,7 @@ class TestReviewPageXSS:
 
     def test_transaction_table_escapes_category_name(self):
         """Category names in the transaction table badge are escaped."""
-        from web.pages.review_page import _generate_transaction_table
+        from fafycat.web.pages.review_page import _generate_transaction_table
 
         categories = [CategoryORM(name=XSS_PAYLOAD, type="spending", budget=0.0)]
         transactions = [_FakeTransaction(predicted_category=XSS_PAYLOAD)]
@@ -88,7 +88,7 @@ class TestReviewPageXSS:
 
     def test_category_options_escapes_names(self):
         """Category names in filter dropdowns are escaped."""
-        from web.pages.review_page import _generate_category_options
+        from fafycat.web.pages.review_page import _generate_category_options
 
         categories = [CategoryORM(name=XSS_PAYLOAD, type="spending", budget=0.0)]
 
@@ -103,7 +103,7 @@ class TestSettingsPageXSS:
 
     def test_settings_category_name_escaped_in_js(self):
         """Category names are safely embedded in onclick handlers via json.dumps."""
-        from web.pages.settings_page import render_categories_management
+        from fafycat.web.pages.settings_page import render_categories_management
 
         xss_cat = CategoryORM(name=XSS_PAYLOAD, type="spending", budget=100.0)
         xss_cat.id = 1

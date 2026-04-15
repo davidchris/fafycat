@@ -5,6 +5,10 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.manual
+
 # Add project root to Python path for imports
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
@@ -14,11 +18,11 @@ os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_dev.db"
 os.environ["FAFYCAT_ENV"] = "development"
 
 from fastapi.testclient import TestClient
-from main import app
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import DatabaseManager, TransactionORM, CategoryORM
-from src.fafycat.core.models import TransactionInput
-from src.fafycat.data.csv_processor import CSVProcessor
+from fafycat.app import app
+from fafycat.core.config import AppConfig
+from fafycat.core.database import DatabaseManager, TransactionORM, CategoryORM
+from fafycat.core.models import TransactionInput
+from fafycat.data.csv_processor import CSVProcessor
 from datetime import date
 
 
@@ -214,7 +218,7 @@ def main():
     print("✅ All tests completed successfully")
 
     print("\n🚀 Next Steps:")
-    print("1. Start the dev server: uv run python run_dev.py")
+    print("1. Start the dev server: uv run fafycat serve --dev")
     print("2. Go to Settings page: http://localhost:8000/settings")
     print("3. Click 'Train ML Model Now' button")
     print("4. Observe auto-prediction workflow in action!")

@@ -38,15 +38,15 @@ os.environ["FAFYCAT_ENV"] = "production"
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from fafycat.core.config import AppConfig, MLConfig
+from fafycat.core.database import DatabaseManager
+from fafycat.ml.feature_extractor import FeatureExtractor
 from scripts.establish_baseline import (
     compute_brier_multiclass,
     compute_ece,
     compute_fold_metrics,
     load_reviewed_transactions,
 )
-from src.fafycat.core.config import AppConfig, MLConfig
-from src.fafycat.core.database import DatabaseManager
-from src.fafycat.ml.feature_extractor import FeatureExtractor
 
 # Suppress noisy warnings during CV
 warnings.filterwarnings("ignore", category=UserWarning, module="lightgbm")

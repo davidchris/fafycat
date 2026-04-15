@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.fafycat.core.models import ReviewPriority
+from fafycat.core.models import ReviewPriority
 
 
 class TransactionResponse(BaseModel):

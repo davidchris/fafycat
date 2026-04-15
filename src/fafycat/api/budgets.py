@@ -6,8 +6,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_db_session
-from api.services import BudgetService
+from fafycat.api.dependencies import get_db_session
+from fafycat.api.services import BudgetService
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
 

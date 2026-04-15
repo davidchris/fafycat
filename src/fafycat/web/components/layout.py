@@ -1,6 +1,6 @@
 """Layout components for web pages — Bauhaus dark mode."""
 
-from web.components.icons import (
+from fafycat.web.components.icons import (
     icon_analytics,
     icon_cat_brand,
     icon_export,

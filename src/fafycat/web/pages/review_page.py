@@ -4,17 +4,17 @@ import html
 
 from fastapi import Request
 
-from api.dependencies import get_db_manager
-from api.services import CategoryService, TransactionService
-from web.components.layout import create_page_layout
+from fafycat.api.dependencies import get_db_manager
+from fafycat.api.services import CategoryService, TransactionService
+from fafycat.web.components.layout import create_page_layout
 
 
 def _get_model_status_alert():
     """Get model status and return HTML alert if model needs training."""
     try:
         # Get ML status directly without HTTP call
-        from src.fafycat.core.config import AppConfig
-        from src.fafycat.core.database import DatabaseManager, TransactionORM
+        from fafycat.core.config import AppConfig
+        from fafycat.core.database import DatabaseManager, TransactionORM
 
         config = AppConfig()
         db_manager = DatabaseManager(config)
@@ -238,7 +238,7 @@ def render_review_page(request: Request):
             categories = CategoryService.get_categories(session)
 
             # Generate transaction table with pagination
-            from api.transactions import _generate_transaction_table_htmx
+            from fafycat.api.transactions import _generate_transaction_table_htmx
 
             transactions_html = _generate_transaction_table_htmx(
                 result["transactions"], categories, result["pagination_info"]

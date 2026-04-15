@@ -20,8 +20,8 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import DatabaseManager
+from fafycat.core.config import AppConfig
+from fafycat.core.database import DatabaseManager
 
 
 def reset_database(config: AppConfig) -> None:
@@ -130,7 +130,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Set environment for production database by default (matches run_prod.py)
+    # Set environment for production database by default (matches `fafycat serve`)
     if not args.dev_mode:
         os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_prod.db"
         os.environ["FAFYCAT_ENV"] = "production"
@@ -174,9 +174,9 @@ def main() -> None:
     print("=" * 50)
     print(f"Database location: {config.database.url}")
     if not args.dev_mode:
-        print("🚀 Start the application: uv run python run_prod.py")
+        print("🚀 Start the application: uv run fafycat serve")
     else:
-        print("🚀 Start the application: uv run python run_dev.py")
+        print("🚀 Start the application: uv run fafycat serve --dev")
     print("You can now start the application with fresh labeled data.")
 
 

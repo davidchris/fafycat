@@ -11,8 +11,8 @@ from pathlib import Path
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import BudgetPlanORM, CategoryORM, DatabaseManager
+from fafycat.core.config import AppConfig
+from fafycat.core.database import BudgetPlanORM, CategoryORM, DatabaseManager
 
 
 def migrate_yearly_budgets():

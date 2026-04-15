@@ -20,30 +20,34 @@ FafyCat is a privacy-focused financial transaction categorization tool that uses
 
 ### Installation
 
-1. **Clone the repository**
+1. **Install with uv**
+   ```bash
+   uv tool install git+https://github.com/davidchris/fafycat
+   ```
+
+2. **Or clone for development**
    ```bash
    git clone https://github.com/davidchris/fafycat.git
    cd fafycat
-   ```
-
-2. **Install dependencies**
-   ```bash
    uv sync
    ```
 
 3. **Configure environment** (optional)
    ```bash
    cp .env.example .env
-   # Edit .env to customize paths and settings
+   # Edit .env only if you want to override the defaults
    ```
 
 4. **Start the application**
    ```bash
-   # Development mode with sample data
-   uv run python run_dev.py
-   
-   # Production mode with real data
-   uv run python run_prod.py
+   # Start the packaged app
+   fafycat serve
+
+   # Development mode with sample data and hot reload
+   fafycat serve --dev
+
+   # If developing from a cloned checkout
+   uv run fafycat serve --dev
    ```
 
 5. **Open your browser**
@@ -153,16 +157,17 @@ Common bank formats supported:
 
 ### Environment Variables
 
-Create a `.env` file to customize your setup:
+Create a `.env` file only if you want to override the default user-data location:
 
 ```bash
-# Database location
-FAFYCAT_DB_URL=sqlite:///data/fafycat.db
+# Data defaults to your platform user-data directory
+# Override only if you want a custom location
+FAFYCAT_DATA_DIR=/path/to/fafycat-data
+FAFYCAT_EXPORT_DIR=/path/to/fafycat-data/exports
+FAFYCAT_MODEL_DIR=/path/to/fafycat-data/models
 
-# Data directories
-FAFYCAT_DATA_DIR=data
-FAFYCAT_EXPORT_DIR=data/exports
-FAFYCAT_MODEL_DIR=data/models
+# Optional explicit database override
+FAFYCAT_DB_URL=sqlite:////path/to/fafycat-data/fafycat.db
 
 # Server settings
 FAFYCAT_DEV_PORT=8001
@@ -172,9 +177,9 @@ FAFYCAT_HOST=127.0.0.1
 
 ### Database Management
 
-- **Development**: Uses `data/fafycat_dev.db` with synthetic test data
-- **Production**: Uses `data/fafycat_prod.db` with your real data
-- **Custom**: Set `FAFYCAT_DB_URL` to any SQLite path
+- **Default**: Uses your platform user-data directory
+- **Development**: `fafycat serve --dev` seeds synthetic test data
+- **Custom**: Set `FAFYCAT_DB_URL` or pass `--data-dir`
 
 ## 📈 Performance
 
@@ -205,6 +210,19 @@ uvx ty check
 ### API Documentation
 - FastAPI docs: http://localhost:8000/docs
 - OpenAPI schema: http://localhost:8000/openapi.json
+
+## 📦 Project Layout
+
+All shipped application code lives under `src/fafycat/`:
+
+- `src/fafycat/app.py` for the FastAPI app factory
+- `src/fafycat/cli.py` for the packaged CLI
+- `src/fafycat/api/` for API routes and services
+- `src/fafycat/web/` for HTML routes, pages, and components
+- `src/fafycat/core/` for config, database, and shared models
+- `src/fafycat/data/` for CSV processing
+- `src/fafycat/ml/` for the ML pipeline
+- `src/fafycat/static/` for packaged static assets
 
 ## 🤝 Contributing
 

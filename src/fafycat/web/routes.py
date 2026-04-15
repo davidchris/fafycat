@@ -5,12 +5,12 @@ import html
 from fastapi import APIRouter, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from api.dependencies import get_db_manager
-from api.models import TransactionUpdate
-from api.services import TransactionService
-from web.components.alerts import create_info_alert, create_purple_alert, create_upload_result_alert
-from web.components.buttons import create_action_button, create_button_group
-from web.components.layout import create_page_layout
+from fafycat.api.dependencies import get_db_manager
+from fafycat.api.models import TransactionUpdate
+from fafycat.api.services import TransactionService
+from fafycat.web.components.alerts import create_info_alert, create_purple_alert, create_upload_result_alert
+from fafycat.web.components.buttons import create_action_button, create_button_group
+from fafycat.web.components.layout import create_page_layout
 
 router = APIRouter()
 
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.get("/", response_class=HTMLResponse)
 async def home_page(request: Request) -> HTMLResponse:
     """Home page with workflow navigation."""
-    from web.pages.home_page import render_home_page
+    from fafycat.web.pages.home_page import render_home_page
 
     return HTMLResponse(create_page_layout("FafyCat - Family Finance Categorizer", render_home_page()))
 
@@ -32,7 +32,7 @@ async def main_app(request: Request) -> Response:
 @router.get("/import", response_class=HTMLResponse)
 async def import_page(request: Request) -> HTMLResponse:
     """Import transactions page."""
-    from web.pages.import_page import render_import_page
+    from fafycat.web.pages.import_page import render_import_page
 
     return render_import_page(request)
 
@@ -40,7 +40,7 @@ async def import_page(request: Request) -> HTMLResponse:
 @router.get("/review", response_class=HTMLResponse)
 async def review_page(request: Request) -> HTMLResponse:
     """Review and categorize transactions page."""
-    from web.pages.review_page import render_review_page
+    from fafycat.web.pages.review_page import render_review_page
 
     return render_review_page(request)
 
@@ -48,8 +48,8 @@ async def review_page(request: Request) -> HTMLResponse:
 @router.get("/export", response_class=HTMLResponse)
 async def export_page(request: Request) -> HTMLResponse:
     """Export data configuration page."""
-    from api.dependencies import get_db_manager
-    from web.pages.export_page import create_export_page
+    from fafycat.api.dependencies import get_db_manager
+    from fafycat.web.pages.export_page import create_export_page
 
     # Get database manager and session
     db_manager = get_db_manager(request)
@@ -61,8 +61,8 @@ async def export_page(request: Request) -> HTMLResponse:
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request) -> HTMLResponse:
     """Settings and categories page."""
-    from api.dependencies import get_db_manager
-    from web.pages.settings_page import render_settings_page
+    from fafycat.api.dependencies import get_db_manager
+    from fafycat.web.pages.settings_page import render_settings_page
 
     # Get database manager and session
     db_manager = get_db_manager(request)
@@ -74,8 +74,8 @@ async def settings_page(request: Request) -> HTMLResponse:
 @router.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request) -> HTMLResponse:
     """Analytics and financial insights page."""
-    from api.dependencies import get_db_manager
-    from web.pages.analytics_page import render_analytics_page
+    from fafycat.api.dependencies import get_db_manager
+    from fafycat.web.pages.analytics_page import render_analytics_page
 
     # Get database manager and session
     db_manager = get_db_manager(request)
@@ -91,14 +91,14 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
     import tempfile
     from pathlib import Path
 
-    from api.dependencies import get_db_manager
+    from fafycat.api.dependencies import get_db_manager
 
     # Get database manager and session
     db_manager = get_db_manager(request)
 
     try:
         with db_manager.get_session() as db_session:
-            from src.fafycat.data.csv_processor import CSVProcessor
+            from fafycat.data.csv_processor import CSVProcessor
 
             # Save uploaded file temporarily
             file_content = await file.read()
@@ -126,7 +126,7 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
             new_count, duplicate_count = processor.save_transactions(transactions)
 
             # Auto-predict categories for new transactions if model is available
-            from api.upload import empty_categorization_summary, predict_transaction_categories
+            from fafycat.api.upload import empty_categorization_summary, predict_transaction_categories
 
             if new_count > 0:
                 cat_summary = predict_transaction_categories(db_session, transactions, new_count)
@@ -235,8 +235,8 @@ async def categorize_transaction_web(
 @router.post("/api/export/summary", response_class=HTMLResponse)
 async def export_summary_htmx(request: Request) -> str:
     """HTMX endpoint for export summary updates."""
-    from api.export import ExportService
-    from web.pages.export_page import create_export_summary_response
+    from fafycat.api.export import ExportService
+    from fafycat.web.pages.export_page import create_export_summary_response
 
     db_manager = get_db_manager(request)
 
@@ -264,7 +264,7 @@ async def export_summary_htmx(request: Request) -> str:
         parsed_categories: list[str] | None = [c for c in raw_categories if isinstance(c, str)] or None
 
         with db_manager.get_session() as db_session:
-            from api.export import ExportService
+            from fafycat.api.export import ExportService
 
             # Mock summary for now - in real implementation this would call the actual summary endpoint logic
             summary_data = {

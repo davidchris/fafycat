@@ -9,10 +9,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_db_session
-from api.models import UploadResponse
-from src.fafycat.core.models import ReviewPriority
-from src.fafycat.data.csv_processor import CSVProcessor
+from fafycat.api.dependencies import get_db_session
+from fafycat.api.models import UploadResponse
+from fafycat.core.models import ReviewPriority
+from fafycat.data.csv_processor import CSVProcessor
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -44,8 +44,8 @@ def predict_transaction_categories(db: Session, transactions: list, new_count: i
 
 def _perform_predictions(db: Session, transactions: list) -> dict:
     """Perform ML predictions on transactions."""
-    from api.ml import get_categorizer
-    from src.fafycat.core.database import TransactionORM
+    from fafycat.api.ml import get_categorizer
+    from fafycat.core.database import TransactionORM
 
     categorizer = get_categorizer(db)
 
@@ -71,7 +71,7 @@ def _perform_predictions(db: Session, transactions: list) -> dict:
 
 def _convert_to_transaction_inputs(new_txns):
     """Convert ORM transactions to TransactionInput objects."""
-    from src.fafycat.core.models import TransactionInput
+    from fafycat.core.models import TransactionInput
 
     txn_inputs = []
     for txn in new_txns:
@@ -89,8 +89,8 @@ def _convert_to_transaction_inputs(new_txns):
 
 def _apply_hybrid_categorization_strategy(db: Session, new_txns, predictions) -> dict:
     """Apply hybrid categorization using confidence scores and active learning."""
-    from src.fafycat.core.models import TransactionPrediction
-    from src.fafycat.ml.active_learning import ActiveLearningSelector
+    from fafycat.core.models import TransactionPrediction
+    from fafycat.ml.active_learning import ActiveLearningSelector
 
     # Get active learning strategic selections
     al_selector = ActiveLearningSelector(db)
@@ -110,7 +110,7 @@ def _apply_hybrid_categorization_strategy(db: Session, new_txns, predictions) ->
     )
 
     # Apply categorization logic
-    from api.ml import get_auto_approve_threshold
+    from fafycat.api.ml import get_auto_approve_threshold
 
     summary = empty_categorization_summary()
     confidence_threshold = get_auto_approve_threshold(db)
@@ -238,7 +238,7 @@ async def get_upload_preview(upload_id: str, db: Session = Depends(get_db_sessio
     session_data = upload_sessions[upload_id]
 
     # Get first few transactions for preview
-    from src.fafycat.core.database import TransactionORM
+    from fafycat.core.database import TransactionORM
 
     transactions = (
         db.query(TransactionORM).filter(TransactionORM.id.in_(session_data["transaction_ids"])).limit(5).all()

@@ -1,10 +1,15 @@
+[build-system]
+requires = ["uv_build>=0.11.5,<0.12.0"]
+build-backend = "uv_build"
+
 [project]
 name = "fafycat"
 version = "0.1.0"
 description = "Local-first transaction categorization with ML"
 readme = "README.md"
 requires-python = ">=3.13"
-license = {text = "Apache License 2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     {name = "David Wilde"},
 ]
@@ -16,7 +21,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
     "Topic :: Office/Business :: Financial :: Accounting",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
@@ -29,6 +33,8 @@ dependencies = [
     "lightgbm>=4.6.0",
     "numpy>=2.3.0",
     "pandas>=2.3.0",
+    "platformdirs>=4.0",
+    "pydantic>=2.0",
     "python-dateutil>=2.9.0.post0",
     "python-fasthtml>=0.12.19",
     "requests>=2.32.4",
@@ -38,7 +44,7 @@ dependencies = [
 ]
 
 [project.scripts]
-fafycat = "cli:main"
+fafycat = "fafycat.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/davidchris/fafycat"
@@ -46,6 +52,8 @@ Repository = "https://github.com/davidchris/fafycat"
 Issues = "https://github.com/davidchris/fafycat/issues"
 Documentation = "https://github.com/davidchris/fafycat#readme"
 
+[tool.uv]
+exclude-newer = "7 days"
 
 [tool.ruff]
 line-length = 120
@@ -80,21 +88,20 @@ line-ending = "auto"
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"api/*.py" = ["B008"]
-"api/upload.py" = ["E501", "W291"]  # Allow long lines and whitespace for HTML content in upload responses
-"api/transactions.py" = ["E501", "W291"]  # Allow long lines for HTML content in HTMX responses
-"cli.py" = ["T201"]  # Allow print statements in CLI
-"run_*.py" = ["T201"]  # Allow print statements in runner scripts
+"src/fafycat/api/*.py" = ["B008"]
+"src/fafycat/api/upload.py" = ["E501", "W291"]  # Allow long lines and whitespace for HTML content in upload responses
+"src/fafycat/api/transactions.py" = ["E501", "W291"]  # Allow long lines for HTML content in HTMX responses
+"src/fafycat/cli.py" = ["T201"]  # Allow print statements in CLI
 "scripts/*.py" = ["T201", "C901"]  # Allow print statements and complex functions in scripts
 "src/fafycat/ml/*.py" = ["T201"]  # Allow print statements in ML modules for training feedback
 "src/fafycat/data/*.py" = ["C901", "B007"]  # Allow complex functions and unused loop vars in data processing
-"web/components/*.py" = ["E501", "W291"]  # Allow long lines for HTML content in layout components
-"web/pages/*.py" = ["E501", "W291", "W293"]  # Allow long lines and whitespace for HTML/SVG content
+"src/fafycat/web/components/*.py" = ["E501", "W291"]  # Allow long lines for HTML content in layout components
+"src/fafycat/web/pages/*.py" = ["E501", "W291", "W293"]  # Allow long lines and whitespace for HTML/SVG content
 "tests/*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for tests
 "test_*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for test files
 
 [tool.ty.src]
-exclude = ["tests/", "*.ipynb", ".ipynb_checkpoints/"]
+exclude = ["tests/", "*.ipynb", ".ipynb_checkpoints/", ".claude/"]
 
 [tool.ty.environment]
 python = ".venv"
@@ -140,8 +147,20 @@ not-subscriptable = "ignore"
 output-format = "full"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "-m", "not manual and not requires_server and not perf",
+]
 markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "slow: tests that take >2s (deselect with '-m \"not slow\"')",
+    "manual: hardcodes real dev DB paths or mutates filesystem; opt-in only (use '-m manual')",
+    "requires_server: needs a live HTTP server on localhost; opt-in only",
+    "perf: performance/benchmark tests; opt-in only",
+    "integration: exercises multiple layers (DB + API + ML); hermetic but heavy",
 ]
 
 [dependency-groups]

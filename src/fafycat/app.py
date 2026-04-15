@@ -3,14 +3,17 @@
 import logging
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import DatabaseManager
+from fafycat.core.config import AppConfig
+from fafycat.core.database import DatabaseManager
+
+_PACKAGE_DIR = Path(__file__).resolve().parent
 
 
 class _TrainingStatusAccessLogFilter(logging.Filter):
@@ -58,16 +61,16 @@ def create_app() -> FastAPI:
         return response
 
     # Mount static files
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    app.mount("/static", StaticFiles(directory=_PACKAGE_DIR / "static"), name="static")
 
     # Include API routes
-    from api.analytics import router as analytics_router
-    from api.budgets import router as budgets_router
-    from api.categories import router as categories_router
-    from api.export import router as export_router
-    from api.ml import router as ml_router
-    from api.transactions import router as transactions_router
-    from api.upload import router as upload_router
+    from fafycat.api.analytics import router as analytics_router
+    from fafycat.api.budgets import router as budgets_router
+    from fafycat.api.categories import router as categories_router
+    from fafycat.api.export import router as export_router
+    from fafycat.api.ml import router as ml_router
+    from fafycat.api.transactions import router as transactions_router
+    from fafycat.api.upload import router as upload_router
 
     app.include_router(transactions_router, prefix="/api")
     app.include_router(categories_router, prefix="/api")
@@ -78,7 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(analytics_router)
 
     # Include web routes (FastHTML)
-    from web.routes import router as web_router
+    from fafycat.web.routes import router as web_router
 
     app.include_router(web_router)
 
@@ -89,4 +92,4 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("fafycat.app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

@@ -5,8 +5,8 @@ from datetime import date, datetime, UTC
 
 import pytest
 
-from src.fafycat.core.database import CategoryORM, TransactionORM
-from src.fafycat.core.models import ReviewPriority
+from fafycat.core.database import CategoryORM, TransactionORM
+from fafycat.core.models import ReviewPriority
 
 
 def _make_txn_id(name: str, d: date, amount: float) -> str:
@@ -236,51 +236,5 @@ class TestEnrichedUploadResponse:
             csv_path.unlink()
 
 
-class TestCLIImport:
-    """Tests for the CLI import command."""
-
-    def test_cmd_import_json_output_shape(self, db_session, monkeypatch):
-        """cmd_import prints JSON with expected keys."""
-        import io
-        import json
-        import tempfile
-        from pathlib import Path
-        from unittest.mock import patch
-
-        csv_content = "date,name,purpose,amount,currency\n2025-01-01,Test Store,Purchase,-10.00,EUR\n"
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-            f.write(csv_content)
-            csv_path = Path(f.name)
-
-        try:
-            import argparse
-
-            args = argparse.Namespace(file=str(csv_path), command="import")
-
-            # Capture stdout
-            captured = io.StringIO()
-
-            # Patch DatabaseManager to use our test session
-            with (
-                patch("cli.AppConfig") as mock_config,
-                patch("cli.DatabaseManager") as mock_db_manager,
-                patch("sys.stdout", captured),
-            ):
-                mock_config.return_value.ensure_dirs.return_value = None
-                mock_db_manager_instance = mock_db_manager.return_value
-                mock_db_manager_instance.create_tables.return_value = None
-                mock_db_manager_instance.get_session.return_value.__enter__ = lambda self: db_session
-                mock_db_manager_instance.get_session.return_value.__exit__ = lambda self, *a: None
-
-                from cli import cmd_import
-
-                cmd_import(args)
-
-            output = captured.getvalue()
-            result = json.loads(output)
-            assert "filename" in result
-            assert "rows_processed" in result
-            assert "transactions_imported" in result
-            assert "duplicates_skipped" in result
-        finally:
-            csv_path.unlink()
+# TestCLIImport moved to tests/test_cli.py and rewritten to invoke the CLI
+# via subprocess so it works on both sides of the packaging refactor.

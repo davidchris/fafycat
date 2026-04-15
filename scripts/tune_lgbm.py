@@ -32,10 +32,10 @@ os.environ["FAFYCAT_ENV"] = "production"
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.fafycat.core.config import AppConfig, MLConfig
-from src.fafycat.core.database import DatabaseManager, TransactionORM
-from src.fafycat.core.models import TransactionInput
-from src.fafycat.ml.feature_extractor import FeatureExtractor
+from fafycat.core.config import AppConfig, MLConfig
+from fafycat.core.database import DatabaseManager, TransactionORM
+from fafycat.core.models import TransactionInput
+from fafycat.ml.feature_extractor import FeatureExtractor
 
 warnings.filterwarnings("ignore", category=UserWarning, module="lightgbm")
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")

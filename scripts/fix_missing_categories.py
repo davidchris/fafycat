@@ -12,8 +12,8 @@ os.environ["FAFYCAT_ENV"] = "production"
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import CategoryORM, DatabaseManager, TransactionORM
+from fafycat.core.config import AppConfig
+from fafycat.core.database import CategoryORM, DatabaseManager, TransactionORM
 
 
 def fix_missing_categories() -> None:
@@ -146,7 +146,7 @@ def fix_missing_categories() -> None:
             print("✨ Great! You now have enough data to train the ML model.")
             print("📝 Next steps:")
             print("  1. Run: python scripts/train_model.py")
-            print("  2. Or use the Streamlit app: uv run python run_prod.py")
+            print("  2. Or start the app: uv run fafycat serve")
         else:
             print(f"⚠️  Still need {50 - total_categorized} more categorized transactions for training.")
 

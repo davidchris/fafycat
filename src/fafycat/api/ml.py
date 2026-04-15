@@ -8,8 +8,8 @@ from typing import cast
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_db_session
-from api.ml_training_job import (
+from fafycat.api.dependencies import get_db_session
+from fafycat.api.ml_training_job import (
     TrainingPhase,
     complete_job,
     create_training_job,
@@ -21,23 +21,34 @@ from api.ml_training_job import (
     set_job_running,
     update_job_phase,
 )
-from api.models import (
+from fafycat.api.models import (
     BulkPredictRequest,
     BulkPredictResponse,
     TransactionPredictRequest,
     TransactionPredictResponse,
 )
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import AppSettingsORM, CategoryORM
-from src.fafycat.core.models import TransactionInput
-from src.fafycat.ml.categorizer import TransactionCategorizer
-from src.fafycat.ml.ensemble_categorizer import EnsembleCategorizer
+from fafycat.core.config import AppConfig
+from fafycat.core.database import AppSettingsORM, CategoryORM
+from fafycat.core.models import TransactionInput
+from fafycat.ml.categorizer import TransactionCategorizer
+from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 
 # Global categorizer instance (lazy-loaded)
 _categorizer: TransactionCategorizer | EnsembleCategorizer | None = None
 _config: AppConfig | None = None
+
+
+def reset_singletons() -> None:
+    """Clear the module-level categorizer and config cache.
+
+    Exposed so tests can build a fresh app with no cached ML state without
+    reaching into private module attributes.
+    """
+    global _categorizer, _config
+    _categorizer = None
+    _config = None
 
 
 def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategorizer | EnsembleCategorizer:
@@ -243,7 +254,7 @@ async def get_ml_status(
 ) -> dict:
     """Get ML model status and training readiness information."""
     try:
-        from src.fafycat.core.database import TransactionORM
+        from fafycat.core.database import TransactionORM
 
         config = AppConfig()
         model_filename = "ensemble_categorizer.pkl" if config.ml.use_ensemble else "categorizer.pkl"
@@ -327,7 +338,7 @@ def _run_training_sync() -> None:
         _config.ensure_dirs()
 
         # Create a separate database manager and session for training
-        from src.fafycat.core.database import DatabaseManager
+        from fafycat.core.database import DatabaseManager
 
         training_db_manager = DatabaseManager(_config)
 
@@ -458,8 +469,8 @@ async def predict_unpredicted_transactions(
 ) -> dict:
     """Run ML predictions on transactions that don't have predictions yet."""
     try:
-        from src.fafycat.core.database import TransactionORM
-        from src.fafycat.core.models import TransactionInput
+        from fafycat.core.database import TransactionORM
+        from fafycat.core.models import TransactionInput
 
         # Get transactions without predictions
         try:
@@ -494,8 +505,8 @@ async def predict_unpredicted_transactions(
         predictions = categorizer.predict_with_confidence(txn_inputs)
 
         # Use active learning to set review priorities (same logic as upload)
-        from src.fafycat.core.models import TransactionPrediction
-        from src.fafycat.ml.active_learning import ActiveLearningSelector
+        from fafycat.core.models import TransactionPrediction
+        from fafycat.ml.active_learning import ActiveLearningSelector
 
         al_selector = ActiveLearningSelector(db)
 
@@ -575,8 +586,8 @@ async def repredict_unreviewed_transactions(
 ) -> dict:
     """Re-run ML predictions on unreviewed transactions that already have predictions."""
     try:
-        from src.fafycat.core.database import TransactionORM
-        from src.fafycat.core.models import TransactionInput
+        from fafycat.core.database import TransactionORM
+        from fafycat.core.models import TransactionInput
 
         # Get unreviewed transactions that already have predictions
         repredict_txns = (
@@ -613,8 +624,8 @@ async def repredict_unreviewed_transactions(
         predictions = categorizer.predict_with_confidence(txn_inputs)
 
         # Use active learning to set review priorities
-        from src.fafycat.core.models import TransactionPrediction
-        from src.fafycat.ml.active_learning import ActiveLearningSelector
+        from fafycat.core.models import TransactionPrediction
+        from fafycat.ml.active_learning import ActiveLearningSelector
 
         al_selector = ActiveLearningSelector(db)
 

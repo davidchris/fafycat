@@ -5,6 +5,10 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.manual
+
 # Add project root to Python path for imports
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
@@ -14,7 +18,7 @@ os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_dev.db"
 os.environ["FAFYCAT_ENV"] = "development"
 
 from fastapi.testclient import TestClient
-from main import app
+from fafycat.app import app
 
 
 def test_settings_page_basic():

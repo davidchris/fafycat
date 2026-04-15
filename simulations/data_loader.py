@@ -11,7 +11,7 @@ from simulations.data_sources import DataSource
 
 # Optional FafyCat import - allows module to be imported without FafyCat installed
 try:
-    from src.fafycat.core.database import CategoryORM, TransactionORM
+    from fafycat.core.database import CategoryORM, TransactionORM
 
     FAFYCAT_AVAILABLE = True
 except ImportError:

@@ -1,9 +1,9 @@
 """Tests for ML training functionality in settings page."""
 
 from unittest.mock import patch, MagicMock
-from src.fafycat.core.database import TransactionORM, CategoryORM
-from src.fafycat.core.models import TransactionInput
-from src.fafycat.data.csv_processor import CSVProcessor
+from fafycat.core.database import TransactionORM, CategoryORM
+from fafycat.core.models import TransactionInput
+from fafycat.data.csv_processor import CSVProcessor
 from datetime import date
 
 

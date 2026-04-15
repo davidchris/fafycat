@@ -8,11 +8,11 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_db_session
-from api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
-from api.services import CategoryService, TransactionService
-from src.fafycat.core.models import ReviewPriority
-from web.components.pagination import create_full_pagination
+from fafycat.api.dependencies import get_db_session
+from fafycat.api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
+from fafycat.api.services import CategoryService, TransactionService
+from fafycat.core.models import ReviewPriority
+from fafycat.web.components.pagination import create_full_pagination
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 

@@ -12,10 +12,10 @@ os.environ["FAFYCAT_ENV"] = "production"
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import DatabaseManager
-from src.fafycat.ml.categorizer import TransactionCategorizer
-from src.fafycat.ml.ensemble_categorizer import EnsembleCategorizer
+from fafycat.core.config import AppConfig
+from fafycat.core.database import DatabaseManager
+from fafycat.ml.categorizer import TransactionCategorizer
+from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
 
 
 def main() -> None:
