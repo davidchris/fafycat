@@ -40,6 +40,17 @@ _categorizer: TransactionCategorizer | EnsembleCategorizer | None = None
 _config: AppConfig | None = None
 
 
+def reset_singletons() -> None:
+    """Clear the module-level categorizer and config cache.
+
+    Exposed so tests can build a fresh app with no cached ML state without
+    reaching into private module attributes.
+    """
+    global _categorizer, _config
+    _categorizer = None
+    _config = None
+
+
 def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategorizer | EnsembleCategorizer:
     """Get or create the ML categorizer instance."""
     global _categorizer, _config

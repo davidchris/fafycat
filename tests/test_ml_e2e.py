@@ -21,14 +21,13 @@ from src.fafycat.ml.categorizer import TransactionCategorizer
 from src.fafycat.ml.ensemble_categorizer import EnsembleCategorizer
 
 # ---------------------------------------------------------------------------
-# Class-scoped fixtures (train once per class — avoids cross-class leakage
-# that module scope allowed; ~6s added runtime, order-independent).
+# Module-scoped fixtures (train once, share across tests in this file)
 # ---------------------------------------------------------------------------
 
 CATEGORY_NAMES = ["groceries", "restaurants", "salary", "rent", "utilities"]
 
 
-@pytest.fixture(scope="class")
+@pytest.fixture(scope="module")
 def ml_engine():
     """Create a temporary SQLite database engine for ML tests."""
     db_fd, db_path = tempfile.mkstemp(suffix=".db")
@@ -42,7 +41,7 @@ def ml_engine():
     os.unlink(db_path)
 
 
-@pytest.fixture(scope="class")
+@pytest.fixture(scope="module")
 def ml_session(ml_engine):
     """Create a session from the ML test engine."""
     Session = sessionmaker(autocommit=False, autoflush=False, bind=ml_engine)
@@ -53,7 +52,7 @@ def ml_session(ml_engine):
     session.close()
 
 
-@pytest.fixture(scope="class")
+@pytest.fixture(scope="module")
 def seeded_db(ml_session):
     """Seed the database with synthetic transactions.
 
@@ -76,7 +75,7 @@ def seeded_db(ml_session):
     yield ml_session, transactions
 
 
-@pytest.fixture(scope="class")
+@pytest.fixture(scope="module")
 def ml_config():
     """Return default MLConfig (85 txns > min_training_samples=50)."""
     return MLConfig()

@@ -48,6 +48,23 @@ def test_db_url_honors_env_var(tmp_data_dir: Path, app_config) -> None:
     assert app_config.database.url.startswith("sqlite:///")
 
 
+def test_app_config_with_no_env_vars_uses_defaults() -> None:
+    """Without any ``FAFYCAT_*`` env vars set, ``AppConfig()`` constructs
+    cleanly and exposes path-typed defaults plus a ``sqlite:///`` URL.
+
+    The autouse ``_isolate_fafycat_env`` fixture has already stripped the
+    env. Exact default values differ pre/post refactor (repo-local vs
+    ``platformdirs``); this test locks the weaker invariant that holds
+    both ways.
+    """
+    AppConfig = _app_config_cls()
+    cfg = AppConfig()
+    assert isinstance(cfg.data_dir, Path)
+    assert isinstance(cfg.export_dir, Path)
+    assert isinstance(cfg.ml.model_dir, Path)
+    assert cfg.database.url.startswith("sqlite:///")
+
+
 def test_ensure_dirs_creates_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``ensure_dirs`` creates the data, models, and exports directories."""
     data_dir = tmp_path / "fresh"

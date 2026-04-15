@@ -148,8 +148,7 @@ def app_factory(tmp_data_dir: Path) -> Callable:
     """
 
     def _build():
-        _ml_mod._categorizer = None
-        _ml_mod._config = None
+        _ml_mod.reset_singletons()
         return create_app()
 
     return _build
@@ -186,9 +185,10 @@ def cli_runner(tmp_data_dir: Path) -> Callable[..., subprocess.CompletedProcess]
     module = _get_cli_module()
 
     def _run(*args: str, check: bool = False, timeout: int = 60) -> subprocess.CompletedProcess:
+        # Inherit the parent env and only prepend import paths — repo root
+        # (so `main`, `cli`, `api.*` resolve pre-refactor) and `src/` (so
+        # `fafycat.*` / `src.fafycat.*` resolves). Nothing else is touched.
         env = {**os.environ}
-        # Ensure the subprocess can find `src.fafycat.*` pre-refactor and
-        # `fafycat.*` post-refactor without requiring an editable install step.
         existing_pp = env.get("PYTHONPATH", "")
         paths = [str(_ROOT), str(_SRC)]
         if existing_pp:

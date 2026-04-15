@@ -6,6 +6,7 @@ and the ``FAFYCAT_DATA_DIR`` env-var contract. Each assertion holds both
 pre- and post-refactor.
 """
 
+import shutil
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -60,3 +61,20 @@ def test_openapi_schema_is_generatable(test_client):
     resp = test_client.get("/openapi.json")
     assert resp.status_code == 200
     assert resp.json()["info"]["title"] == "FafyCat - Family Finance Categorizer"
+
+
+def test_create_app_recreates_missing_model_dir(tmp_data_dir: Path, app_factory):
+    """If the model dir is wiped between builds, ``ensure_dirs`` recreates it.
+
+    Guards against a refactor that stops calling ``config.ensure_dirs()``
+    — without it, later ML model saves would blow up on a missing path.
+    """
+    model_dir = tmp_data_dir / "models"
+    app_factory()
+    assert model_dir.is_dir()
+
+    shutil.rmtree(model_dir)
+    assert not model_dir.exists()
+
+    app_factory()
+    assert model_dir.is_dir()

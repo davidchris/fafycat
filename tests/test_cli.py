@@ -8,6 +8,8 @@ these assertions hold on both sides of the packaging refactor.
 
 import json
 
+import pytest
+
 
 def test_cli_help_exits_zero(cli_runner):
     result = cli_runner("--help")
@@ -28,11 +30,27 @@ def test_cli_import_nonexistent_file_prints_error_json(cli_runner):
     assert "not found" in payload["error"].lower()
 
 
+def test_cli_import_malformed_csv_prints_error_json(cli_runner, tmp_path):
+    """A CSV whose columns don't match the expected schema exits non-zero
+    with a structured error payload — never a bare traceback."""
+    csv = tmp_path / "bad.csv"
+    csv.write_text("foo,bar,baz\n1,2,3\n")
+
+    result = cli_runner("import", str(csv))
+    assert result.returncode != 0
+    payload = json.loads(result.stdout)
+    assert "error" in payload
+
+
+@pytest.mark.integration
 def test_cli_import_valid_csv_prints_expected_json_shape(cli_runner, tmp_path):
     """The CLI's public JSON contract: these four keys must be present.
 
     Any breakage of this shape is a user-visible regression, so the
     assertion is part of the refactor's green-light set.
+
+    Marked ``integration`` because it exercises CSV parsing, DB writes,
+    and ML prediction in a single subprocess.
     """
     csv = tmp_path / "sample.csv"
     csv.write_text("date,name,purpose,amount,currency\n2025-01-01,Test Store,Purchase,-10.00,EUR\n")
