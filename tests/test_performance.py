@@ -39,7 +39,7 @@ def _verify_server_running(base_url: str) -> None:
             pytest.skip("Server not responding properly")
     except requests.exceptions.RequestException:
         print(f"❌ Cannot connect to server at {base_url}")
-        print("   Make sure to run: uv run python run_dev.py")
+        print("   Make sure to run: uv run fafycat serve --dev")
         pytest.skip("Cannot connect to server")
 
     print("✅ Server is running\n")

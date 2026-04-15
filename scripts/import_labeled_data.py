@@ -12,10 +12,10 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 # Module imports after path manipulation (required by E402)
-from src.fafycat.core.config import AppConfig  # noqa: E402
-from src.fafycat.core.database import DatabaseManager  # noqa: E402
-from src.fafycat.core.models import TransactionInput  # noqa: E402
-from src.fafycat.data.csv_processor import CSVProcessor  # noqa: E402
+from fafycat.core.config import AppConfig  # noqa: E402
+from fafycat.core.database import DatabaseManager  # noqa: E402
+from fafycat.core.models import TransactionInput  # noqa: E402
+from fafycat.data.csv_processor import CSVProcessor  # noqa: E402
 
 # Set production environment only if not already set
 if "FAFYCAT_DB_URL" not in os.environ:
@@ -182,7 +182,7 @@ def import_all_labeled_data(data_path: Path | None = None) -> None:
     if total_imported > 0:
         print("\n✨ Great! Your labeled data is now imported.")
         print("📝 Next steps:")
-        print("  1. Launch production mode: uv run python run_prod.py")
+        print("  1. Launch production mode: uv run fafycat serve")
         print("  2. Go to Settings → Categories to review discovered categories")
         print("  3. Set budgets for your categories (optional)")
         print("  4. Go to Settings → Train New Model")

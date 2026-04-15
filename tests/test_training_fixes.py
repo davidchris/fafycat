@@ -4,7 +4,7 @@ Covers:
 - categorizer.fit() adapts calibration folds to the smallest class count,
   so training no longer crashes when a class has < 5 samples.
 - LightGBM is configured with verbose=-1 (suppresses "no further splits" spam).
-- main.py installs a uvicorn access-log filter that drops /api/ml/training-status lines.
+- fafycat.app installs a uvicorn access-log filter that drops /api/ml/training-status lines.
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from main import _TrainingStatusAccessLogFilter
-from src.fafycat.core.config import MLConfig
-from src.fafycat.core.database import Base
-from src.fafycat.core.models import TransactionInput
-from src.fafycat.ml.categorizer import TransactionCategorizer
+from fafycat.app import _TrainingStatusAccessLogFilter
+from fafycat.core.config import MLConfig
+from fafycat.core.database import Base
+from fafycat.core.models import TransactionInput
+from fafycat.ml.categorizer import TransactionCategorizer
 
 
 @pytest.fixture

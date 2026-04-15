@@ -5,8 +5,8 @@ from datetime import date, datetime, UTC
 
 import pytest
 
-from src.fafycat.core.database import CategoryORM, TransactionORM
-from src.fafycat.core.models import ReviewPriority
+from fafycat.core.database import CategoryORM, TransactionORM
+from fafycat.core.models import ReviewPriority
 
 
 def _make_txn_id(name: str, d: date, amount: float) -> str:

@@ -4,13 +4,29 @@ import os
 from pathlib import Path
 from typing import Any
 
+from platformdirs import user_data_dir
 from pydantic import BaseModel, Field
+
+
+def _default_data_dir() -> Path:
+    """Return the default application data directory."""
+    return Path(os.getenv("FAFYCAT_DATA_DIR", user_data_dir("fafycat")))
+
+
+def _default_database_url() -> str:
+    """Return the default database URL."""
+    return os.getenv("FAFYCAT_DB_URL", f"sqlite:///{_default_data_dir() / 'fafycat.db'}")
+
+
+def _default_model_dir() -> Path:
+    """Return the default model directory."""
+    return Path(os.getenv("FAFYCAT_MODEL_DIR", _default_data_dir() / "models"))
 
 
 class DatabaseConfig(BaseModel):
     """Database configuration."""
 
-    url: str = Field(default_factory=lambda: os.getenv("FAFYCAT_DB_URL", "sqlite:///data/fafycat.db"))
+    url: str = Field(default_factory=_default_database_url)
     echo: bool = Field(default_factory=lambda: os.getenv("FAFYCAT_DB_ECHO", "false").lower() == "true")
 
 
@@ -71,7 +87,7 @@ class MLConfig(BaseModel):
 
     auto_approve_threshold: float = 0.95
 
-    model_dir: Path = Field(default_factory=lambda: Path(os.getenv("FAFYCAT_MODEL_DIR", "data/models")))
+    model_dir: Path = Field(default_factory=_default_model_dir)
     min_training_samples: int = 50
 
 
@@ -81,14 +97,27 @@ class AppConfig(BaseModel):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     ml: MLConfig = Field(default_factory=MLConfig)
 
-    data_dir: Path = Field(default_factory=lambda: Path(os.getenv("FAFYCAT_DATA_DIR", "data")))
-    export_dir: Path = Field(default_factory=lambda: Path(os.getenv("FAFYCAT_EXPORT_DIR", "data/exports")))
+    data_dir: Path = Field(default_factory=_default_data_dir)
+    export_dir: Path | None = Field(default=None)
 
     max_import_batch_size: int = 10000
     default_currency: str = "EUR"
 
+    def model_post_init(self, __context: Any) -> None:
+        """Derive dependent paths after initialization."""
+        if "database" not in self.model_fields_set and "FAFYCAT_DB_URL" not in os.environ:
+            self.database.url = f"sqlite:///{self.data_dir / 'fafycat.db'}"
+
+        if "ml" not in self.model_fields_set and "FAFYCAT_MODEL_DIR" not in os.environ:
+            self.ml.model_dir = self.data_dir / "models"
+
+        if "export_dir" not in self.model_fields_set and "FAFYCAT_EXPORT_DIR" not in os.environ:
+            self.export_dir = self.data_dir / "exports"
+        elif self.export_dir is None:
+            self.export_dir = Path(os.getenv("FAFYCAT_EXPORT_DIR", self.data_dir / "exports"))
+
     def ensure_dirs(self) -> None:
         """Create necessary directories."""
-        self.data_dir.mkdir(exist_ok=True)
-        self.export_dir.mkdir(exist_ok=True)
-        self.ml.model_dir.mkdir(exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.export_dir.mkdir(parents=True, exist_ok=True)
+        self.ml.model_dir.mkdir(parents=True, exist_ok=True)

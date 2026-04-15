@@ -1,3 +1,7 @@
+[build-system]
+requires = ["uv_build>=0.11.5,<0.12.0"]
+build-backend = "uv_build"
+
 [project]
 name = "fafycat"
 version = "0.1.0"
@@ -29,6 +33,8 @@ dependencies = [
     "lightgbm>=4.6.0",
     "numpy>=2.3.0",
     "pandas>=2.3.0",
+    "platformdirs>=4.0",
+    "pydantic>=2.0",
     "python-dateutil>=2.9.0.post0",
     "python-fasthtml>=0.12.19",
     "requests>=2.32.4",
@@ -38,7 +44,7 @@ dependencies = [
 ]
 
 [project.scripts]
-fafycat = "cli:main"
+fafycat = "fafycat.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/davidchris/fafycat"
@@ -80,16 +86,15 @@ line-ending = "auto"
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"api/*.py" = ["B008"]
-"api/upload.py" = ["E501", "W291"]  # Allow long lines and whitespace for HTML content in upload responses
-"api/transactions.py" = ["E501", "W291"]  # Allow long lines for HTML content in HTMX responses
-"cli.py" = ["T201"]  # Allow print statements in CLI
-"run_*.py" = ["T201"]  # Allow print statements in runner scripts
+"src/fafycat/api/*.py" = ["B008"]
+"src/fafycat/api/upload.py" = ["E501", "W291"]  # Allow long lines and whitespace for HTML content in upload responses
+"src/fafycat/api/transactions.py" = ["E501", "W291"]  # Allow long lines for HTML content in HTMX responses
+"src/fafycat/cli.py" = ["T201"]  # Allow print statements in CLI
 "scripts/*.py" = ["T201", "C901"]  # Allow print statements and complex functions in scripts
 "src/fafycat/ml/*.py" = ["T201"]  # Allow print statements in ML modules for training feedback
 "src/fafycat/data/*.py" = ["C901", "B007"]  # Allow complex functions and unused loop vars in data processing
-"web/components/*.py" = ["E501", "W291"]  # Allow long lines for HTML content in layout components
-"web/pages/*.py" = ["E501", "W291", "W293"]  # Allow long lines and whitespace for HTML/SVG content
+"src/fafycat/web/components/*.py" = ["E501", "W291"]  # Allow long lines for HTML content in layout components
+"src/fafycat/web/pages/*.py" = ["E501", "W291", "W293"]  # Allow long lines and whitespace for HTML/SVG content
 "tests/*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for tests
 "test_*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for test files
 

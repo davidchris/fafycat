@@ -7,8 +7,8 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import DatabaseManager
+from fafycat.core.config import AppConfig
+from fafycat.core.database import DatabaseManager
 
 
 def main() -> None:

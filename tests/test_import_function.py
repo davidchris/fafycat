@@ -21,7 +21,7 @@ os.environ["FAFYCAT_ENV"] = "development"
 def test_import_function():
     """Test the import page function."""
     try:
-        from web.pages.import_page import _get_ml_status_sync
+        from fafycat.web.pages.import_page import _get_ml_status_sync
 
         print("Testing _get_ml_status_sync()...")
 
@@ -35,7 +35,7 @@ def test_import_function():
         traceback.print_exc()
 
     try:
-        from web.pages.import_page import _get_import_model_status_alert
+        from fafycat.web.pages.import_page import _get_import_model_status_alert
 
         print("\nTesting _get_import_model_status_alert()...")
 

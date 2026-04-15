@@ -12,8 +12,8 @@ os.environ["FAFYCAT_ENV"] = "production"
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import DatabaseManager
+from fafycat.core.config import AppConfig
+from fafycat.core.database import DatabaseManager
 
 
 def main() -> None:
@@ -34,7 +34,7 @@ def main() -> None:
     print("\n📝 Next steps:")
     print("1. Import your labeled transaction data: uv run scripts/import_labeled_data.py")
     print("   OR create categories manually through the UI")
-    print("2. Launch production mode: uv run python run_prod.py")
+    print("2. Launch production mode: uv run fafycat serve")
     print("3. Go to Settings → Categories to review and set budgets")
     print("4. Train the model with your data")
 

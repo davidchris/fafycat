@@ -42,15 +42,15 @@ os.environ["FAFYCAT_ENV"] = "production"
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from fafycat.core.config import AppConfig, MLConfig
+from fafycat.core.database import CategoryORM, DatabaseManager
+from fafycat.core.models import TransactionInput
+from fafycat.ml.categorizer import TransactionCategorizer
+from fafycat.ml.naive_bayes_classifier import NaiveBayesTextClassifier
 from scripts.establish_baseline import (
     align_probas,
     load_reviewed_transactions,
 )
-from src.fafycat.core.config import AppConfig, MLConfig
-from src.fafycat.core.database import CategoryORM, DatabaseManager
-from src.fafycat.core.models import TransactionInput
-from src.fafycat.ml.categorizer import TransactionCategorizer
-from src.fafycat.ml.naive_bayes_classifier import NaiveBayesTextClassifier
 
 # Suppress noisy warnings during CV
 warnings.filterwarnings("ignore", category=UserWarning, module="lightgbm")

@@ -6,8 +6,8 @@ from datetime import date, timedelta
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from src.fafycat.core.database import get_categories
-from web.components.layout import create_page_layout
+from fafycat.core.database import get_categories
+from fafycat.web.components.layout import create_page_layout
 
 
 def create_export_page(request: Request, db_session: Session):

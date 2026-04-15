@@ -1,6 +1,13 @@
 """Home page — Bauhaus gateway to the FafyCat workflow."""
 
-from web.components.icons import icon_analytics, icon_cat_brand, icon_export, icon_import, icon_review, icon_settings
+from fafycat.web.components.icons import (
+    icon_analytics,
+    icon_cat_brand,
+    icon_export,
+    icon_import,
+    icon_review,
+    icon_settings,
+)
 
 
 def render_home_page() -> str:

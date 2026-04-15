@@ -3,9 +3,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_db_session
-from api.models import CategoryCreate, CategoryResponse, CategoryUpdate
-from api.services import CategoryService
+from fafycat.api.dependencies import get_db_session
+from fafycat.api.models import CategoryCreate, CategoryResponse, CategoryUpdate
+from fafycat.api.services import CategoryService
 
 router = APIRouter(prefix="/categories", tags=["categories"])
 

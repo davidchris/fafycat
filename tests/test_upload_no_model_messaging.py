@@ -1,7 +1,7 @@
 """Tests for upload messaging when no ML model is available."""
 
 import io
-from src.fafycat.core.database import TransactionORM, CategoryORM
+from fafycat.core.database import TransactionORM, CategoryORM
 
 
 class TestUploadNoModelMessaging:

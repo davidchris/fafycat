@@ -2,9 +2,9 @@
 
 from unittest.mock import patch, MagicMock
 from sqlalchemy import text
-from src.fafycat.core.database import TransactionORM, CategoryORM
-from src.fafycat.core.models import TransactionInput
-from src.fafycat.data.csv_processor import CSVProcessor
+from fafycat.core.database import TransactionORM, CategoryORM
+from fafycat.core.models import TransactionInput
+from fafycat.data.csv_processor import CSVProcessor
 from datetime import date
 
 

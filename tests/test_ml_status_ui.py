@@ -4,10 +4,10 @@ import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
-from main import app
-from src.fafycat.core.database import TransactionORM, CategoryORM
-from src.fafycat.core.models import TransactionInput
-from src.fafycat.data.csv_processor import CSVProcessor
+from fafycat.app import app
+from fafycat.core.database import TransactionORM, CategoryORM
+from fafycat.core.models import TransactionInput
+from fafycat.data.csv_processor import CSVProcessor
 from datetime import date
 
 
@@ -72,7 +72,7 @@ class TestMLStatusAPI:
         assert status["reviewed_transactions"] == 60
         assert status["status"] == "No model found - ready to train"
 
-    @patch("api.ml.get_categorizer")
+    @patch("fafycat.api.ml.get_categorizer")
     def test_ml_status_model_loaded(self, mock_get_categorizer, test_client, db_session):
         """Test ML status when model is loaded and working."""
         # Mock a working categorizer
@@ -147,7 +147,7 @@ class TestMLStatusAlerts:
         assert "alert alert-warning" in html
         assert "ready for training" in html
 
-    @patch("api.ml.get_categorizer")
+    @patch("fafycat.api.ml.get_categorizer")
     @patch("pathlib.Path.exists")
     def test_import_page_model_status_alert_model_ready(self, mock_exists, mock_get_categorizer, test_client):
         """Test import page shows success when model is working."""

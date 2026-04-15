@@ -129,8 +129,8 @@ def mock_categorizer():
 @pytest.fixture
 def test_client(shared_engine, test_db, mock_categorizer, app_factory):
     """Create a test client with mocked dependencies."""
-    from api.dependencies import get_db_session
-    from api.ml import get_categorizer
+    from fafycat.api.dependencies import get_db_session
+    from fafycat.api.ml import get_categorizer
 
     app = app_factory()
 
@@ -287,8 +287,8 @@ def test_predict_without_model(app_factory):
 
 def test_prediction_error_handling(shared_engine, test_db, app_factory):
     """Test error handling when prediction fails."""
-    from api.dependencies import get_db_session
-    from api.ml import get_categorizer
+    from fafycat.api.dependencies import get_db_session
+    from fafycat.api.ml import get_categorizer
 
     app = app_factory()
 

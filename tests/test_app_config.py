@@ -1,33 +1,13 @@
-"""Contract tests for ``AppConfig`` env-var resolution.
+"""Contract tests for ``AppConfig`` env-var resolution."""
 
-The packaging refactor changes ``AppConfig`` default values (data goes to
-``platformdirs.user_data_dir("fafycat")`` instead of a repo-local ``data/``
-directory). The override-via-env-var contract is the invariant — these
-tests lock it in so the refactor can't silently regress it.
-"""
-
-import importlib
 from pathlib import Path
 
 import pytest
-
-
-def _app_config_cls():
-    """Return the ``AppConfig`` class from whichever import path works.
-
-    Pre-refactor: ``src.fafycat.core.config``. Post-refactor:
-    ``fafycat.core.config``. Tests don't care which — they only exercise
-    public surface.
-    """
-    try:
-        return importlib.import_module("fafycat.core.config").AppConfig
-    except ImportError:
-        return importlib.import_module("src.fafycat.core.config").AppConfig
+from fafycat.core.config import AppConfig
 
 
 @pytest.fixture
 def app_config(tmp_data_dir: Path):
-    AppConfig = _app_config_cls()
     return AppConfig()
 
 
@@ -49,15 +29,7 @@ def test_db_url_honors_env_var(tmp_data_dir: Path, app_config) -> None:
 
 
 def test_app_config_with_no_env_vars_uses_defaults() -> None:
-    """Without any ``FAFYCAT_*`` env vars set, ``AppConfig()`` constructs
-    cleanly and exposes path-typed defaults plus a ``sqlite:///`` URL.
-
-    The autouse ``_isolate_fafycat_env`` fixture has already stripped the
-    env. Exact default values differ pre/post refactor (repo-local vs
-    ``platformdirs``); this test locks the weaker invariant that holds
-    both ways.
-    """
-    AppConfig = _app_config_cls()
+    """Without any ``FAFYCAT_*`` env vars set, ``AppConfig()`` constructs cleanly."""
     cfg = AppConfig()
     assert isinstance(cfg.data_dir, Path)
     assert isinstance(cfg.export_dir, Path)
@@ -74,7 +46,6 @@ def test_ensure_dirs_creates_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("FAFYCAT_EXPORT_DIR", str(data_dir / "exports"))
     data_dir.mkdir()
 
-    AppConfig = _app_config_cls()
     cfg = AppConfig()
     cfg.ensure_dirs()
 

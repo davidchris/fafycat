@@ -2,7 +2,7 @@
 
 import io
 from fastapi.testclient import TestClient
-from src.fafycat.core.database import TransactionORM, CategoryORM
+from fafycat.core.database import TransactionORM, CategoryORM
 
 
 class TestUploadProgressHTMX:

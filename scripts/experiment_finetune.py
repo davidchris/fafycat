@@ -35,14 +35,14 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from fafycat.core.config import AppConfig
+from fafycat.core.database import DatabaseManager
 from scripts.establish_baseline import (
     compute_brier_multiclass,
     compute_ece,
     compute_fold_metrics,
     load_reviewed_transactions,
 )
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import DatabaseManager
 
 # Suppress noisy warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="lightgbm")

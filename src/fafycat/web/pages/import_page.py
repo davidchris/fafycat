@@ -2,7 +2,7 @@
 
 from fastapi import Request
 
-from web.components.layout import create_page_layout
+from fafycat.web.components.layout import create_page_layout
 
 
 def _get_ml_status_sync():
@@ -12,8 +12,8 @@ def _get_ml_status_sync():
 
         start_time = time.time()
 
-        from src.fafycat.core.config import AppConfig
-        from src.fafycat.core.database import DatabaseManager, TransactionORM
+        from fafycat.core.config import AppConfig
+        from fafycat.core.database import DatabaseManager, TransactionORM
 
         config = AppConfig()
         db_manager = DatabaseManager(config)

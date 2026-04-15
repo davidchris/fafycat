@@ -13,12 +13,12 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.fafycat.core.config import MLConfig
-from src.fafycat.core.database import Base, CategoryORM
-from src.fafycat.core.models import ModelMetrics, TransactionInput, TransactionPrediction
-from src.fafycat.data.csv_processor import CSVProcessor, create_synthetic_transactions
-from src.fafycat.ml.categorizer import TransactionCategorizer
-from src.fafycat.ml.ensemble_categorizer import EnsembleCategorizer
+from fafycat.core.config import MLConfig
+from fafycat.core.database import Base, CategoryORM
+from fafycat.core.models import ModelMetrics, TransactionInput, TransactionPrediction
+from fafycat.data.csv_processor import CSVProcessor, create_synthetic_transactions
+from fafycat.ml.categorizer import TransactionCategorizer
+from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
 
 # ---------------------------------------------------------------------------
 # Module-scoped fixtures (train once, share across tests in this file)

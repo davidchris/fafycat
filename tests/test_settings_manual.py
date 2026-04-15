@@ -18,7 +18,7 @@ os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_dev.db"
 os.environ["FAFYCAT_ENV"] = "development"
 
 from fastapi.testclient import TestClient
-from main import app
+from fafycat.app import app
 
 
 def test_settings_page_basic():

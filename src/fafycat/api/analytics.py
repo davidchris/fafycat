@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_db_session
-from api.services import AnalyticsService
+from fafycat.api.dependencies import get_db_session
+from fafycat.api.services import AnalyticsService
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -189,7 +189,7 @@ async def get_category_cumulative_data(
 async def get_categories(session: Session = Depends(get_db_session)) -> dict[str, Any]:
     """Get all active categories for selection."""
     try:
-        from api.services import CategoryService
+        from fafycat.api.services import CategoryService
 
         categories = CategoryService.get_categories(session)
         return {"categories": categories}

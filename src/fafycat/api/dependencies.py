@@ -4,8 +4,8 @@ from collections.abc import Generator
 
 from fastapi import Request
 
-from src.fafycat.core.config import AppConfig
-from src.fafycat.core.database import DatabaseManager
+from fafycat.core.config import AppConfig
+from fafycat.core.database import DatabaseManager
 
 
 def get_config(request: Request) -> AppConfig:

@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-04-01T07:03:45.552819Z"
+exclude-newer = "2026-04-08T21:13:12.155813Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -517,13 +517,15 @@ wheels = [
 [[package]]
 name = "fafycat"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "lightgbm" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "platformdirs" },
+    { name = "pydantic" },
     { name = "python-dateutil" },
     { name = "python-fasthtml" },
     { name = "requests" },
@@ -569,6 +571,8 @@ requires-dist = [
     { name = "lightgbm", specifier = ">=4.6.0" },
     { name = "numpy", specifier = ">=2.3.0" },
     { name = "pandas", specifier = ">=2.3.0" },
+    { name = "platformdirs", specifier = ">=4.0" },
+    { name = "pydantic", specifier = ">=2.0" },
     { name = "python-dateutil", specifier = ">=2.9.0.post0" },
     { name = "python-fasthtml", specifier = ">=0.12.19" },
     { name = "requests", specifier = ">=2.32.4" },
