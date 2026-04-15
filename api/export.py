@@ -113,7 +113,7 @@ class ExportService:
                 if "category_type" in df.columns:
                     group_cols.append("category_type")
 
-                agg_dict = {"amount": ["count", "sum", "mean"]}
+                agg_dict: dict[str, list[str] | str] = {"amount": ["count", "sum", "mean"]}
                 if "confidence_score" in df.columns:
                     agg_dict["confidence_score"] = "mean"
 

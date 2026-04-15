@@ -5,7 +5,11 @@
 - run python commands with `uv run python ...`
 - **Lint**: `ruff check` (configured for line length 120, Python 3.13+)
 - **Format**: `ruff format`
-- **Type Check**: `ty check` (strict typing enabled)
+- **Type Check**: `ty check` (strict typing enabled). `scripts/` and `simulations/` are
+  type-checked with `unresolved-import` ignored — they import optional ML deps from
+  `[dependency-groups]` (`experiments`, `mlx`, `finetune`) that are not in the default
+  `.venv`. Install the relevant group with `uv sync --group <name>` before running such a
+  script.
 - **Run Tests**: `uv run pytest` (when implemented)
 - **Test Coverage**: Tests should be in `tests/` directory
 - use puppeteer to verify UI functionality
