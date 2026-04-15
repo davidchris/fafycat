@@ -119,5 +119,9 @@ class AppConfig(BaseModel):
     def ensure_dirs(self) -> None:
         """Create necessary directories."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.export_dir.mkdir(parents=True, exist_ok=True)
+        export_dir = self.export_dir
+        if export_dir is None:
+            export_dir = self.data_dir / "exports"
+            self.export_dir = export_dir
+        export_dir.mkdir(parents=True, exist_ok=True)
         self.ml.model_dir.mkdir(parents=True, exist_ok=True)
