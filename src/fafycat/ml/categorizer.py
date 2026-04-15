@@ -207,18 +207,19 @@ class TransactionCategorizer:
         text_features = X_df["text_combined"].fillna("").values
 
         if self._has_combined_vectorizer:
+            assert self.word_vectorizer is not None and self.svd is not None
             # Combined char + word TF-IDF → SVD (keeps sparse until SVD)
             if fit:
                 X_char = self.char_vectorizer.fit_transform(text_features)
-                X_word = self.word_vectorizer.fit_transform(text_features)  # type: ignore[union-attr]
+                X_word = self.word_vectorizer.fit_transform(text_features)
                 X_text_sparse = sparse_hstack([X_char, X_word])
-                X_text = self.svd.fit_transform(X_text_sparse)  # type: ignore[union-attr]
+                X_text = self.svd.fit_transform(X_text_sparse)
                 self.feature_names = numerical_features + [f"svd_{i}" for i in range(X_text.shape[1])]
             else:
                 X_char = self.char_vectorizer.transform(text_features)
-                X_word = self.word_vectorizer.transform(text_features)  # type: ignore[union-attr]
+                X_word = self.word_vectorizer.transform(text_features)
                 X_text_sparse = sparse_hstack([X_char, X_word])
-                X_text = self.svd.transform(X_text_sparse)  # type: ignore[union-attr]
+                X_text = self.svd.transform(X_text_sparse)
         else:
             # Legacy single-vectorizer path (for old saved models)
             if fit:
