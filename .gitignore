@@ -16,3 +16,24 @@ wheels/
 .DS_Store
 .ipynb_checkpoints/
 data/
+
+# Local Claude Code & MCP state
+.claude/settings.local.json
+.claude/launch.json
+.playwright-mcp/
+
+# Personal notes / planning (not intended for the public repo)
+scratch_pads/
+bank_reconciliation/
+product-plans/
+*-code-review.md
+
+# Notebooks live in the working tree, not in the repo
+*.ipynb
+
+# Ad-hoc CSV exports / local financial data (root only — tests and
+# fixtures may legitimately ship CSVs deeper in the tree)
+/*.csv
+
+# Screenshots from local UI verification runs (root only)
+/*.png
