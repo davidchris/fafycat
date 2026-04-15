@@ -6,6 +6,8 @@ import requests
 import sys
 import pytest
 
+pytestmark = [pytest.mark.requires_server, pytest.mark.perf]
+
 
 def test_page_performance():
     """Test loading times of main pages."""

@@ -134,8 +134,19 @@ unresolved-reference = "ignore"
 output-format = "full"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "-m", "not manual and not requires_server and not perf",
+]
 markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "slow: tests that take >2s (deselect with '-m \"not slow\"')",
+    "manual: hardcodes real dev DB paths or mutates filesystem; opt-in only (use '-m manual')",
+    "requires_server: needs a live HTTP server on localhost; opt-in only",
+    "perf: performance/benchmark tests; opt-in only",
+    "integration: exercises multiple layers (DB + API + ML); hermetic but heavy",
 ]
 
 [dependency-groups]

@@ -127,11 +127,12 @@ def mock_categorizer():
 
 
 @pytest.fixture
-def test_client(shared_engine, test_db, mock_categorizer):
+def test_client(shared_engine, test_db, mock_categorizer, app_factory):
     """Create a test client with mocked dependencies."""
-    from main import create_app
+    from api.dependencies import get_db_session
+    from api.ml import get_categorizer
 
-    app = create_app()
+    app = app_factory()
 
     # Create session factory for the shared engine
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=shared_engine)
@@ -147,10 +148,6 @@ def test_client(shared_engine, test_db, mock_categorizer):
     # Override categorizer dependency
     def get_test_categorizer():
         return mock_categorizer
-
-    # Patch dependencies
-    from api.dependencies import get_db_session
-    from api.ml import get_categorizer
 
     app.dependency_overrides[get_db_session] = get_test_db
     app.dependency_overrides[get_categorizer] = get_test_categorizer
@@ -274,11 +271,9 @@ def test_predict_invalid_request(test_client):
     assert response.status_code == 422  # Validation error
 
 
-def test_predict_without_model():
+def test_predict_without_model(app_factory):
     """Test prediction when no model is available."""
-    from main import create_app
-
-    app = create_app()
+    app = app_factory()
 
     # Don't override the categorizer dependency so it tries to load real model
     with TestClient(app) as client:
@@ -290,11 +285,12 @@ def test_predict_without_model():
         # In production, this could be either True or False depending on if model was trained
 
 
-def test_prediction_error_handling(shared_engine, test_db):
+def test_prediction_error_handling(shared_engine, test_db, app_factory):
     """Test error handling when prediction fails."""
-    from main import create_app
+    from api.dependencies import get_db_session
+    from api.ml import get_categorizer
 
-    app = create_app()
+    app = app_factory()
 
     # Create session factory for the shared engine
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=shared_engine)
@@ -314,10 +310,6 @@ def test_prediction_error_handling(shared_engine, test_db):
 
     def get_failing_categorizer():
         return failing_categorizer
-
-    # Patch dependencies
-    from api.dependencies import get_db_session
-    from api.ml import get_categorizer
 
     app.dependency_overrides[get_db_session] = get_test_db
     app.dependency_overrides[get_categorizer] = get_failing_categorizer

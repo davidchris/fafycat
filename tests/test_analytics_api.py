@@ -1,8 +1,7 @@
 """Tests for Analytics API endpoints."""
 
-import os
-import tempfile
 from datetime import date, datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,19 +11,22 @@ from sqlalchemy.orm import sessionmaker
 from fafycat.core.database import Base, CategoryORM, TransactionORM  # noqa: F401 - sessionmaker used
 
 
-@pytest.fixture(scope="function")
-def temp_db_file():
-    """Create a temporary database file."""
-    db_fd, db_path = tempfile.mkstemp(suffix=".db")
-    os.close(db_fd)
-    yield db_path
-    os.unlink(db_path)
+@pytest.fixture
+def yoy_db_file(tmp_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Pre-seeded YoY database file at ``tmp_data_dir/yoy.db``.
+
+    Overrides ``FAFYCAT_DB_URL`` so the app uses this seeded DB instead of
+    the default ``tmp_data_dir/test.db``.
+    """
+    db_path = tmp_data_dir / "yoy.db"
+    monkeypatch.setenv("FAFYCAT_DB_URL", f"sqlite:///{db_path}")
+    return db_path
 
 
 @pytest.fixture
-def test_db_with_yoy_data(temp_db_file):
+def test_db_with_yoy_data(yoy_db_file: Path) -> Path:
     """Create a test database with multi-year transaction data for YoY testing."""
-    engine = create_engine(f"sqlite:///{temp_db_file}", echo=False)
+    engine = create_engine(f"sqlite:///{yoy_db_file}", echo=False)
     Base.metadata.create_all(engine)
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -110,36 +112,21 @@ def test_db_with_yoy_data(temp_db_file):
     session.close()
     engine.dispose()
 
-    yield temp_db_file
+    return yoy_db_file
 
 
 @pytest.fixture
-def test_client(test_db_with_yoy_data):
-    """Create a test client with multi-year data."""
-    temp_model_dir = tempfile.mkdtemp()
-
-    # Set environment variables BEFORE importing the app
-    os.environ["FAFYCAT_DB_URL"] = f"sqlite:///{test_db_with_yoy_data}"
-    os.environ["FAFYCAT_ENV"] = "testing"
-    os.environ["FAFYCAT_MODEL_DIR"] = temp_model_dir
-
-    from main import create_app
-
-    app = create_app()
-
+def test_client(test_db_with_yoy_data, app_factory):  # noqa: ARG001 - fixture dep ensures DB seeded
+    """Test client wired to the pre-seeded multi-year YoY database."""
+    app = app_factory()
     with TestClient(app) as client:
         yield client
 
-    # Cleanup
-    import shutil
-
-    shutil.rmtree(temp_model_dir, ignore_errors=True)
-
 
 @pytest.fixture
-def test_db_with_partial_current_year_yoy_data(temp_db_file):
+def test_db_with_partial_current_year_yoy_data(yoy_db_file: Path) -> Path:
     """Create a test database with a partial current year for YoY comparison tests."""
-    engine = create_engine(f"sqlite:///{temp_db_file}", echo=False)
+    engine = create_engine(f"sqlite:///{yoy_db_file}", echo=False)
     Base.metadata.create_all(engine)
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -185,28 +172,15 @@ def test_db_with_partial_current_year_yoy_data(temp_db_file):
     session.close()
     engine.dispose()
 
-    yield temp_db_file
+    return yoy_db_file
 
 
 @pytest.fixture
-def partial_current_year_test_client(test_db_with_partial_current_year_yoy_data):
-    """Create a test client for partial-current-year YoY scenarios."""
-    temp_model_dir = tempfile.mkdtemp()
-
-    os.environ["FAFYCAT_DB_URL"] = f"sqlite:///{test_db_with_partial_current_year_yoy_data}"
-    os.environ["FAFYCAT_ENV"] = "testing"
-    os.environ["FAFYCAT_MODEL_DIR"] = temp_model_dir
-
-    from main import create_app
-
-    app = create_app()
-
+def partial_current_year_test_client(test_db_with_partial_current_year_yoy_data, app_factory):  # noqa: ARG001
+    """Test client wired to the partial-current-year YoY database."""
+    app = app_factory()
     with TestClient(app) as client:
         yield client
-
-    import shutil
-
-    shutil.rmtree(temp_model_dir, ignore_errors=True)
 
 
 class TestYearOverYearEndpoint:
