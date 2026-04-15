@@ -6,10 +6,6 @@ resolution-markers = [
     "python_full_version < '3.14'",
 ]
 
-[options]
-exclude-newer = "2026-04-01T07:03:45.552819Z"
-exclude-newer-span = "P7D"
-
 [[package]]
 name = "accelerate"
 version = "1.12.0"
