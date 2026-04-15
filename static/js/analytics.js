@@ -75,7 +75,12 @@ function initChartTheme() {
     Chart.defaults.plugins.tooltip.bodyColor = THEME.textSecondary;
     Chart.defaults.plugins.tooltip.borderColor = THEME.borderDefault;
     Chart.defaults.plugins.tooltip.borderWidth = 1;
-    Chart.defaults.scale.grid = { color: THEME.borderSubtle, drawBorder: false };
+    Chart.defaults.scale.grid.color = THEME.borderSubtle;
+    Chart.defaults.scale.grid.drawBorder = false;
+    // Chart.js 4.5 does not populate a default grid.lineWidth on Chart.defaults.scale.grid,
+    // which makes Scale#getLineWidthForValue return NaN. That NaN propagates into the bar
+    // controller's base/size calculation and silently prevents bars from rendering.
+    Chart.defaults.scale.grid.lineWidth = 1;
 }
 
 /**

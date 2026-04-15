@@ -168,24 +168,24 @@ def render_analytics_page(request: Request, session: Session) -> HTMLResponse:
                 <!-- Spending Categories Chart -->
                 <div class="mt-6">
                     <h3 class="text-lg font-semibold mb-3 text-spending">Spending Categories</h3>
-                    <div class="p-4 rounded">
-                        <canvas id="spending-categories-chart" height="400"></canvas>
+                    <div class="p-4 rounded" style="position: relative; height: 400px;">
+                        <canvas id="spending-categories-chart"></canvas>
                     </div>
                 </div>
 
                 <!-- Income Categories Chart -->
                 <div class="mt-6">
                     <h3 class="text-lg font-semibold mb-3 text-income">Income Categories</h3>
-                    <div class="p-4 rounded">
-                        <canvas id="income-categories-chart" height="200"></canvas>
+                    <div class="p-4 rounded" style="position: relative; height: 300px;">
+                        <canvas id="income-categories-chart"></canvas>
                     </div>
                 </div>
 
                 <!-- Saving Categories Chart -->
                 <div class="mt-6">
                     <h3 class="text-lg font-semibold mb-3 text-saving">Saving Categories</h3>
-                    <div class="p-4 rounded">
-                        <canvas id="saving-categories-chart" height="200"></canvas>
+                    <div class="p-4 rounded" style="position: relative; height: 300px;">
+                        <canvas id="saving-categories-chart"></canvas>
                     </div>
                 </div>
             </div>
