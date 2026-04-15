@@ -99,7 +99,7 @@ convention = "google"
 "test_*.py" = ["E402", "F401", "T201", "SIM108", "F841", "E501", "W291", "I001", "RET505"]  # Relax linting for test files
 
 [tool.ty.src]
-exclude = ["tests/", "*.ipynb", ".ipynb_checkpoints/"]
+exclude = ["tests/", "*.ipynb", ".ipynb_checkpoints/", ".claude/"]
 
 [tool.ty.environment]
 python = ".venv"
