@@ -236,14 +236,14 @@ def _generate_transaction_table_htmx(transactions, categories, pagination_info=N
         table_rows += f"""
         <tr id="transaction-{tx.id}">
             <td>{tx.date}</td>
-            <td>{html.escape(str(tx.description))}</td>
+            <td style="max-width: 24rem; overflow-wrap: anywhere; word-break: break-word;">{html.escape(str(tx.description))}</td>
             <td class="amount-cell">${tx.amount:,.2f}</td>
             <td>
                 <span class="badge badge-saving">
                     {html.escape(str(tx.actual_category or tx.predicted_category or "Uncategorized"))}
                 </span>
             </td>
-            <td>
+            <td style="min-width: 18rem;">
                 <form hx-put="/api/transactions/{tx.id}/categorize-htmx"
                       hx-target="#transaction-{tx.id}"
                       hx-swap="outerHTML"

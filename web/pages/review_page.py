@@ -163,14 +163,14 @@ def _generate_transaction_table(transactions, categories):
         table_rows += f"""
         <tr id="transaction-{tx.id}">
             <td class="px-4 py-3 text-sm">{tx.date}</td>
-            <td class="px-4 py-3 text-sm font-medium" style="max-width: 34rem; overflow-wrap: anywhere; word-break: break-word;">{html.escape(tx.description)}</td>
+            <td class="px-4 py-3 text-sm font-medium" style="max-width: 24rem; overflow-wrap: anywhere; word-break: break-word;">{html.escape(tx.description)}</td>
             <td class="px-4 py-3 text-sm text-right">${tx.amount:,.2f}</td>
             <td class="px-4 py-3 text-sm">
                 <span class="badge badge-neutral">
                     {html.escape(tx.actual_category or tx.predicted_category or "Uncategorized")}
                 </span>
             </td>
-            <td class="px-4 py-3 text-sm">
+            <td class="px-4 py-3 text-sm" style="min-width: 18rem;">
                 <form hx-put="/api/transactions/{tx.id}/categorize-htmx"
                       hx-target="#transaction-{tx.id}"
                       hx-swap="outerHTML"
