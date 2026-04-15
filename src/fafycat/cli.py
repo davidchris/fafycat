@@ -14,7 +14,6 @@ def _apply_data_dir_override(data_dir: Path | None) -> None:
 
     resolved_data_dir = data_dir.resolve()
     os.environ["FAFYCAT_DATA_DIR"] = str(resolved_data_dir)
-    os.environ.setdefault("FAFYCAT_DB_URL", f"sqlite:///{resolved_data_dir / 'fafycat.db'}")
     os.environ.setdefault("FAFYCAT_MODEL_DIR", str(resolved_data_dir / "models"))
     os.environ.setdefault("FAFYCAT_EXPORT_DIR", str(resolved_data_dir / "exports"))
 
@@ -173,8 +172,6 @@ def main() -> None:
         prog="fafycat",
         description="FafyCat - Local-first transaction categorization with ML",
     )
-    _add_data_dir_argument(parser)
-
     subparsers = parser.add_subparsers(dest="command")
 
     serve_parser = subparsers.add_parser("serve", help="Start the web server")
