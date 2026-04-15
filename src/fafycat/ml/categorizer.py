@@ -60,8 +60,11 @@ class TransactionCategorizer:
                 f"Not enough training data. Need at least {self.config.min_training_samples} transactions."
             )
 
-        # Filter out categories with too few samples for cross-validation
-        min_samples_per_category = 5  # Need at least 5 for 5-fold CV
+        # Filter out categories with too few samples for cross-validation.
+        # Each class must survive both the outer train_test_split (test_size=0.2)
+        # and the inner CalibratedClassifierCV(cv=5) on the train slice, so we
+        # need ceil(5 / 0.8) = 7 samples per class.
+        min_samples_per_category = 7
 
         # Count transactions per category
         category_counts = {}
@@ -148,7 +151,9 @@ class TransactionCategorizer:
         # Calibrates on train set with 5-fold CV for pseudo-out-of-sample predictions
         print("Calibrating probabilities...")
         frozen = FrozenEstimator(self.classifier)
-        self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid", cv=5)
+        min_class_count = int(np.min(np.bincount(y_train)))
+        cv_folds = max(2, min(5, min_class_count))
+        self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid", cv=cv_folds)
         self.calibrated_classifier.fit(X_train_prepared, y_train)
 
         # Calculate metrics
@@ -180,7 +185,9 @@ class TransactionCategorizer:
 
         # Calibrate on training data with internal CV
         frozen = FrozenEstimator(self.classifier)
-        self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid", cv=5)
+        min_class_count = int(np.min(np.bincount(y_encoded)))
+        cv_folds = max(2, min(5, min_class_count))
+        self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid", cv=cv_folds)
         self.calibrated_classifier.fit(X_prepared, y_encoded)
 
         self.is_trained = True

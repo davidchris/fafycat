@@ -37,6 +37,7 @@ class MLConfig(BaseModel):
             "class_weight": "balanced",
             "random_state": 42,
             "n_jobs": -1,
+            "verbose": -1,
         }
     )
 

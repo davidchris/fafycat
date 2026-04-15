@@ -13,8 +13,17 @@ from src.fafycat.core.config import AppConfig
 from src.fafycat.core.database import DatabaseManager
 
 
+class _TrainingStatusAccessLogFilter(logging.Filter):
+    """Drop uvicorn access-log lines for the training-status poll endpoint."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/api/ml/training-status" not in record.getMessage()
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    logging.getLogger("uvicorn.access").addFilter(_TrainingStatusAccessLogFilter())
+
     app = FastAPI(
         title="FafyCat - Family Finance Categorizer",
         description="Local-first transaction categorization tool",
