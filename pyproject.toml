@@ -37,7 +37,7 @@ dependencies = [
     "pydantic>=2.0",
     "python-dateutil>=2.9.0.post0",
     "python-fasthtml>=0.12.19",
-    "requests>=2.32.4",
+    "requests>=2.33.0",
     "scikit-learn>=1.7.0",
     "sqlalchemy>=2.0.41",
     "uvicorn>=0.34.3",
@@ -170,7 +170,7 @@ dev = [
     "jupyterlab>=4.5.4",
     "matplotlib>=3.10.6",
     "nbconvert>=7.17.0",
-    "pytest>=8.3.5",
+    "pytest>=9.0.3",
     "pytest-benchmark>=5.1.0",
     "pytest-cov>=6.1.1",
 ]
