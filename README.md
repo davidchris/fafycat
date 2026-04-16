@@ -2,6 +2,20 @@
 
 FafyCat is a privacy-focused financial transaction categorization tool that uses machine learning to automatically organize your banking data with >90% accuracy. All processing happens locally on your device - no cloud services, no data sharing.
 
+<p align="center">
+  <img src="docs/media/fafycat-demo.gif" alt="FafyCat demo showing the workflow from import to review and analytics" width="100%">
+</p>
+
+<p align="center">
+  <em>Import bank CSVs, let the local model predict categories, review the uncertain cases, and explore the results.</em>
+</p>
+
+<p align="center">
+  <img src="docs/media/home.png" alt="FafyCat workflow overview" width="32%">
+  <img src="docs/media/review-queue.png" alt="FafyCat review queue" width="32%">
+  <img src="docs/media/analytics.png" alt="FafyCat analytics dashboard" width="32%">
+</p>
+
 ## ✨ Key Features
 
 - **🤖 Smart Categorization**: Machine learning automatically categorizes transactions with high accuracy

@@ -37,3 +37,7 @@ product-plans/
 
 # Screenshots from local UI verification runs (root only)
 /*.png
+
+# Generated README capture workspace
+docs/media/.raw/
+docs/media/.raw-test/
