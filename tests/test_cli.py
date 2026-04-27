@@ -153,6 +153,17 @@ def test_budget_show_after_init_returns_expected_shape(cli_runner):
 
 
 @pytest.mark.integration
+def test_budget_show_no_year_specific_budgets_flag(cli_runner):
+    """budget show for a year with no explicit budgets sets has_year_specific_budgets=False."""
+    cli_runner("init")
+    result = cli_runner("budget", "show", "9999")
+    assert result.returncode == 0, f"stderr={result.stderr!r}\nstdout={result.stdout!r}"
+    payload = json.loads(result.stdout)
+    assert "has_year_specific_budgets" in payload, "missing has_year_specific_budgets key"
+    assert payload["has_year_specific_budgets"] is False
+
+
+@pytest.mark.integration
 def test_analytics_monthly_returns_json_shape(cli_runner):
     """analytics monthly --year 2025 returns JSON with year, monthly_data, and yearly_totals."""
     cli_runner("init")

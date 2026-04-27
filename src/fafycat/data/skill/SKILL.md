@@ -23,7 +23,10 @@ fafycat cat list --include-inactive
 ```
 
 ### `fafycat budget show <year>`
-Per-category budgets for a year. Response: `year`, `budgets`, `total_categories`.
+Per-category budgets for a year. Response: `year`, `budgets`, `total_categories`, `has_year_specific_budgets`.
+`has_year_specific_budgets` is `true` only when at least one category has an explicit budget plan for that year;
+`false` means all entries are fallback (category default) budgets — treat this the same as "year not budgeted".
+Each `budgets` entry: `category_id`, `category_name`, `category_type`, `monthly_budget`, `has_year_specific`, `fallback_budget`.
 ```
 fafycat budget show 2025
 ```

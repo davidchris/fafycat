@@ -1271,7 +1271,13 @@ class BudgetService:
                 }
             )
 
-        return {"year": year, "budgets": budgets, "total_categories": len(categories)}
+        has_year_specific_budgets = any(b["has_year_specific"] for b in budgets)
+        return {
+            "year": year,
+            "budgets": budgets,
+            "total_categories": len(categories),
+            "has_year_specific_budgets": has_year_specific_budgets,
+        }
 
     @staticmethod
     def set_budget_for_category_year(session: Session, category_id: int, year: int, monthly_budget: float) -> bool:
