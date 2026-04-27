@@ -10,6 +10,17 @@ from datetime import date
 from pathlib import Path
 
 
+def _positive_int(value: str) -> int:
+    """Argparse type= validator: integer >= 1, else ArgumentTypeError (exit 2)."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1, got {n}")
+    return n
+
+
 def _apply_data_dir_override(data_dir: Path | None) -> None:
     """Set environment overrides so config derives paths from data_dir."""
     if data_dir is None:
@@ -602,7 +613,7 @@ def main() -> None:
     )
     tx_list_parser.add_argument("--skip", type=int, default=0, help="Number of rows to skip (default: 0)")
     tx_list_parser.add_argument(
-        "--limit", type=int, default=20, help="Maximum rows to return, capped at 500 (default: 20)"
+        "--limit", type=_positive_int, default=20, help="Maximum rows to return, 1–500 (default: 20)"
     )
     tx_list_parser.add_argument("--category", default=None, help="Filter by category name")
     tx_list_parser.add_argument("--search", default="", help="Full-text search in description")
