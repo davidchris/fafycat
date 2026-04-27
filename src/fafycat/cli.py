@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -246,6 +247,27 @@ def cmd_tx_list(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_budget_show(args: argparse.Namespace) -> None:
+    """Return per-category budgets for a year as JSON."""
+    _apply_data_dir_override(args.data_dir)
+
+    logging.disable(logging.WARNING)
+
+    from fafycat.api.services import BudgetService
+    from fafycat.cli_query.output import emit_success
+    from fafycat.core.config import AppConfig
+    from fafycat.core.database import DatabaseManager
+
+    config = AppConfig()
+    db_manager = DatabaseManager(config)
+    db_manager.create_tables()
+
+    with db_manager.get_session() as session:
+        result = BudgetService.get_budgets_for_year(session, args.year)
+
+    emit_success(result)
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize fafycat data directory and default categories."""
     _apply_data_dir_override(args.data_dir)
@@ -275,6 +297,21 @@ def _add_data_dir_argument(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Override data directory (default: platform user data dir)",
     )
+
+
+def _dispatch_group(
+    group_parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    handlers: dict[str, Callable[[argparse.Namespace], None]],
+) -> None:
+    """Dispatch to a named subcommand handler, or print group help if none given."""
+    subcommand = getattr(args, "subcommand", None)
+    if subcommand is None:
+        group_parser.print_help()
+        sys.exit(0)
+    handler = handlers.get(subcommand)
+    if handler is not None:
+        handler(args)
 
 
 def main() -> None:
@@ -358,33 +395,41 @@ def main() -> None:
         help="Include inactive categories (default: active only)",
     )
 
+    # budget subcommand group
+    budget_parser = subparsers.add_parser("budget", help="Budget queries")
+    _add_data_dir_argument(budget_parser)
+    budget_subparsers = budget_parser.add_subparsers(dest="subcommand")
+    budget_show_parser = budget_subparsers.add_parser(
+        "show",
+        help="Show per-category budgets for a year",
+        description=(
+            "Return per-category budgets for a year as JSON. "
+            "Examples: fafycat budget show 2025  |  fafycat budget show 2024"
+        ),
+    )
+    budget_show_parser.add_argument("year", type=int, help="Year (YYYY)")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
         sys.exit(0)
 
-    if args.command == "tx":
-        if not hasattr(args, "subcommand") or args.subcommand is None:
-            tx_parser.print_help()
-            sys.exit(0)
-        if args.subcommand == "list":
-            cmd_tx_list(args)
+    group_commands: dict[str, tuple[argparse.ArgumentParser, dict[str, Callable[[argparse.Namespace], None]]]] = {
+        "tx": (tx_parser, {"list": cmd_tx_list}),
+        "cat": (cat_parser, {"list": cmd_cat_list}),
+        "budget": (budget_parser, {"show": cmd_budget_show}),
+    }
+    if args.command in group_commands:
+        group_parser, handlers = group_commands[args.command]
+        _dispatch_group(group_parser, args, handlers)
         return
 
-    if args.command == "cat":
-        if not hasattr(args, "subcommand") or args.subcommand is None:
-            cat_parser.print_help()
-            sys.exit(0)
-        if args.subcommand == "list":
-            cmd_cat_list(args)
-        return
-
-    commands = {
+    leaf_commands: dict[str, Callable[[argparse.Namespace], None]] = {
         "serve": cmd_serve,
         "import": cmd_import,
         "init": cmd_init,
     }
-    commands[args.command](args)
+    leaf_commands[args.command](args)
 
 
 if __name__ == "__main__":
