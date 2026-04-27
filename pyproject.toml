@@ -109,7 +109,7 @@ python = ".venv"
 [tool.ty.rules]
 # Core type checking - keep as errors
 invalid-return-type = "warn"  # Many false positives from fasthtml
-invalid-assignment = "error"
+invalid-assignment = "warn"  # Many false positives from SQLAlchemy ORM attribute assignments
 
 # Reduce noise from external libraries (fasthtml, pandas have incomplete stubs)
 invalid-argument-type = "warn"
