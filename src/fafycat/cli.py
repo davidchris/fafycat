@@ -32,6 +32,17 @@ def _month_int(value: str) -> int:
     return n
 
 
+def _year_month(value: str) -> str:
+    """Argparse type= validator: YYYY-MM format with valid month 1-12, else ArgumentTypeError (exit 2)."""
+    parts = value.split("-")
+    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        raise argparse.ArgumentTypeError(f"--month must be YYYY-MM; got: {value!r}")
+    month = int(parts[1])
+    if not 1 <= month <= 12:
+        raise argparse.ArgumentTypeError(f"--month has invalid month number: {value!r}")
+    return value
+
+
 def _year_list(value: str) -> list[int]:
     """Argparse type= validator: comma-separated integers, else ArgumentTypeError (exit 2)."""
     years = []
@@ -653,13 +664,15 @@ def main() -> None:
     tx_list_parser.add_argument("--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)")
     tx_list_parser.add_argument("--end", type=date.fromisoformat, default=None, help="End date (YYYY-MM-DD)")
     tx_date_group = tx_list_parser.add_mutually_exclusive_group()
-    tx_date_group.add_argument("--month", default=None, metavar="YYYY-MM", help="Filter to a calendar month")
+    tx_date_group.add_argument(
+        "--month", type=_year_month, default=None, metavar="YYYY-MM", help="Filter to a calendar month"
+    )
     tx_date_group.add_argument("--year", type=int, default=None, metavar="YYYY", help="Filter to a calendar year")
     tx_date_group.add_argument("--this-month", action="store_true", default=False, help="Filter to the current month")
     tx_date_group.add_argument("--last-month", action="store_true", default=False, help="Filter to the previous month")
     tx_date_group.add_argument("--ytd", action="store_true", default=False, help="Filter to year-to-date")
     tx_date_group.add_argument(
-        "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
+        "--last-n-months", type=_positive_int, default=None, metavar="N", help="Filter to the last N months"
     )
 
     # cat subcommand group
@@ -713,7 +726,7 @@ def main() -> None:
     analytics_monthly_parser.add_argument("--end", type=date.fromisoformat, default=None, help="End date (YYYY-MM-DD)")
     analytics_monthly_date_group = analytics_monthly_parser.add_mutually_exclusive_group()
     analytics_monthly_date_group.add_argument(
-        "--month", default=None, metavar="YYYY-MM", help="Filter to a calendar month"
+        "--month", type=_year_month, default=None, metavar="YYYY-MM", help="Filter to a calendar month"
     )
     analytics_monthly_date_group.add_argument(
         "--year", type=int, default=None, metavar="YYYY", help="Summarise a calendar year"
@@ -728,7 +741,7 @@ def main() -> None:
         "--ytd", action="store_true", default=False, help="Filter to year-to-date"
     )
     analytics_monthly_date_group.add_argument(
-        "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
+        "--last-n-months", type=_positive_int, default=None, metavar="N", help="Filter to the last N months"
     )
 
     analytics_breakdown_parser = analytics_subparsers.add_parser(
@@ -751,7 +764,7 @@ def main() -> None:
     )
     analytics_breakdown_date_group = analytics_breakdown_parser.add_mutually_exclusive_group()
     analytics_breakdown_date_group.add_argument(
-        "--month", default=None, metavar="YYYY-MM", help="Filter to a calendar month"
+        "--month", type=_year_month, default=None, metavar="YYYY-MM", help="Filter to a calendar month"
     )
     analytics_breakdown_date_group.add_argument(
         "--year", type=int, default=None, metavar="YYYY", help="Filter to a calendar year"
@@ -766,7 +779,7 @@ def main() -> None:
         "--ytd", action="store_true", default=False, help="Filter to year-to-date"
     )
     analytics_breakdown_date_group.add_argument(
-        "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
+        "--last-n-months", type=_positive_int, default=None, metavar="N", help="Filter to the last N months"
     )
 
     analytics_variance_parser = analytics_subparsers.add_parser(
@@ -784,7 +797,7 @@ def main() -> None:
     analytics_variance_parser.add_argument("--end", type=date.fromisoformat, default=None, help="End date (YYYY-MM-DD)")
     analytics_variance_date_group = analytics_variance_parser.add_mutually_exclusive_group()
     analytics_variance_date_group.add_argument(
-        "--month", default=None, metavar="YYYY-MM", help="Filter to a calendar month"
+        "--month", type=_year_month, default=None, metavar="YYYY-MM", help="Filter to a calendar month"
     )
     analytics_variance_date_group.add_argument(
         "--year", type=int, default=None, metavar="YYYY", help="Filter to a calendar year"
@@ -799,7 +812,7 @@ def main() -> None:
         "--ytd", action="store_true", default=False, help="Filter to year-to-date"
     )
     analytics_variance_date_group.add_argument(
-        "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
+        "--last-n-months", type=_positive_int, default=None, metavar="N", help="Filter to the last N months"
     )
 
     analytics_savings_parser = analytics_subparsers.add_parser(
@@ -817,7 +830,7 @@ def main() -> None:
     analytics_savings_parser.add_argument("--end", type=date.fromisoformat, default=None, help="End date (YYYY-MM-DD)")
     analytics_savings_date_group = analytics_savings_parser.add_mutually_exclusive_group()
     analytics_savings_date_group.add_argument(
-        "--month", default=None, metavar="YYYY-MM", help="Filter to a calendar month"
+        "--month", type=_year_month, default=None, metavar="YYYY-MM", help="Filter to a calendar month"
     )
     analytics_savings_date_group.add_argument(
         "--year", type=int, default=None, metavar="YYYY", help="Filter to a calendar year"
@@ -832,7 +845,7 @@ def main() -> None:
         "--ytd", action="store_true", default=False, help="Filter to year-to-date"
     )
     analytics_savings_date_group.add_argument(
-        "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
+        "--last-n-months", type=_positive_int, default=None, metavar="N", help="Filter to the last N months"
     )
 
     analytics_yoy_parser = analytics_subparsers.add_parser(

@@ -320,3 +320,11 @@ def test_skill_install_writes_skill_md(cli_runner, tmp_path):
     content = skill_file.read_text()
     assert "description:" in content, "frontmatter missing 'description' key"
     assert "fafycat" in content.lower(), "skill body does not mention fafycat"
+
+
+def test_tx_list_month_bad_format_exits_with_argparse_error(cli_runner):
+    """--month foo must be rejected at parse time (exit 2, US 18), not JSON exit 1."""
+    result = cli_runner("tx", "list", "--month", "foo")
+    assert result.returncode == 2, (
+        f"expected exit 2, got {result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
+    )
