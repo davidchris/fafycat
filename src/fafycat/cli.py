@@ -268,6 +268,48 @@ def cmd_budget_show(args: argparse.Namespace) -> None:
     emit_success(result)
 
 
+def cmd_analytics_monthly(args: argparse.Namespace) -> None:
+    """Return monthly income/spending/saving totals as JSON."""
+    _apply_data_dir_override(args.data_dir)
+    logging.disable(logging.WARNING)
+
+    from fafycat.api.services import AnalyticsService
+    from fafycat.cli_query.date_range import resolve_date_range
+    from fafycat.cli_query.output import emit_error, emit_success
+    from fafycat.core.config import AppConfig
+    from fafycat.core.database import DatabaseManager
+
+    year: int | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+
+    _has_date_sugar = (
+        args.month is not None
+        or args.this_month
+        or args.last_month
+        or args.ytd
+        or args.last_n_months is not None
+        or args.start is not None
+        or args.end is not None
+    )
+    if args.year is not None:
+        year = args.year
+    elif _has_date_sugar:
+        try:
+            start_date, end_date = resolve_date_range(args)
+        except ValueError as exc:
+            emit_error(str(exc))
+
+    config = AppConfig()
+    db_manager = DatabaseManager(config)
+    db_manager.create_tables()
+
+    with db_manager.get_session() as session:
+        result = AnalyticsService.get_monthly_summary(session, year=year, start_date=start_date, end_date=end_date)
+
+    emit_success(result)
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize fafycat data directory and default categories."""
     _apply_data_dir_override(args.data_dir)
@@ -409,6 +451,42 @@ def main() -> None:
     )
     budget_show_parser.add_argument("year", type=int, help="Year (YYYY)")
 
+    # analytics subcommand group
+    analytics_parser = subparsers.add_parser("analytics", help="Analytics queries")
+    _add_data_dir_argument(analytics_parser)
+    analytics_subparsers = analytics_parser.add_subparsers(dest="subcommand")
+    analytics_monthly_parser = analytics_subparsers.add_parser(
+        "monthly",
+        help="Monthly income/spending/saving totals for a year",
+        description=(
+            "Return monthly income/spending/saving totals as JSON. "
+            "Examples: fafycat analytics monthly --year 2025  |  fafycat analytics monthly --ytd"
+        ),
+    )
+    analytics_monthly_parser.add_argument(
+        "--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)"
+    )
+    analytics_monthly_parser.add_argument("--end", type=date.fromisoformat, default=None, help="End date (YYYY-MM-DD)")
+    analytics_monthly_date_group = analytics_monthly_parser.add_mutually_exclusive_group()
+    analytics_monthly_date_group.add_argument(
+        "--month", default=None, metavar="YYYY-MM", help="Filter to a calendar month"
+    )
+    analytics_monthly_date_group.add_argument(
+        "--year", type=int, default=None, metavar="YYYY", help="Summarise a calendar year"
+    )
+    analytics_monthly_date_group.add_argument(
+        "--this-month", action="store_true", default=False, help="Filter to the current month"
+    )
+    analytics_monthly_date_group.add_argument(
+        "--last-month", action="store_true", default=False, help="Filter to the previous month"
+    )
+    analytics_monthly_date_group.add_argument(
+        "--ytd", action="store_true", default=False, help="Filter to year-to-date"
+    )
+    analytics_monthly_date_group.add_argument(
+        "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
+    )
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -418,6 +496,7 @@ def main() -> None:
         "tx": (tx_parser, {"list": cmd_tx_list}),
         "cat": (cat_parser, {"list": cmd_cat_list}),
         "budget": (budget_parser, {"show": cmd_budget_show}),
+        "analytics": (analytics_parser, {"monthly": cmd_analytics_monthly}),
     }
     if args.command in group_commands:
         group_parser, handlers = group_commands[args.command]
