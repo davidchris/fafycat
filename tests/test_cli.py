@@ -246,6 +246,14 @@ def test_tx_list_limit_zero_exits_with_argparse_error(cli_runner):
     )
 
 
+def test_tx_list_negative_limit_exits_with_argparse_error(cli_runner):
+    """--limit -1 must be rejected at parse time (exit 2), not silently dump all rows."""
+    result = cli_runner("tx", "list", "--limit", "-1")
+    assert result.returncode == 2, (
+        f"expected exit 2, got {result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
+    )
+
+
 def test_analytics_yoy_bad_years_exits_with_argparse_error(cli_runner):
     """--years foo must be rejected at parse time (exit 2), not traceback."""
     result = cli_runner("analytics", "yoy", "--years", "foo")
