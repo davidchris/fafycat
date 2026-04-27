@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -156,6 +157,27 @@ def cmd_import(args: argparse.Namespace) -> None:
         print(json.dumps(result, indent=2))
 
 
+def cmd_cat_list(args: argparse.Namespace) -> None:
+    """List categories as JSON."""
+    _apply_data_dir_override(args.data_dir)
+
+    logging.disable(logging.WARNING)
+
+    from fafycat.api.services import CategoryService
+    from fafycat.cli_query.output import emit_success
+    from fafycat.core.config import AppConfig
+    from fafycat.core.database import DatabaseManager
+
+    config = AppConfig()
+    db_manager = DatabaseManager(config)
+    db_manager.create_tables()
+
+    with db_manager.get_session() as session:
+        categories = CategoryService.get_categories(session, include_inactive=args.include_inactive)
+
+    emit_success([c.model_dump() for c in categories])
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize fafycat data directory and default categories."""
     _apply_data_dir_override(args.data_dir)
@@ -217,10 +239,34 @@ def main() -> None:
     init_parser = subparsers.add_parser("init", help="Initialize data directory and default categories")
     _add_data_dir_argument(init_parser)
 
+    # cat subcommand group
+    cat_parser = subparsers.add_parser("cat", help="Category queries")
+    _add_data_dir_argument(cat_parser)
+    cat_subparsers = cat_parser.add_subparsers(dest="subcommand")
+    cat_list_parser = cat_subparsers.add_parser(
+        "list",
+        help="List categories with budgets and types",
+        description="List all categories. Examples: fafycat cat list  |  fafycat cat list --include-inactive",
+    )
+    cat_list_parser.add_argument(
+        "--include-inactive",
+        action="store_true",
+        default=False,
+        help="Include inactive categories (default: active only)",
+    )
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
         sys.exit(0)
+
+    if args.command == "cat":
+        if not hasattr(args, "subcommand") or args.subcommand is None:
+            cat_parser.print_help()
+            sys.exit(0)
+        if args.subcommand == "list":
+            cmd_cat_list(args)
+        return
 
     commands = {
         "serve": cmd_serve,
