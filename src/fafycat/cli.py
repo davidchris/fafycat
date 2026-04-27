@@ -21,6 +21,17 @@ def _positive_int(value: str) -> int:
     return n
 
 
+def _month_int(value: str) -> int:
+    """Argparse type= validator: integer in 1..12, else ArgumentTypeError (exit 2)."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from None
+    if not 1 <= n <= 12:
+        raise argparse.ArgumentTypeError(f"month must be in 1..12, got {n}")
+    return n
+
+
 def _year_list(value: str) -> list[int]:
     """Argparse type= validator: comma-separated integers, else ArgumentTypeError (exit 2)."""
     years = []
@@ -837,7 +848,9 @@ def main() -> None:
         ),
     )
     analytics_top_parser.add_argument("--year", type=int, default=None, help="Year (default: current year)")
-    analytics_top_parser.add_argument("--month", type=int, default=None, help="Month 1-12 (default: current month)")
+    analytics_top_parser.add_argument(
+        "--month", type=_month_int, default=None, help="Month 1-12 (default: current month)"
+    )
     analytics_top_parser.add_argument(
         "--limit", type=int, default=5, help="Number of transactions to return (default: 5)"
     )
