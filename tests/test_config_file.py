@@ -78,6 +78,16 @@ def test_fafycat_config_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert result["data_dir"] == "/custom"
 
 
+def test_unknown_key_warns_only_once_per_path(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    config = tmp_path / "warn_once.toml"
+    config.write_text('[paths]\ndata_dir = "/ok"\nunknown_key = "bad"\n')
+    load_config_file(config)
+    load_config_file(config)
+    captured = capsys.readouterr()
+    warning_lines = [line for line in captured.err.splitlines() if "unknown_key" in line]
+    assert len(warning_lines) == 1
+
+
 def test_none_path_missing_default_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FAFYCAT_CONFIG", raising=False)
     # Default path (~/.config/fafycat/config.toml) almost certainly doesn't exist in CI
