@@ -179,6 +179,20 @@ def test_analytics_breakdown_returns_json_shape(cli_runner):
 
 
 @pytest.mark.integration
+def test_analytics_variance_year(cli_runner):
+    """analytics variance --year 2025 returns JSON with variances, summary, and date_range."""
+    cli_runner("init")
+    result = cli_runner("analytics", "variance", "--year", "2025")
+    assert result.returncode == 0, f"stderr={result.stderr!r}\nstdout={result.stdout!r}"
+    payload = json.loads(result.stdout)
+    assert isinstance(payload, dict)
+    for key in ("variances", "summary", "date_range"):
+        assert key in payload, f"missing key {key!r}"
+    assert isinstance(payload["variances"], list)
+    assert isinstance(payload["summary"], dict)
+
+
+@pytest.mark.integration
 def test_tx_list_empty_db_returns_pagination_envelope(cli_runner):
     """tx list on a fresh DB returns a pagination envelope with an empty transactions list."""
     cli_runner("init")
