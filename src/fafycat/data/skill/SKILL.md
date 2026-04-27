@@ -16,7 +16,7 @@ fafycat tx list --ytd --category Groceries --limit 50
 ```
 
 ### `fafycat cat list`
-Response envelope: `categories` (list of `{id, name, type, is_active, budget}`), `total_count`.
+Response envelope: `categories` (list of `{id, name, type, is_active, budget, created_at, updated_at}`), `total_count`.
 ```
 fafycat cat list
 fafycat cat list --include-inactive
@@ -67,7 +67,8 @@ fafycat analytics yoy --type spending --years 2023,2024,2025
 ```
 
 ### `fafycat analytics top`
-Largest spending transactions for a month. Response: `year`, `month`, `month_name`, `top_transactions`, `total_spending`, `transactions_count`.
+Largest spending transactions for a month. `--year` defaults to current year; `--month` defaults to current month.
+Response: `year`, `month`, `month_name`, `top_transactions`, `total_spending`, `transactions_count`.
 ```
 fafycat analytics top --year 2025 --month 3
 fafycat analytics top --limit 10

@@ -338,6 +338,24 @@ def test_skill_install_writes_skill_md(cli_runner, tmp_path):
     assert "fafycat" in content.lower(), "skill body does not mention fafycat"
 
 
+def test_skill_md_cat_list_includes_timestamp_fields():
+    """SKILL.md cat list section must document created_at and updated_at (issue 12b)."""
+    import importlib.resources
+
+    content = importlib.resources.files("fafycat.data.skill").joinpath("SKILL.md").read_text(encoding="utf-8")
+    assert "created_at" in content, "SKILL.md cat list missing created_at field"
+    assert "updated_at" in content, "SKILL.md cat list missing updated_at field"
+
+
+def test_skill_md_analytics_top_documents_defaults():
+    """SKILL.md analytics top section must document current-year/current-month defaults (issue 12c)."""
+    import importlib.resources
+
+    content = importlib.resources.files("fafycat.data.skill").joinpath("SKILL.md").read_text(encoding="utf-8")
+    assert "current year" in content, "SKILL.md analytics top missing 'current year' default documentation"
+    assert "current month" in content, "SKILL.md analytics top missing 'current month' default documentation"
+
+
 def test_tx_list_month_bad_format_exits_with_argparse_error(cli_runner):
     """--month foo must be rejected at parse time (exit 2, US 18), not JSON exit 1."""
     result = cli_runner("tx", "list", "--month", "foo")
