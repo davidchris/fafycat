@@ -445,6 +445,34 @@ def cmd_analytics_savings(args: argparse.Namespace) -> None:
     emit_success(result)
 
 
+def cmd_analytics_yoy(args: argparse.Namespace) -> None:
+    """Return year-over-year comparison data as JSON."""
+    _apply_data_dir_override(args.data_dir)
+    logging.disable(logging.WARNING)
+
+    from fafycat.api.services import AnalyticsService
+    from fafycat.cli_query.output import emit_success
+    from fafycat.core.config import AppConfig
+    from fafycat.core.database import DatabaseManager
+
+    years: list[int] | None = None
+    if args.years:
+        years = [int(y.strip()) for y in args.years.split(",")]
+
+    config = AppConfig()
+    db_manager = DatabaseManager(config)
+    db_manager.create_tables()
+
+    with db_manager.get_session() as session:
+        result = AnalyticsService.get_year_over_year_comparison(
+            session,
+            category_type=args.type or None,
+            years=years,
+        )
+
+    emit_success(result)
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize fafycat data directory and default categories."""
     _apply_data_dir_override(args.data_dir)
@@ -723,6 +751,22 @@ def main() -> None:
         "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
     )
 
+    analytics_yoy_parser = analytics_subparsers.add_parser(
+        "yoy",
+        help="Year-over-year comparison by category",
+        description=(
+            "Return year-over-year comparison data as JSON, optionally filtered by category type or year list. "
+            "Examples: fafycat analytics yoy  |  fafycat analytics yoy --type spending --years 2023,2024,2025"
+        ),
+    )
+    analytics_yoy_parser.add_argument("--type", default=None, help="Filter by category type (e.g. spending, income)")
+    analytics_yoy_parser.add_argument(
+        "--years",
+        default=None,
+        metavar="YYYY,YYYY,...",
+        help="Comma-separated list of years to compare (default: all available years)",
+    )
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -739,6 +783,7 @@ def main() -> None:
                 "breakdown": cmd_analytics_breakdown,
                 "variance": cmd_analytics_variance,
                 "savings": cmd_analytics_savings,
+                "yoy": cmd_analytics_yoy,
             },
         ),
     }

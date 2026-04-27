@@ -208,6 +208,21 @@ def test_analytics_savings_returns_json_shape(cli_runner):
 
 
 @pytest.mark.integration
+def test_analytics_yoy_returns_json_shape(cli_runner):
+    """analytics yoy returns JSON with categories list and summary with years key."""
+    cli_runner("init")
+    result = cli_runner("analytics", "yoy")
+    assert result.returncode == 0, f"stderr={result.stderr!r}\nstdout={result.stdout!r}"
+    payload = json.loads(result.stdout)
+    assert isinstance(payload, dict)
+    for key in ("categories", "summary"):
+        assert key in payload, f"missing key {key!r}"
+    assert isinstance(payload["categories"], list)
+    assert isinstance(payload["summary"], dict)
+    assert "years" in payload["summary"]
+
+
+@pytest.mark.integration
 def test_tx_list_empty_db_returns_pagination_envelope(cli_runner):
     """tx list on a fresh DB returns a pagination envelope with an empty transactions list."""
     cli_runner("init")
