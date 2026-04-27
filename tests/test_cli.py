@@ -131,3 +131,19 @@ def test_cat_list_include_inactive_returns_all(cli_runner):
     active_count = len(json.loads(result_active.stdout))
     all_count = len(json.loads(result_all.stdout))
     assert all_count >= active_count
+
+
+@pytest.mark.integration
+def test_tx_list_empty_db_returns_pagination_envelope(cli_runner):
+    """tx list on a fresh DB returns a pagination envelope with an empty transactions list."""
+    cli_runner("init")
+    result = cli_runner("tx", "list")
+    assert result.returncode == 0, f"stderr={result.stderr!r}\nstdout={result.stdout!r}"
+    payload = json.loads(result.stdout)
+    assert isinstance(payload, dict)
+    for key in ("transactions", "total_count", "has_next", "skip", "limit"):
+        assert key in payload, f"missing key {key!r}"
+    assert isinstance(payload["transactions"], list)
+    assert payload["total_count"] == 0
+    assert payload["skip"] == 0
+    assert payload["limit"] == 20

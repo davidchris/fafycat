@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 
@@ -178,6 +179,73 @@ def cmd_cat_list(args: argparse.Namespace) -> None:
     emit_success([c.model_dump() for c in categories])
 
 
+def cmd_tx_list(args: argparse.Namespace) -> None:
+    """List transactions as a paginated JSON envelope."""
+    _apply_data_dir_override(args.data_dir)
+
+    logging.disable(logging.WARNING)
+
+    from fafycat.api.services import TransactionService
+    from fafycat.cli_query.date_range import resolve_date_range
+    from fafycat.cli_query.output import emit_error, emit_success
+    from fafycat.core.config import AppConfig
+    from fafycat.core.database import DatabaseManager
+
+    _has_date_arg = (
+        args.start is not None
+        or args.end is not None
+        or args.month is not None
+        or args.year is not None
+        or args.this_month
+        or args.last_month
+        or args.ytd
+        or args.last_n_months is not None
+    )
+    start_date: date | None = None
+    end_date: date | None = None
+    if _has_date_arg:
+        try:
+            start_date, end_date = resolve_date_range(args)
+        except ValueError as exc:
+            emit_error(str(exc))
+
+    limit = min(args.limit, 500)
+
+    is_reviewed: bool | None = None
+    if args.reviewed:
+        is_reviewed = True
+    elif args.unreviewed:
+        is_reviewed = False
+
+    config = AppConfig()
+    db_manager = DatabaseManager(config)
+    db_manager.create_tables()
+
+    with db_manager.get_session() as session:
+        result = TransactionService.get_transactions_with_pagination(
+            session,
+            skip=args.skip,
+            limit=limit,
+            is_reviewed=is_reviewed,
+            category=args.category or None,
+            search=args.search or "",
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    transactions = [t.model_dump(mode="json") for t in result["transactions"]]
+    pagination = result["pagination_info"]
+    emit_success(
+        {
+            "transactions": transactions,
+            "total_count": pagination["total_count"],
+            "has_next": pagination["has_next"],
+            "skip": args.skip,
+            "limit": limit,
+        }
+    )
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize fafycat data directory and default categories."""
     _apply_data_dir_override(args.data_dir)
@@ -239,6 +307,41 @@ def main() -> None:
     init_parser = subparsers.add_parser("init", help="Initialize data directory and default categories")
     _add_data_dir_argument(init_parser)
 
+    # tx subcommand group
+    tx_parser = subparsers.add_parser("tx", help="Transaction queries")
+    _add_data_dir_argument(tx_parser)
+    tx_subparsers = tx_parser.add_subparsers(dest="subcommand")
+    tx_list_parser = tx_subparsers.add_parser(
+        "list",
+        help="List transactions with optional filters",
+        description=(
+            "List transactions as a paginated JSON envelope. "
+            "Examples: fafycat tx list --month 2025-01  |  fafycat tx list --ytd --category Groceries"
+        ),
+    )
+    tx_list_parser.add_argument("--skip", type=int, default=0, help="Number of rows to skip (default: 0)")
+    tx_list_parser.add_argument(
+        "--limit", type=int, default=20, help="Maximum rows to return, capped at 500 (default: 20)"
+    )
+    tx_list_parser.add_argument("--category", default=None, help="Filter by category name")
+    tx_list_parser.add_argument("--search", default="", help="Full-text search in description")
+    tx_reviewed_group = tx_list_parser.add_mutually_exclusive_group()
+    tx_reviewed_group.add_argument("--reviewed", action="store_true", default=False, help="Only reviewed transactions")
+    tx_reviewed_group.add_argument(
+        "--unreviewed", action="store_true", default=False, help="Only unreviewed transactions"
+    )
+    tx_list_parser.add_argument("--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)")
+    tx_list_parser.add_argument("--end", type=date.fromisoformat, default=None, help="End date (YYYY-MM-DD)")
+    tx_date_group = tx_list_parser.add_mutually_exclusive_group()
+    tx_date_group.add_argument("--month", default=None, metavar="YYYY-MM", help="Filter to a calendar month")
+    tx_date_group.add_argument("--year", type=int, default=None, metavar="YYYY", help="Filter to a calendar year")
+    tx_date_group.add_argument("--this-month", action="store_true", default=False, help="Filter to the current month")
+    tx_date_group.add_argument("--last-month", action="store_true", default=False, help="Filter to the previous month")
+    tx_date_group.add_argument("--ytd", action="store_true", default=False, help="Filter to year-to-date")
+    tx_date_group.add_argument(
+        "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
+    )
+
     # cat subcommand group
     cat_parser = subparsers.add_parser("cat", help="Category queries")
     _add_data_dir_argument(cat_parser)
@@ -259,6 +362,14 @@ def main() -> None:
     if args.command is None:
         parser.print_help()
         sys.exit(0)
+
+    if args.command == "tx":
+        if not hasattr(args, "subcommand") or args.subcommand is None:
+            tx_parser.print_help()
+            sys.exit(0)
+        if args.subcommand == "list":
+            cmd_tx_list(args)
+        return
 
     if args.command == "cat":
         if not hasattr(args, "subcommand") or args.subcommand is None:
