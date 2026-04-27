@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from fafycat.core.config_file import load_config_file
+from fafycat.core.config_file import ConfigFileError, load_config_file
 
 
 def test_missing_file_returns_empty_dict(tmp_path: Path) -> None:
@@ -63,10 +63,10 @@ def test_unknown_section_warns_stderr(tmp_path: Path, capsys: pytest.CaptureFixt
     assert "logging" in captured.err
 
 
-def test_malformed_toml_raises_value_error(tmp_path: Path) -> None:
+def test_malformed_toml_raises_config_file_error(tmp_path: Path) -> None:
     config = tmp_path / "config.toml"
     config.write_text("[paths\ndata_dir = oops\n")
-    with pytest.raises(ValueError, match="Malformed TOML"):
+    with pytest.raises(ConfigFileError, match="Malformed TOML"):
         load_config_file(config)
 
 

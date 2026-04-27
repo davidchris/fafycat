@@ -297,6 +297,18 @@ def test_data_dir_recognized_at_leaf_position(cli_runner, tmp_path):
     )
 
 
+def test_malformed_config_toml_returns_json_error(cli_runner, tmp_path, monkeypatch):
+    """FAFYCAT_CONFIG pointing to malformed TOML must exit 1 with JSON error (US 17), not a traceback."""
+    bad_toml = tmp_path / "bad.toml"
+    bad_toml.write_text("[unclosed\n")
+    monkeypatch.setenv("FAFYCAT_CONFIG", str(bad_toml))
+    result = cli_runner("tx", "list")
+    assert result.returncode == 1, f"stderr={result.stderr!r}\nstdout={result.stdout!r}"
+    payload = json.loads(result.stdout)
+    assert "error" in payload
+    assert "Malformed TOML" in payload["error"]
+
+
 @pytest.mark.integration
 def test_skill_install_writes_skill_md(cli_runner, tmp_path):
     """skill install writes SKILL.md to target dir; file has frontmatter description and mentions fafycat."""

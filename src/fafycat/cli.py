@@ -913,8 +913,15 @@ def main() -> None:
         "skill": (skill_parser, {"install": cmd_skill_install}),
     }
     if args.command in group_commands:
+        from fafycat.core.config_file import ConfigFileError
+
         group_parser, handlers = group_commands[args.command]
-        _dispatch_group(group_parser, args, handlers)
+        try:
+            _dispatch_group(group_parser, args, handlers)
+        except ConfigFileError as exc:
+            from fafycat.cli_query.output import emit_error
+
+            emit_error(str(exc))
         return
 
     leaf_commands: dict[str, Callable[[argparse.Namespace], None]] = {

@@ -13,6 +13,10 @@ _DEFAULT_CONFIG_PATH = Path("~/.config/fafycat/config.toml").expanduser()
 _KNOWN_PATHS_KEYS = frozenset({"data_dir", "db_url", "model_dir", "export_dir"})
 
 
+class ConfigFileError(Exception):
+    """Raised when the FafyCat config file exists but cannot be parsed."""
+
+
 def load_config_file(path: Path | None) -> dict[str, str]:
     """Load the FafyCat config file and return a flat dict of [paths] settings.
 
@@ -38,7 +42,7 @@ def load_config_file(path: Path | None) -> dict[str, str]:
     except FileNotFoundError:
         return {}
     except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"Malformed TOML in {path}: {exc}") from exc
+        raise ConfigFileError(f"Malformed TOML in {path}: {exc}") from exc
 
     result: dict[str, str] = {}
 
