@@ -565,12 +565,17 @@ def cmd_init(args: argparse.Namespace) -> None:
     print("✅ FafyCat initialized successfully")
 
 
-def _add_data_dir_argument(parser: argparse.ArgumentParser) -> None:
-    """Add the shared --data-dir argument."""
+def _add_data_dir_argument(parser: argparse.ArgumentParser, *, suppress_default: bool = False) -> None:
+    """Add the shared --data-dir argument.
+
+    Root parser uses default=None (authoritative).  Group and leaf parsers use
+    suppress_default=True so an absent flag doesn't overwrite a value already set
+    by a higher-level parser in the chain.
+    """
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=None,
+        default=argparse.SUPPRESS if suppress_default else None,
         help="Override data directory (default: platform user data dir)",
     )
 
@@ -596,6 +601,7 @@ def main() -> None:
         prog="fafycat",
         description="FafyCat - Local-first transaction categorization with ML",
     )
+    _add_data_dir_argument(parser)
     subparsers = parser.add_subparsers(dest="command")
 
     serve_parser = subparsers.add_parser("serve", help="Start the web server")
@@ -611,18 +617,18 @@ def main() -> None:
         help="Port number (default: 8001 for dev, 8000 for prod)",
     )
     serve_parser.add_argument("--host", default=None, help="Host to bind to (default: 127.0.0.1)")
-    _add_data_dir_argument(serve_parser)
+    _add_data_dir_argument(serve_parser, suppress_default=True)
 
     import_parser = subparsers.add_parser("import", help="Import transactions from a CSV file")
     import_parser.add_argument("file", type=Path, help="Path to the CSV file")
-    _add_data_dir_argument(import_parser)
+    _add_data_dir_argument(import_parser, suppress_default=True)
 
     init_parser = subparsers.add_parser("init", help="Initialize data directory and default categories")
-    _add_data_dir_argument(init_parser)
+    _add_data_dir_argument(init_parser, suppress_default=True)
 
     # tx subcommand group
     tx_parser = subparsers.add_parser("tx", help="Transaction queries")
-    _add_data_dir_argument(tx_parser)
+    _add_data_dir_argument(tx_parser, suppress_default=True)
     tx_subparsers = tx_parser.add_subparsers(dest="subcommand")
     tx_list_parser = tx_subparsers.add_parser(
         "list",
@@ -632,6 +638,7 @@ def main() -> None:
             "Examples: fafycat tx list --month 2025-01  |  fafycat tx list --ytd --category Groceries"
         ),
     )
+    _add_data_dir_argument(tx_list_parser, suppress_default=True)
     tx_list_parser.add_argument("--skip", type=int, default=0, help="Number of rows to skip (default: 0)")
     tx_list_parser.add_argument(
         "--limit", type=_positive_int, default=20, help="Maximum rows to return, 1–500 (default: 20)"
@@ -657,13 +664,14 @@ def main() -> None:
 
     # cat subcommand group
     cat_parser = subparsers.add_parser("cat", help="Category queries")
-    _add_data_dir_argument(cat_parser)
+    _add_data_dir_argument(cat_parser, suppress_default=True)
     cat_subparsers = cat_parser.add_subparsers(dest="subcommand")
     cat_list_parser = cat_subparsers.add_parser(
         "list",
         help="List categories with budgets and types",
         description="List all categories. Examples: fafycat cat list  |  fafycat cat list --include-inactive",
     )
+    _add_data_dir_argument(cat_list_parser, suppress_default=True)
     cat_list_parser.add_argument(
         "--include-inactive",
         action="store_true",
@@ -673,7 +681,7 @@ def main() -> None:
 
     # budget subcommand group
     budget_parser = subparsers.add_parser("budget", help="Budget queries")
-    _add_data_dir_argument(budget_parser)
+    _add_data_dir_argument(budget_parser, suppress_default=True)
     budget_subparsers = budget_parser.add_subparsers(dest="subcommand")
     budget_show_parser = budget_subparsers.add_parser(
         "show",
@@ -683,11 +691,12 @@ def main() -> None:
             "Examples: fafycat budget show 2025  |  fafycat budget show 2024"
         ),
     )
+    _add_data_dir_argument(budget_show_parser, suppress_default=True)
     budget_show_parser.add_argument("year", type=int, help="Year (YYYY)")
 
     # analytics subcommand group
     analytics_parser = subparsers.add_parser("analytics", help="Analytics queries")
-    _add_data_dir_argument(analytics_parser)
+    _add_data_dir_argument(analytics_parser, suppress_default=True)
     analytics_subparsers = analytics_parser.add_subparsers(dest="subcommand")
     analytics_monthly_parser = analytics_subparsers.add_parser(
         "monthly",
@@ -697,6 +706,7 @@ def main() -> None:
             "Examples: fafycat analytics monthly --year 2025  |  fafycat analytics monthly --ytd"
         ),
     )
+    _add_data_dir_argument(analytics_monthly_parser, suppress_default=True)
     analytics_monthly_parser.add_argument(
         "--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)"
     )
@@ -729,6 +739,7 @@ def main() -> None:
             "Examples: fafycat analytics breakdown --year 2025  |  fafycat analytics breakdown --ytd --type spending"
         ),
     )
+    _add_data_dir_argument(analytics_breakdown_parser, suppress_default=True)
     analytics_breakdown_parser.add_argument(
         "--type", default=None, help="Filter by category type (e.g. spending, income)"
     )
@@ -766,6 +777,7 @@ def main() -> None:
             "Examples: fafycat analytics variance --year 2025  |  fafycat analytics variance --ytd"
         ),
     )
+    _add_data_dir_argument(analytics_variance_parser, suppress_default=True)
     analytics_variance_parser.add_argument(
         "--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)"
     )
@@ -798,6 +810,7 @@ def main() -> None:
             "Examples: fafycat analytics savings --year 2025  |  fafycat analytics savings --ytd"
         ),
     )
+    _add_data_dir_argument(analytics_savings_parser, suppress_default=True)
     analytics_savings_parser.add_argument(
         "--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)"
     )
@@ -830,6 +843,7 @@ def main() -> None:
             "Examples: fafycat analytics yoy  |  fafycat analytics yoy --type spending --years 2023,2024,2025"
         ),
     )
+    _add_data_dir_argument(analytics_yoy_parser, suppress_default=True)
     analytics_yoy_parser.add_argument("--type", default=None, help="Filter by category type (e.g. spending, income)")
     analytics_yoy_parser.add_argument(
         "--years",
@@ -847,6 +861,7 @@ def main() -> None:
             "Examples: fafycat analytics top --year 2025 --month 3  |  fafycat analytics top --limit 10"
         ),
     )
+    _add_data_dir_argument(analytics_top_parser, suppress_default=True)
     analytics_top_parser.add_argument("--year", type=int, default=None, help="Year (default: current year)")
     analytics_top_parser.add_argument(
         "--month", type=_month_int, default=None, help="Month 1-12 (default: current month)"

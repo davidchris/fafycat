@@ -82,3 +82,9 @@ fafycat analytics top --limit 10
 
 - `--data-dir PATH` flag, or `FAFYCAT_DATA_DIR` env var, or `~/.config/fafycat/config.toml` `[paths] data_dir`
 - Precedence: flag > env var > config file > platform default
+- The flag is accepted at any position — root, group, or leaf:
+  ```
+  fafycat tx list --data-dir /path/to/data
+  fafycat --data-dir /path/to/data tx list
+  fafycat tx --data-dir /path/to/data list
+  ```

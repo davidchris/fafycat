@@ -276,6 +276,19 @@ def test_analytics_top_returns_json_shape(cli_runner):
     assert payload["month"] == 1
 
 
+def test_data_dir_recognized_at_leaf_position(cli_runner, tmp_path):
+    """--data-dir must parse when placed after the leaf subcommand (PRD US 21, US 28).
+
+    `fafycat tx list --data-dir PATH` was rejecting with exit 2 ("unrecognized arguments")
+    because --data-dir was only registered on the group parser, not the leaf subparser.
+    """
+    result = cli_runner("tx", "list", "--data-dir", str(tmp_path))
+    assert result.returncode != 2, (
+        f"--data-dir not recognized at leaf position (exit 2 = argparse 'unrecognized arguments')\n"
+        f"stderr={result.stderr!r}"
+    )
+
+
 @pytest.mark.integration
 def test_skill_install_writes_skill_md(cli_runner, tmp_path):
     """skill install writes SKILL.md to target dir; file has frontmatter description and mentions fafycat."""
