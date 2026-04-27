@@ -473,6 +473,31 @@ def cmd_analytics_yoy(args: argparse.Namespace) -> None:
     emit_success(result)
 
 
+def cmd_analytics_top(args: argparse.Namespace) -> None:
+    """Return top spending transactions for a given month as JSON."""
+    _apply_data_dir_override(args.data_dir)
+    logging.disable(logging.WARNING)
+
+    from fafycat.api.services import AnalyticsService
+    from fafycat.cli_query.output import emit_success
+    from fafycat.core.config import AppConfig
+    from fafycat.core.database import DatabaseManager
+
+    config = AppConfig()
+    db_manager = DatabaseManager(config)
+    db_manager.create_tables()
+
+    with db_manager.get_session() as session:
+        result = AnalyticsService.get_top_transactions_by_month(
+            session,
+            year=args.year,
+            month=args.month,
+            limit=args.limit,
+        )
+
+    emit_success(result)
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize fafycat data directory and default categories."""
     _apply_data_dir_override(args.data_dir)
@@ -767,6 +792,20 @@ def main() -> None:
         help="Comma-separated list of years to compare (default: all available years)",
     )
 
+    analytics_top_parser = analytics_subparsers.add_parser(
+        "top",
+        help="Top spending transactions for a given month",
+        description=(
+            "Return the largest spending transactions for a given month as JSON. "
+            "Examples: fafycat analytics top --year 2025 --month 3  |  fafycat analytics top --limit 10"
+        ),
+    )
+    analytics_top_parser.add_argument("--year", type=int, default=None, help="Year (default: current year)")
+    analytics_top_parser.add_argument("--month", type=int, default=None, help="Month 1-12 (default: current month)")
+    analytics_top_parser.add_argument(
+        "--limit", type=int, default=5, help="Number of transactions to return (default: 5)"
+    )
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -784,6 +823,7 @@ def main() -> None:
                 "variance": cmd_analytics_variance,
                 "savings": cmd_analytics_savings,
                 "yoy": cmd_analytics_yoy,
+                "top": cmd_analytics_top,
             },
         ),
     }

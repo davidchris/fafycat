@@ -236,3 +236,17 @@ def test_tx_list_empty_db_returns_pagination_envelope(cli_runner):
     assert payload["total_count"] == 0
     assert payload["skip"] == 0
     assert payload["limit"] == 20
+
+
+def test_analytics_top_returns_json_shape(cli_runner):
+    """analytics top returns JSON with year, month, top_transactions, total_spending, transactions_count."""
+    cli_runner("init")
+    result = cli_runner("analytics", "top", "--year", "2025", "--month", "1")
+    assert result.returncode == 0, f"stderr={result.stderr!r}\nstdout={result.stdout!r}"
+    payload = json.loads(result.stdout)
+    assert isinstance(payload, dict)
+    for key in ("year", "month", "month_name", "top_transactions", "total_spending", "transactions_count"):
+        assert key in payload, f"missing key {key!r}"
+    assert isinstance(payload["top_transactions"], list)
+    assert payload["year"] == 2025
+    assert payload["month"] == 1
