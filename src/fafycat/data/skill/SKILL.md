@@ -37,6 +37,7 @@ fafycat analytics monthly --ytd
 
 ### `fafycat analytics breakdown`
 Per-category spending totals for a date range. Response: `categories`, `summary`, `date_range`.
+`--type` accepts exactly: `income`, `saving`, `spending` (invalid values exit 2).
 ```
 fafycat analytics breakdown --year 2025
 fafycat analytics breakdown --ytd --type spending

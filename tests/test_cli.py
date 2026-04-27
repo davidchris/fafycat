@@ -333,3 +333,11 @@ def test_tx_list_month_bad_format_exits_with_argparse_error(cli_runner):
     assert result.returncode == 2, (
         f"expected exit 2, got {result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
     )
+
+
+def test_analytics_breakdown_invalid_type_exits_with_argparse_error(cli_runner):
+    """--type bogus must be rejected at parse time (exit 2), not silently return empty results."""
+    result = cli_runner("analytics", "breakdown", "--type", "bogus")
+    assert result.returncode == 2, (
+        f"expected exit 2, got {result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
+    )

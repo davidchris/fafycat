@@ -755,7 +755,10 @@ def main() -> None:
     )
     _add_data_dir_argument(analytics_breakdown_parser, suppress_default=True)
     analytics_breakdown_parser.add_argument(
-        "--type", default=None, help="Filter by category type (e.g. spending, income)"
+        "--type",
+        default=None,
+        choices=["income", "saving", "spending"],
+        help="Filter by category type: income, saving, or spending",
     )
     analytics_breakdown_parser.add_argument(
         "--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)"
