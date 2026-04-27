@@ -21,6 +21,18 @@ def _positive_int(value: str) -> int:
     return n
 
 
+def _year_list(value: str) -> list[int]:
+    """Argparse type= validator: comma-separated integers, else ArgumentTypeError (exit 2)."""
+    years = []
+    for token in value.split(","):
+        token = token.strip()
+        try:
+            years.append(int(token))
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"{token!r} is not a valid year (expected integer)") from None
+    return years
+
+
 def _apply_data_dir_override(data_dir: Path | None) -> None:
     """Set environment overrides so config derives paths from data_dir."""
     if data_dir is None:
@@ -466,9 +478,7 @@ def cmd_analytics_yoy(args: argparse.Namespace) -> None:
     from fafycat.core.config import AppConfig
     from fafycat.core.database import DatabaseManager
 
-    years: list[int] | None = None
-    if args.years:
-        years = [int(y.strip()) for y in args.years.split(",")]
+    years: list[int] | None = args.years or None
 
     config = AppConfig()
     db_manager = DatabaseManager(config)
@@ -812,6 +822,7 @@ def main() -> None:
     analytics_yoy_parser.add_argument("--type", default=None, help="Filter by category type (e.g. spending, income)")
     analytics_yoy_parser.add_argument(
         "--years",
+        type=_year_list,
         default=None,
         metavar="YYYY,YYYY,...",
         help="Comma-separated list of years to compare (default: all available years)",
