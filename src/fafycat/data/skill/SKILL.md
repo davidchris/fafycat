@@ -16,7 +16,7 @@ fafycat tx list --ytd --category Groceries --limit 50
 ```
 
 ### `fafycat cat list`
-All active categories with `id`, `name`, `type`, `is_active`, `budget`.
+Response envelope: `categories` (list of `{id, name, type, is_active, budget}`), `total_count`.
 ```
 fafycat cat list
 fafycat cat list --include-inactive

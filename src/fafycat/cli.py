@@ -222,7 +222,8 @@ def cmd_cat_list(args: argparse.Namespace) -> None:
     with db_manager.get_session() as session:
         categories = CategoryService.get_categories(session, include_inactive=args.include_inactive)
 
-    emit_success([c.model_dump() for c in categories])
+    cat_dicts = [c.model_dump() for c in categories]
+    emit_success({"categories": cat_dicts, "total_count": len(cat_dicts)})
 
 
 def cmd_tx_list(args: argparse.Namespace) -> None:

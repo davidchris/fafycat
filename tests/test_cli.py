@@ -98,24 +98,29 @@ def test_cli_import_valid_csv_prints_expected_json_shape(cli_runner, tmp_path):
 
 
 @pytest.mark.integration
-def test_cat_list_empty_db_returns_empty_list(cli_runner):
-    """cat list on a fresh DB returns an empty JSON array, not an error."""
+def test_cat_list_returns_envelope_shape(cli_runner):
+    """cat list on a fresh DB returns envelope with categories list and total_count."""
     result = cli_runner("cat", "list")
     assert result.returncode == 0, f"stderr={result.stderr!r}"
     payload = json.loads(result.stdout)
-    assert payload == []
+    assert isinstance(payload, dict), "expected envelope dict, got bare array or other type"
+    assert "categories" in payload
+    assert "total_count" in payload
+    assert payload["categories"] == []
+    assert payload["total_count"] == 0
 
 
 @pytest.mark.integration
 def test_cat_list_after_init_returns_categories_with_required_keys(cli_runner):
-    """After init, cat list returns categories each with id, name, type, is_active, budget."""
+    """After init, cat list returns envelope with categories each having required keys."""
     cli_runner("init")
     result = cli_runner("cat", "list")
     assert result.returncode == 0, f"stderr={result.stderr!r}"
     payload = json.loads(result.stdout)
-    assert isinstance(payload, list)
-    assert len(payload) > 0
-    cat = payload[0]
+    assert isinstance(payload, dict)
+    assert "categories" in payload and "total_count" in payload
+    assert len(payload["categories"]) > 0
+    cat = payload["categories"][0]
     for key in ("id", "name", "type", "is_active", "budget"):
         assert key in cat, f"missing key {key!r}"
 
@@ -128,8 +133,8 @@ def test_cat_list_include_inactive_returns_all(cli_runner):
     result_all = cli_runner("cat", "list", "--include-inactive")
     assert result_active.returncode == 0
     assert result_all.returncode == 0
-    active_count = len(json.loads(result_active.stdout))
-    all_count = len(json.loads(result_all.stdout))
+    active_count = json.loads(result_active.stdout)["total_count"]
+    all_count = json.loads(result_all.stdout)["total_count"]
     assert all_count >= active_count
 
 
