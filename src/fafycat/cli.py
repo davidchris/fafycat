@@ -399,6 +399,52 @@ def cmd_analytics_variance(args: argparse.Namespace) -> None:
     emit_success(result)
 
 
+def cmd_analytics_savings(args: argparse.Namespace) -> None:
+    """Return monthly and cumulative savings for a date range as JSON."""
+    _apply_data_dir_override(args.data_dir)
+    logging.disable(logging.WARNING)
+
+    from fafycat.api.services import AnalyticsService
+    from fafycat.cli_query.date_range import resolve_date_range
+    from fafycat.cli_query.output import emit_error, emit_success
+    from fafycat.core.config import AppConfig
+    from fafycat.core.database import DatabaseManager
+
+    start_date: date | None = None
+    end_date: date | None = None
+    year: int | None = getattr(args, "year", None)
+
+    _has_date_arg = (
+        args.start is not None
+        or args.end is not None
+        or args.month is not None
+        or args.year is not None
+        or args.this_month
+        or args.last_month
+        or args.ytd
+        or args.last_n_months is not None
+    )
+    if _has_date_arg and year is None:
+        try:
+            start_date, end_date = resolve_date_range(args)
+        except ValueError as exc:
+            emit_error(str(exc))
+
+    config = AppConfig()
+    db_manager = DatabaseManager(config)
+    db_manager.create_tables()
+
+    with db_manager.get_session() as session:
+        result = AnalyticsService.get_savings_tracking(
+            session,
+            year=year,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    emit_success(result)
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize fafycat data directory and default categories."""
     _apply_data_dir_override(args.data_dir)
@@ -645,6 +691,38 @@ def main() -> None:
         "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
     )
 
+    analytics_savings_parser = analytics_subparsers.add_parser(
+        "savings",
+        help="Monthly and cumulative savings for a date range",
+        description=(
+            "Return monthly and cumulative savings as JSON. "
+            "Examples: fafycat analytics savings --year 2025  |  fafycat analytics savings --ytd"
+        ),
+    )
+    analytics_savings_parser.add_argument(
+        "--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)"
+    )
+    analytics_savings_parser.add_argument("--end", type=date.fromisoformat, default=None, help="End date (YYYY-MM-DD)")
+    analytics_savings_date_group = analytics_savings_parser.add_mutually_exclusive_group()
+    analytics_savings_date_group.add_argument(
+        "--month", default=None, metavar="YYYY-MM", help="Filter to a calendar month"
+    )
+    analytics_savings_date_group.add_argument(
+        "--year", type=int, default=None, metavar="YYYY", help="Filter to a calendar year"
+    )
+    analytics_savings_date_group.add_argument(
+        "--this-month", action="store_true", default=False, help="Filter to the current month"
+    )
+    analytics_savings_date_group.add_argument(
+        "--last-month", action="store_true", default=False, help="Filter to the previous month"
+    )
+    analytics_savings_date_group.add_argument(
+        "--ytd", action="store_true", default=False, help="Filter to year-to-date"
+    )
+    analytics_savings_date_group.add_argument(
+        "--last-n-months", type=int, default=None, metavar="N", help="Filter to the last N months"
+    )
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -660,6 +738,7 @@ def main() -> None:
                 "monthly": cmd_analytics_monthly,
                 "breakdown": cmd_analytics_breakdown,
                 "variance": cmd_analytics_variance,
+                "savings": cmd_analytics_savings,
             },
         ),
     }
