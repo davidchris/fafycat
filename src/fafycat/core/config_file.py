@@ -32,12 +32,11 @@ def load_config_file(path: Path | None) -> dict[str, str]:
         env_path = os.getenv("FAFYCAT_CONFIG")
         path = Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
 
-    if not path.exists():
-        return {}
-
     try:
         with path.open("rb") as f:
             data = tomllib.load(f)
+    except FileNotFoundError:
+        return {}
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"Malformed TOML in {path}: {exc}") from exc
 

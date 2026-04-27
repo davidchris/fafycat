@@ -7,20 +7,40 @@ from typing import Any
 from platformdirs import user_data_dir
 from pydantic import BaseModel, Field
 
+from fafycat.core.config_file import load_config_file
+
 
 def _default_data_dir() -> Path:
     """Return the default application data directory."""
-    return Path(os.getenv("FAFYCAT_DATA_DIR", user_data_dir("fafycat")))
+    env = os.getenv("FAFYCAT_DATA_DIR")
+    if env:
+        return Path(env)
+    cfg = load_config_file(None)
+    if "data_dir" in cfg:
+        return Path(cfg["data_dir"])
+    return Path(user_data_dir("fafycat"))
 
 
 def _default_database_url() -> str:
     """Return the default database URL."""
-    return os.getenv("FAFYCAT_DB_URL", f"sqlite:///{_default_data_dir() / 'fafycat.db'}")
+    env = os.getenv("FAFYCAT_DB_URL")
+    if env:
+        return env
+    cfg = load_config_file(None)
+    if "db_url" in cfg:
+        return cfg["db_url"]
+    return f"sqlite:///{_default_data_dir() / 'fafycat.db'}"
 
 
 def _default_model_dir() -> Path:
     """Return the default model directory."""
-    return Path(os.getenv("FAFYCAT_MODEL_DIR", _default_data_dir() / "models"))
+    env = os.getenv("FAFYCAT_MODEL_DIR")
+    if env:
+        return Path(env)
+    cfg = load_config_file(None)
+    if "model_dir" in cfg:
+        return Path(cfg["model_dir"])
+    return _default_data_dir() / "models"
 
 
 class DatabaseConfig(BaseModel):
@@ -105,16 +125,24 @@ class AppConfig(BaseModel):
 
     def model_post_init(self, __context: Any) -> None:
         """Derive dependent paths after initialization."""
-        if "database" not in self.model_fields_set and "FAFYCAT_DB_URL" not in os.environ:
+        file_cfg = load_config_file(None)
+
+        if "database" not in self.model_fields_set and "FAFYCAT_DB_URL" not in os.environ and "db_url" not in file_cfg:
             self.database.url = f"sqlite:///{self.data_dir / 'fafycat.db'}"
 
-        if "ml" not in self.model_fields_set and "FAFYCAT_MODEL_DIR" not in os.environ:
+        if "ml" not in self.model_fields_set and "FAFYCAT_MODEL_DIR" not in os.environ and "model_dir" not in file_cfg:
             self.ml.model_dir = self.data_dir / "models"
 
-        if "export_dir" not in self.model_fields_set and "FAFYCAT_EXPORT_DIR" not in os.environ:
+        no_explicit_export_dir = "export_dir" not in self.model_fields_set and "FAFYCAT_EXPORT_DIR" not in os.environ
+        if no_explicit_export_dir and "export_dir" not in file_cfg:
             self.export_dir = self.data_dir / "exports"
         elif self.export_dir is None:
-            self.export_dir = Path(os.getenv("FAFYCAT_EXPORT_DIR", self.data_dir / "exports"))
+            if "FAFYCAT_EXPORT_DIR" in os.environ:
+                self.export_dir = Path(os.environ["FAFYCAT_EXPORT_DIR"])
+            elif "export_dir" in file_cfg:
+                self.export_dir = Path(file_cfg["export_dir"])
+            else:
+                self.export_dir = self.data_dir / "exports"
 
     def ensure_dirs(self) -> None:
         """Create necessary directories."""
