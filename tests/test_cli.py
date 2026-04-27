@@ -7,6 +7,7 @@ these assertions hold on both sides of the packaging refactor.
 """
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -136,6 +137,29 @@ def test_cat_list_include_inactive_returns_all(cli_runner):
     active_count = json.loads(result_active.stdout)["total_count"]
     all_count = json.loads(result_all.stdout)["total_count"]
     assert all_count >= active_count
+
+
+@pytest.mark.integration
+def test_cat_list_include_inactive_actually_filters(cli_runner, tmp_data_dir: Path):
+    """--include-inactive exposes categories toggled inactive; default omits them."""
+    cli_runner("init")
+    db_path = tmp_data_dir / "test.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        (inactive_name,) = conn.execute(
+            "SELECT name FROM categories WHERE is_active = 1 ORDER BY id LIMIT 1"
+        ).fetchone()
+        conn.execute("UPDATE categories SET is_active = 0 WHERE name = ?", (inactive_name,))
+    result_active = cli_runner("cat", "list")
+    result_all = cli_runner("cat", "list", "--include-inactive")
+    assert result_active.returncode == 0, f"stderr={result_active.stderr!r}"
+    assert result_all.returncode == 0, f"stderr={result_all.stderr!r}"
+    payload_active = json.loads(result_active.stdout)
+    payload_all = json.loads(result_all.stdout)
+    assert payload_all["total_count"] == payload_active["total_count"] + 1
+    active_names = {c["name"] for c in payload_active["categories"]}
+    all_names = {c["name"] for c in payload_all["categories"]}
+    assert inactive_name not in active_names
+    assert inactive_name in all_names
 
 
 @pytest.mark.integration
