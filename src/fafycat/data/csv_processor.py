@@ -53,7 +53,7 @@ class CSVProcessor:
             errors.append("Could not detect required columns (date, amount, description)")
             return transactions, errors
 
-        for idx, row in df.iterrows():
+        for row_num, (_, row) in enumerate(df.iterrows(), start=1):
             try:
                 # Extract required fields
                 txn_date = self._parse_date(row[column_mapping["date"]])
@@ -89,7 +89,7 @@ class CSVProcessor:
                 transactions.append(transaction)
 
             except Exception as e:
-                errors.append(f"Row {idx + 1}: {str(e)}")
+                errors.append(f"Row {row_num}: {str(e)}")
 
         return transactions, errors
 

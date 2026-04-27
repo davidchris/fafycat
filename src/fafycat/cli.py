@@ -498,6 +498,20 @@ def cmd_analytics_top(args: argparse.Namespace) -> None:
     emit_success(result)
 
 
+def cmd_skill_install(args: argparse.Namespace) -> None:
+    """Install the bundled fafycat skill into a workspace directory."""
+    from fafycat.cli_query.output import emit_error, emit_success
+    from fafycat.cli_query.skill_install import install_skill
+
+    target_dir = Path(args.path) if args.path else Path(".claude/skills/fafycat")
+    try:
+        written = install_skill(target_dir, force=args.force)
+    except FileExistsError as exc:
+        emit_error(str(exc))
+        return
+    emit_success({"installed": str(written)})
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize fafycat data directory and default categories."""
     _apply_data_dir_override(args.data_dir)
@@ -806,6 +820,26 @@ def main() -> None:
         "--limit", type=int, default=5, help="Number of transactions to return (default: 5)"
     )
 
+    # skill subcommand group
+    skill_parser = subparsers.add_parser("skill", help="Skill management")
+    skill_subparsers = skill_parser.add_subparsers(dest="subcommand")
+    skill_install_parser = skill_subparsers.add_parser(
+        "install",
+        help="Install the fafycat Claude Code skill into a workspace directory",
+        description=(
+            "Write the bundled fafycat skill file to PATH (default: ./.claude/skills/fafycat/). "
+            "Examples: fafycat skill install  |  fafycat skill install ~/myproject/.claude/skills/fafycat"
+        ),
+    )
+    skill_install_parser.add_argument(
+        "path",
+        nargs="?",
+        default=None,
+        metavar="PATH",
+        help="Target directory (default: ./.claude/skills/fafycat/)",
+    )
+    skill_install_parser.add_argument("--force", action="store_true", default=False, help="Overwrite existing file")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -826,6 +860,7 @@ def main() -> None:
                 "top": cmd_analytics_top,
             },
         ),
+        "skill": (skill_parser, {"install": cmd_skill_install}),
     }
     if args.command in group_commands:
         group_parser, handlers = group_commands[args.command]

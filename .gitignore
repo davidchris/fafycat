@@ -15,11 +15,12 @@ wheels/
 
 .DS_Store
 .ipynb_checkpoints/
-data/
+/data/
 
 # Local Claude Code & MCP state
 .claude/settings.local.json
 .claude/launch.json
+.claude/skills/
 .playwright-mcp/
 
 # Personal notes / planning (not intended for the public repo)
@@ -41,3 +42,6 @@ product-plans/
 # Generated README capture workspace
 docs/media/.raw/
 docs/media/.raw-test/
+
+# Ralph AFK worker: host-side issue snapshots fed to sandbox
+plans/issue-*.md

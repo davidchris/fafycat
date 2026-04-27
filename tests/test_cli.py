@@ -250,3 +250,16 @@ def test_analytics_top_returns_json_shape(cli_runner):
     assert isinstance(payload["top_transactions"], list)
     assert payload["year"] == 2025
     assert payload["month"] == 1
+
+
+@pytest.mark.integration
+def test_skill_install_writes_skill_md(cli_runner, tmp_path):
+    """skill install writes SKILL.md to target dir; file has frontmatter description and mentions fafycat."""
+    target = tmp_path / "skills" / "fafycat"
+    result = cli_runner("skill", "install", str(target))
+    assert result.returncode == 0, f"stderr={result.stderr!r}\nstdout={result.stdout!r}"
+    skill_file = target / "SKILL.md"
+    assert skill_file.exists(), "SKILL.md was not written"
+    content = skill_file.read_text()
+    assert "description:" in content, "frontmatter missing 'description' key"
+    assert "fafycat" in content.lower(), "skill body does not mention fafycat"
