@@ -167,6 +167,16 @@ Common bank formats supported:
 - **Your Data**: You own and control all your financial data
 - **Open Source**: Fully auditable codebase
 
+## 🤖 Use with Coding Agents
+
+FafyCat ships a small read-only CLI surface (transactions, categories, budgets, analytics) that is designed for use by coding agents like Claude Code. Every command emits JSON. A bundled Claude Code skill is one command away:
+
+```bash
+fafycat skill install
+```
+
+See [docs/coding-agents.md](docs/coding-agents.md) for the full guide.
+
 ## 🛠️ Configuration
 
 ### Environment Variables
