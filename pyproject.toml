@@ -53,7 +53,7 @@ Issues = "https://github.com/davidchris/fafycat/issues"
 Documentation = "https://github.com/davidchris/fafycat#readme"
 
 [tool.uv]
-exclude-newer = "7 days"
+exclude-newer = "1 day"
 
 [tool.ruff]
 line-length = 120
@@ -167,7 +167,7 @@ markers = [
 dev = [
     "ipykernel>=7.2.0",
     "jupyter>=1.1.1",
-    "jupyterlab>=4.5.4",
+    "jupyterlab>=4.5.7",
     "matplotlib>=3.10.6",
     "nbconvert>=7.17.1",
     "pytest>=9.0.3",
