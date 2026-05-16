@@ -72,11 +72,11 @@ def create_page_layout(title: str, content: str) -> str:
         <meta name="color-scheme" content="dark">
         <title>{title}</title>
         <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-        <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+        <link href="/static/vendor/tailwind-2.2.19.min.css" rel="stylesheet">
         <link href="/static/css/theme.css" rel="stylesheet">
         <link href="/static/css/components.css" rel="stylesheet">
         <script>document.documentElement.className='js-enabled';</script>
-        <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+        <script src="/static/vendor/htmx-1.9.12.min.js"></script>
         <script src="/static/js/main.js" defer></script>
     </head>
     <body class="antialiased">

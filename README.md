@@ -1,6 +1,6 @@
 # 🐱 FafyCat - Local-First Transaction Categorization
 
-FafyCat is a privacy-focused financial transaction categorization tool that uses machine learning to automatically organize your banking data with >90% accuracy. All processing happens locally on your device - no cloud services, no data sharing.
+FafyCat is a privacy-focused financial transaction categorization tool that uses local machine learning to organize your banking CSV exports. Your transaction data stays on your device: no account linking, no hosted backend, and no cloud copy of your financial history.
 
 <p align="center">
   <img src="docs/media/fafycat-demo.gif" alt="FafyCat demo showing the workflow from import to review and analytics" width="100%">
@@ -18,8 +18,8 @@ FafyCat is a privacy-focused financial transaction categorization tool that uses
 
 ## ✨ Key Features
 
-- **🤖 Smart Categorization**: Machine learning automatically categorizes transactions with high accuracy
-- **🔒 Privacy First**: All data stays on your device - no external APIs or cloud services
+- **🤖 Smart Categorization**: Machine learning categorizes transactions from your own reviewed history
+- **🔒 Privacy First**: Transaction data stays on your device, with local static assets and no hosted backend
 - **📊 Intelligent Review**: Active learning reduces manual work by 70-90%
 - **🏪 Merchant Memory**: Learns from your patterns to improve over time
 - **📈 Export Ready**: Multiple export formats for your favorite analysis tools
@@ -163,7 +163,8 @@ Common bank formats supported:
 ### Privacy & Security
 
 - **Local Processing**: All ML models run on your device
-- **No Cloud Services**: Zero external API calls
+- **No Account Linking**: Import CSV exports instead of connecting bank accounts
+- **No Hosted Backend**: The web UI is served by your local FafyCat process
 - **Your Data**: You own and control all your financial data
 - **Open Source**: Fully auditable codebase
 
@@ -207,7 +208,7 @@ FAFYCAT_HOST=127.0.0.1
 
 ## 📈 Performance
 
-- **Accuracy**: >90% correct categorization
+- **Accuracy**: Designed to improve from your reviewed transactions; results depend on your data quality and category history
 - **Speed**: <100ms per transaction
 - **Scale**: Handles 100,000+ transactions
 - **Efficiency**: 70-90% reduction in manual review
@@ -250,7 +251,7 @@ All shipped application code lives under `src/fafycat/`:
 
 ## 🤝 Contributing
 
-tbd.
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, quality checks, and pull request expectations.
 
 ## 📄 License
 

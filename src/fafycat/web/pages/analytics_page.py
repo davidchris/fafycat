@@ -283,7 +283,7 @@ def render_analytics_page(request: Request, session: Session) -> HTMLResponse:
     </div>
 
     <!-- Chart.js and Analytics JavaScript -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/vendor/chart-4.4.9.umd.min.js"></script>
     <script src="/static/js/analytics.js"></script>
     <script src="/static/js/analytics_yoy.js"></script>
     <script src="/static/js/analytics_page.js"></script>
