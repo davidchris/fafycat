@@ -83,8 +83,8 @@ for _ in range(90):
 raise SystemExit("Training did not complete in time")
 PY
 
-npm install --prefix "${NODE_TOOLS_DIR}" --no-save --no-package-lock playwright >/dev/null
-NODE_PATH="${NODE_TOOLS_DIR}/node_modules" npx -y playwright install chromium >/dev/null
+npm install --prefix "${NODE_TOOLS_DIR}" --ignore-scripts --no-save --no-package-lock playwright >/dev/null
+NODE_PATH="${NODE_TOOLS_DIR}/node_modules" "${NODE_TOOLS_DIR}/node_modules/.bin/playwright" install chromium >/dev/null
 NODE_PATH="${NODE_TOOLS_DIR}/node_modules" node "${ROOT_DIR}/scripts/capture_readme_demo.cjs" \
     --base-url "${BASE_URL}" \
     --output-dir "${RAW_DIR}" \
