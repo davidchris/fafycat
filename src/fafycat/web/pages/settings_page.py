@@ -1121,7 +1121,7 @@ def render_budget_variance_section():
     </script>
 
     <!-- Chart.js for budget variance chart -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/vendor/chart-4.4.9.umd.min.js"></script>
     """
 
 

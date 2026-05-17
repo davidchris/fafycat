@@ -11,7 +11,7 @@ By participating in this project, you agree to be respectful and constructive in
 ### Reporting Issues
 
 1. **Search existing issues** to avoid duplicates
-2. **Use issue templates** when available
+2. **Open a focused issue** with a clear title
 3. **Provide context**: Include OS, Python version, and steps to reproduce
 4. **Be specific**: Clear descriptions help us fix issues faster
 
@@ -36,7 +36,7 @@ uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install development dependencies
-uv install
+uv sync --dev
 
 # Run tests to verify setup
 uv run pytest
@@ -60,7 +60,7 @@ uv run pytest
    uvx ruff check
    
    # Type checking
-   uvx ty
+   uvx ty check
    
    # Run tests
    uv run pytest
@@ -116,7 +116,7 @@ We follow conventional commits:
 
 ## Pull Request Process
 
-1. **Fill out the PR template** completely
+1. **Explain the user-facing change** and any privacy implications
 2. **Link related issues** using keywords (fixes #123)
 3. **Ensure CI passes** all checks
 4. **Respond to feedback** promptly
@@ -136,7 +136,7 @@ We follow conventional commits:
 
 ```bash
 # Run in development mode
-uv run python run_dev.py
+uv run fafycat serve --dev
 
 # Reset with sample data
 uv run python scripts/reset_and_import.py --dev-mode --use-sample-data
@@ -157,10 +157,8 @@ uv run python scripts/train_model.py
 
 ## Getting Help
 
-- **Discord**: [Join our community](https://discord.gg/fafycat) (if available)
-- **Discussions**: Use GitHub Discussions for questions
-- **Issues**: For bugs and feature requests
-- **Email**: contributors@fafycat.org (if available)
+- **Issues**: Use GitHub Issues for bugs and feature requests
+- **Discussions**: Use GitHub Discussions if enabled for broader questions
 
 ## Recognition
 
@@ -171,7 +169,7 @@ Contributors are recognized in:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
 
 ---
 
