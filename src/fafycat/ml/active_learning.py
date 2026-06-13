@@ -135,8 +135,10 @@ class ActiveLearningSelector:
 
     def _get_merchant_novelty_score(self, merchant_name: str) -> float:
         """Calculate novelty score for merchant (higher for new/rare merchants)."""
-        # Count how many transactions we have from this merchant
-        count = self.session.query(TransactionORM).filter(TransactionORM.name.like(f"%{merchant_name[:10]}%")).count()
+        # Count how many transactions we have from this merchant.
+        # Escape LIKE wildcards so merchant names containing % or _ match literally.
+        prefix = merchant_name[:10].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        count = self.session.query(TransactionORM).filter(TransactionORM.name.like(f"%{prefix}%", escape="\\")).count()
 
         # Novelty decreases with frequency
         if count == 0:

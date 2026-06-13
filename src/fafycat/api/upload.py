@@ -173,6 +173,7 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
     if file.size and file.size > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
+    temp_file_path: Path | None = None
     try:
         # Create temporary file
         with tempfile.NamedTemporaryFile(mode="wb", suffix=".csv", delete=False) as temp_file:
@@ -183,9 +184,6 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
         # Process CSV
         processor = CSVProcessor(db)
         transactions, errors = processor.import_csv(temp_file_path)
-
-        # Clean up temp file
-        temp_file_path.unlink()
 
         if errors:
             raise HTTPException(
@@ -227,6 +225,9 @@ async def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db_
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload processing failed: {str(e)}") from e
+    finally:
+        if temp_file_path is not None:
+            temp_file_path.unlink(missing_ok=True)
 
 
 @router.get("/preview/{upload_id}")
@@ -294,6 +295,7 @@ async def confirm_upload(upload_id: str, db: Session = Depends(get_db_session)) 
 @router.post("/csv-htmx", response_class=HTMLResponse)
 async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(get_db_session)) -> str:
     """Upload and process a CSV file, returning HTML results for HTMX."""
+    temp_file_path: Path | None = None
     try:
         # Validate file type
         if not file.filename or not file.filename.endswith(".csv"):
@@ -312,9 +314,6 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
         # Process CSV
         processor = CSVProcessor(db)
         transactions, errors = processor.import_csv(temp_file_path)
-
-        # Clean up temp file
-        temp_file_path.unlink()
 
         if errors:
             return _render_upload_error(f"CSV processing errors: {'; '.join(errors[:3])}")
@@ -339,6 +338,9 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
 
     except Exception as e:
         return _render_upload_error(f"Upload processing failed: {str(e)}")
+    finally:
+        if temp_file_path is not None:
+            temp_file_path.unlink(missing_ok=True)
 
 
 def _render_upload_success(

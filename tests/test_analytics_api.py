@@ -342,3 +342,37 @@ class TestAvailableYearsEndpoint:
         data = response.json()
         assert data["latest_transaction_date"] == "2024-12-15"
         assert data["default_year"] == 2024
+
+
+class TestMonthlySummaryAPI:
+    """Tests for the monthly summary endpoint."""
+
+    def test_single_year_returns_twelve_months(self, test_client):
+        """Test that a year-based query returns one entry per month."""
+        response = test_client.get("/api/analytics/monthly-summary?year=2024")
+        assert response.status_code == 200
+
+        data = response.json()
+        monthly_data = data["monthly_data"]
+        assert len(monthly_data) == 12
+        assert [m["month"] for m in monthly_data] == [f"2024-{month:02d}" for month in range(1, 13)]
+
+    def test_cross_year_range_keeps_months_separate(self, test_client):
+        """Test that a range spanning years does not merge same-named months.
+
+        Regression test: months used to be keyed by month number only, so
+        January 2023 and January 2024 were summed into a single bucket.
+        """
+        response = test_client.get("/api/analytics/monthly-summary?start_date=2023-11-01&end_date=2024-02-28")
+        assert response.status_code == 200
+
+        data = response.json()
+        monthly_data = {m["month"]: m for m in data["monthly_data"]}
+        assert sorted(monthly_data) == ["2023-11", "2023-12", "2024-01", "2024-02"]
+
+        # 2024 salary is 3150/month; a collapsed bucket would show 3000 + 3150
+        assert monthly_data["2024-01"]["income"] == pytest.approx(3150.00)
+        assert monthly_data["2023-11"]["income"] == pytest.approx(3000.00)
+
+        # Yearly totals cover exactly the four months in range
+        assert data["yearly_totals"]["income"] == pytest.approx(2 * 3000.00 + 2 * 3150.00)

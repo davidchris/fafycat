@@ -92,9 +92,9 @@ def render_settings_page(request: Request, db: Session):
     """Render the settings and categories page."""
 
     # Get all categories (including inactive ones for management)
-    active_categories = get_categories(db, active_only=True)
-    inactive_categories = get_categories(db, active_only=False)
-    inactive_categories = [cat for cat in inactive_categories if not cat.is_active]
+    all_categories = get_categories(db, active_only=False)
+    active_categories = [cat for cat in all_categories if cat.is_active]
+    inactive_categories = [cat for cat in all_categories if not cat.is_active]
 
     # Group categories by type
     category_groups = {
