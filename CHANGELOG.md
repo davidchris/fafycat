@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-13
+
 ### Fixed
 - **Analytics bars now render reliably.** The Spending, Income, and Saving
   category charts could appear empty after a recent chart-library upgrade.
@@ -42,3 +44,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   warnings.
 - The training-progress endpoint that the UI polls during training no
   longer fills the access log with one line per poll.
+
+### Security
+- Patched Dependabot vulnerability alerts and refreshed locked
+  dependencies, including an `urllib3` security update.
+
+### Changed (packaging & docs)
+- The repository was prepared for wider public sharing with updated
+  documentation.
+
+[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/davidchris/fafycat/releases/tag/v0.1.0
