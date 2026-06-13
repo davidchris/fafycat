@@ -99,6 +99,7 @@ class TransactionORM(Base):
         CheckConstraint("confidence_score >= 0 AND confidence_score <= 1", name="check_confidence_range"),
         Index("idx_transactions_date", "date"),
         Index("idx_transactions_category", "category_id"),
+        Index("idx_transactions_predicted_category", "predicted_category_id"),
         Index("idx_transactions_reviewed", "is_reviewed"),
         Index("idx_transactions_confidence", "confidence_score"),
         Index("idx_transactions_amount", "amount"),
@@ -172,8 +173,17 @@ class DatabaseManager:
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
     def create_tables(self) -> None:
-        """Create all database tables."""
+        """Create all database tables and any indexes missing from existing tables.
+
+        ``create_all`` skips tables that already exist, so indexes added to the
+        schema after a database was created are built explicitly here.
+        """
         Base.metadata.create_all(bind=self.engine)
+        with self.engine.connect() as conn:
+            for table in Base.metadata.tables.values():
+                for index in table.indexes:
+                    index.create(bind=conn, checkfirst=True)
+            conn.commit()
 
     def get_session(self) -> Session:
         """Get database session."""

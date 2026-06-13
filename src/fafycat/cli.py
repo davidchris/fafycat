@@ -598,11 +598,11 @@ def _dispatch_group(
     handlers: dict[str, Callable[[argparse.Namespace], None]],
 ) -> None:
     """Dispatch to a named subcommand handler, or print group help if none given."""
-    subcommand = getattr(args, "subcommand", None)
-    if subcommand is None:
+    raw_subcommand = getattr(args, "subcommand", None)
+    if raw_subcommand is None:
         group_parser.print_help()
         sys.exit(0)
-    handler = handlers.get(subcommand)
+    handler = handlers.get(str(raw_subcommand))
     if handler is not None:
         handler(args)
 

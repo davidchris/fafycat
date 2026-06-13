@@ -105,6 +105,19 @@ function formatDateRange(startDate, endDate, year) {
 }
 
 /**
+ * Format a "YYYY-MM" month key as a chart label.
+ * Shows "Jan" for single-year data, "Jan 24" when the dataset spans years.
+ */
+function formatMonthLabel(monthKey, dataset) {
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const [year, month] = String(monthKey).split('-');
+    const name = monthNames[parseInt(month, 10) - 1] || monthKey;
+    const multiYear = new Set(dataset.map(d => String(d.month).split('-')[0])).size > 1;
+    return multiYear ? `${name} ${year.slice(2)}` : name;
+}
+
+/**
  * Initialize or update budget variance chart
  */
 function updateBudgetVarianceChart(data) {
@@ -213,12 +226,8 @@ function updateMonthlyOverviewChart(data) {
     const monthlyData = data.monthly_data || [];
     const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
 
-    // Prepare chart data
-    const labels = monthlyData.map(m => {
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        return monthNames[parseInt(m.month) - 1];
-    });
+    // Prepare chart data ("month" is "YYYY-MM"; show year only for multi-year ranges)
+    const labels = monthlyData.map(m => formatMonthLabel(m.month, monthlyData));
 
     charts.monthlyOverview = new Chart(ctx, {
         type: 'bar',
@@ -703,11 +712,7 @@ function updateSavingsTrackingChart(data) {
         monthlyValues = [0];
         cumulativeValues = [0];
     } else {
-        labels = savingsData.map(s => {
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            return monthNames[parseInt(s.month) - 1];
-        });
+        labels = savingsData.map(s => formatMonthLabel(s.month, savingsData));
         monthlyValues = savingsData.map(s => Math.abs(s.amount));
         cumulativeValues = savingsData.map(s => s.cumulative_amount);
     }

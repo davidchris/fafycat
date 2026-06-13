@@ -1,6 +1,7 @@
 """Service layer for database operations."""
 
 import math
+import statistics
 from datetime import date, datetime
 from typing import Any, cast
 
@@ -619,7 +620,7 @@ class AnalyticsService:
         """Query monthly transaction aggregations by category type."""
         query = (
             session.query(
-                func.strftime("%m", TransactionORM.date).label("month"),
+                func.strftime("%Y-%m", TransactionORM.date).label("month"),
                 CategoryORM.type,
                 func.sum(TransactionORM.amount).label("total_amount"),
             )
@@ -629,8 +630,8 @@ class AnalyticsService:
             )
             .filter(TransactionORM.date.between(start_date, end_date))
             .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
-            .group_by(func.strftime("%m", TransactionORM.date), CategoryORM.type)
-            .order_by(func.strftime("%m", TransactionORM.date))
+            .group_by(func.strftime("%Y-%m", TransactionORM.date), CategoryORM.type)
+            .order_by(func.strftime("%Y-%m", TransactionORM.date))
         )
         return query.all()
 
@@ -642,7 +643,8 @@ class AnalyticsService:
         end_month = end_date.replace(day=1)
 
         while current_date <= end_month:
-            month_str = f"{current_date.month:02d}"
+            # Year-qualified key so multi-year ranges don't collapse same-named months
+            month_str = f"{current_date.year}-{current_date.month:02d}"
             monthly_data[month_str] = {
                 "month": month_str,
                 "income": 0.0,
@@ -790,7 +792,7 @@ class AnalyticsService:
         # Use COALESCE to get effective category (actual takes precedence over predicted)
         query = (
             session.query(
-                func.strftime("%m", TransactionORM.date).label("month"),
+                func.strftime("%Y-%m", TransactionORM.date).label("month"),
                 func.sum(TransactionORM.amount).label("savings_amount"),
             )
             .join(
@@ -800,8 +802,8 @@ class AnalyticsService:
             .filter(CategoryORM.type == CategoryType.SAVING)
             .filter(TransactionORM.date.between(resolved_start, resolved_end))
             .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
-            .group_by(func.strftime("%m", TransactionORM.date))
-            .order_by(func.strftime("%m", TransactionORM.date))
+            .group_by(func.strftime("%Y-%m", TransactionORM.date))
+            .order_by(func.strftime("%Y-%m", TransactionORM.date))
         )
 
         results = query.all()
@@ -814,7 +816,8 @@ class AnalyticsService:
         end_month = resolved_end.replace(day=1)
 
         while current_date <= end_month:
-            month_str = f"{current_date.month:02d}"
+            # Year-qualified key so multi-year ranges don't collapse same-named months
+            month_str = f"{current_date.year}-{current_date.month:02d}"
             monthly_savings[month_str] = {"month": month_str, "amount": 0.0}
             # Move to next month
             if current_date.month == 12:
@@ -840,7 +843,7 @@ class AnalyticsService:
         stats = {
             "total_savings": cumulative_savings,
             "average_monthly": sum(amounts) / len(amounts) if amounts else 0,
-            "median_monthly": sorted(amounts)[len(amounts) // 2] if amounts else 0,
+            "median_monthly": statistics.median(amounts) if amounts else 0,
             "months_with_savings": len(amounts),
         }
 
@@ -1128,11 +1131,7 @@ class AnalyticsService:
     ) -> dict[str, Any]:
         """Get monthly cumulative data for a specific category across multiple years."""
         if not years:
-            year_query = session.query(func.distinct(func.strftime("%Y", TransactionORM.date))).order_by(
-                func.strftime("%Y", TransactionORM.date).desc()
-            )
-            available_years = [int(y[0]) for y in year_query.all()]
-            years = available_years[:3] if len(available_years) >= 3 else available_years
+            years = AnalyticsService._get_available_years(session)
 
         if not years:
             return {"years": [], "monthly_data": {}, "category_name": None}
@@ -1241,18 +1240,19 @@ class BudgetService:
     @staticmethod
     def get_budgets_for_year(session: Session, year: int) -> dict[str, Any]:
         """Get all budgets for a specific year."""
-        # Get all active categories
-        categories = session.query(CategoryORM).filter(CategoryORM.is_active).all()
+        # Fetch categories and their year-specific budgets in one query (avoids N+1)
+        rows = (
+            session.query(CategoryORM, BudgetPlanORM)
+            .outerjoin(
+                BudgetPlanORM,
+                and_(BudgetPlanORM.category_id == CategoryORM.id, BudgetPlanORM.year == year),
+            )
+            .filter(CategoryORM.is_active)
+            .all()
+        )
 
         budgets = []
-        for category in categories:
-            # Try to get year-specific budget
-            budget_plan = (
-                session.query(BudgetPlanORM)
-                .filter(BudgetPlanORM.category_id == category.id, BudgetPlanORM.year == year)
-                .first()
-            )
-
+        for category, budget_plan in rows:
             if budget_plan:
                 budget = _to_float(budget_plan.monthly_budget)
                 has_year_specific = True
@@ -1275,7 +1275,7 @@ class BudgetService:
         return {
             "year": year,
             "budgets": budgets,
-            "total_categories": len(categories),
+            "total_categories": len(budgets),
             "has_year_specific_budgets": has_year_specific_budgets,
         }
 
