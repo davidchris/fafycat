@@ -128,10 +128,9 @@ unused-ignore-comment = "warn"
 deprecated = "warn"
 
 # Relax type checking for experimental scripts and simulation notebooks.
-# These directories import optional ML deps (torch, sentence_transformers, transformers,
-# peft, mlx_lm, optuna, ...) declared in [dependency-groups] (experiments, mlx, finetune)
-# that are intentionally absent from the default .venv. Install with
-# `uv sync --group <name>` before running such a script.
+# These directories may import optional deps (matplotlib, optuna, mlx_lm, ...)
+# that are not in the default .venv. Install ad-hoc with `uv pip install <dep>`
+# before running such a script.
 [[tool.ty.overrides]]
 include = ["simulations/", "scripts/"]
 
@@ -175,18 +174,4 @@ dev = [
     "pytest-cov>=6.1.1",
     "ruff>=0.15.11",
     "ty>=0.0.31",
-]
-experiments = [
-    "matplotlib>=3.10.6",
-    "optuna>=4.7.0",
-    "pyarrow>=23.0.0",
-    "sentence-transformers>=5.2.2",
-    "torch>=2.10.0",
-]
-mlx = [
-    "mlx-lm>=0.30.6",
-]
-finetune = [
-    "peft>=0.18.1",
-    {include-group = "experiments"},
 ]
