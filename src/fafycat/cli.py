@@ -21,6 +21,21 @@ def _positive_int(value: str) -> int:
     return n
 
 
+def _bounded_int(lo: int, hi: int) -> Callable[[str], int]:
+    """Build an argparse type= validator: integer in lo..hi, else ArgumentTypeError (exit 2)."""
+
+    def validate(value: str) -> int:
+        try:
+            n = int(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from None
+        if not lo <= n <= hi:
+            raise argparse.ArgumentTypeError(f"must be in {lo}..{hi}, got {n}")
+        return n
+
+    return validate
+
+
 def _month_int(value: str) -> int:
     """Argparse type= validator: integer in 1..12, else ArgumentTypeError (exit 2)."""
     try:
@@ -256,7 +271,7 @@ def cmd_tx_list(args: argparse.Namespace) -> None:
         except ValueError as exc:
             emit_error(str(exc))
 
-    limit = min(args.limit, 500)
+    limit = args.limit
 
     is_reviewed: bool | None = None
     if args.reviewed:
@@ -653,7 +668,7 @@ def main() -> None:
     _add_data_dir_argument(tx_list_parser, suppress_default=True)
     tx_list_parser.add_argument("--skip", type=int, default=0, help="Number of rows to skip (default: 0)")
     tx_list_parser.add_argument(
-        "--limit", type=_positive_int, default=20, help="Maximum rows to return, 1–500 (default: 20)"
+        "--limit", type=_bounded_int(1, 500), default=20, help="Maximum rows to return, 1–500 (default: 20)"
     )
     tx_list_parser.add_argument("--category", default=None, help="Filter by category name")
     tx_list_parser.add_argument("--search", default="", help="Full-text search in description")
@@ -884,7 +899,7 @@ def main() -> None:
         "--month", type=_month_int, default=None, help="Month 1-12 (default: current month)"
     )
     analytics_top_parser.add_argument(
-        "--limit", type=int, default=5, help="Number of transactions to return (default: 5)"
+        "--limit", type=_bounded_int(1, 50), default=5, help="Number of transactions to return, 1–50 (default: 5)"
     )
 
     # skill subcommand group
