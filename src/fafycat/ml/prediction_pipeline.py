@@ -73,6 +73,27 @@ def predict_unpredicted(
     return _apply_predictions(db, txns, categorizer, threshold=threshold, strategy=strategy), remaining
 
 
+def repredict_unreviewed(
+    db: Session,
+    categorizer: ConfidenceCategorizer,
+    *,
+    limit: int = 1000,
+    threshold: float | None = None,
+    strategy: str = DEFAULT_STRATEGY,
+) -> tuple[CategorizationSummary, int]:
+    """Re-predict unreviewed transactions that already have a Prediction.
+
+    Returns the Categorization Summary and the number of matching
+    transactions left unprocessed because of ``limit``. Commits.
+    """
+    query = db.query(TransactionORM).filter(
+        TransactionORM.is_reviewed.is_(False),
+        TransactionORM.predicted_category_id.is_not(None),
+    )
+    txns, remaining = _select_with_limit(query, limit)
+    return _apply_predictions(db, txns, categorizer, threshold=threshold, strategy=strategy), remaining
+
+
 def _select_with_limit(query, limit: int) -> tuple[list[TransactionORM], int]:
     """Fetch up to ``limit`` matches and count how many are left beyond it.
 

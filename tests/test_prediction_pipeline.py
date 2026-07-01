@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from fafycat.core.database import AppSettingsORM, Base, CategoryORM, TransactionORM
 from fafycat.core.models import ReviewPriority, TransactionInput, TransactionPrediction
-from fafycat.ml.prediction_pipeline import get_auto_approve_threshold, predict_unpredicted
+from fafycat.ml.prediction_pipeline import get_auto_approve_threshold, predict_unpredicted, repredict_unreviewed
 
 
 class FakeCategorizer:
@@ -222,3 +222,38 @@ def test_threshold_resolves_from_db_setting_when_not_overridden(session: Session
     assert above.review_priority == "auto_accepted"
     below = session.query(TransactionORM).filter(TransactionORM.name == "just-below").one()
     assert below.review_priority == "high"  # selected as the lowest-confidence item
+
+
+def test_repredict_selects_only_unreviewed_with_existing_prediction(session: Session) -> None:
+    """Re-predict predicate: unreviewed AND already has a Prediction; others untouched."""
+    txns = [
+        make_txn("unreviewed-predicted", predicted_category_id=1, confidence_score=0.30, is_reviewed=False),
+        make_txn("reviewed-predicted", predicted_category_id=1, confidence_score=0.30, is_reviewed=True),
+        make_txn("unreviewed-unpredicted", is_reviewed=False),
+    ]
+    session.add_all(txns)
+    session.commit()
+
+    summary, remaining = repredict_unreviewed(session, FakeCategorizer({"unreviewed-predicted": 0.60}), threshold=0.50)
+
+    assert summary.total == 1
+    assert summary.auto_accepted == 1
+    assert remaining == 0
+    target, reviewed, unpredicted = txns
+    assert target.confidence_score == 0.60
+    assert isinstance(target.review_priority, ReviewPriority)
+    assert reviewed.confidence_score == 0.30
+    assert unpredicted.predicted_category_id is None
+
+
+def test_repredict_limit_and_remaining_unreviewed_rule(session: Session) -> None:
+    """remaining counts unreviewed-with-Prediction matches beyond the limit."""
+    scores = {f"t{i}": 0.30 for i in range(4)}
+    txns = [make_txn(name, predicted_category_id=1, confidence_score=0.9) for name in scores]
+    session.add_all(txns)
+    session.commit()
+
+    summary, remaining = repredict_unreviewed(session, FakeCategorizer(scores), limit=3, threshold=0.50)
+
+    assert summary.total == 3
+    assert remaining == 1
