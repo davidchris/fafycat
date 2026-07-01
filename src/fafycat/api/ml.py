@@ -32,6 +32,7 @@ from fafycat.core.database import AppSettingsORM, CategoryORM
 from fafycat.core.models import TransactionInput
 from fafycat.ml.categorizer import TransactionCategorizer
 from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
+from fafycat.ml.prediction_pipeline import get_auto_approve_threshold, predict_unpredicted
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 
@@ -101,17 +102,6 @@ def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategor
             )
 
     return _categorizer
-
-
-def get_auto_approve_threshold(db: Session) -> float:
-    """Read auto_approve_threshold from DB, falling back to MLConfig default."""
-    try:
-        setting = db.query(AppSettingsORM).filter(AppSettingsORM.key == "auto_approve_threshold").first()
-        if setting and setting.value is not None:
-            return float(str(setting.value))
-    except Exception:
-        pass
-    return AppConfig().ml.auto_approve_threshold
 
 
 @router.get("/settings")
@@ -469,109 +459,23 @@ async def predict_unpredicted_transactions(
 ) -> dict:
     """Run ML predictions on transactions that don't have predictions yet."""
     try:
-        from fafycat.core.database import TransactionORM
-        from fafycat.core.models import TransactionInput
+        summary, remaining = predict_unpredicted(db, categorizer, limit=limit)
 
-        # Get transactions without predictions
-        try:
-            unpredicted_txns = (
-                db.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None)).limit(limit).all()
-            )
-        except Exception:
-            # Handle case where transactions table doesn't exist (e.g., in tests)
-            unpredicted_txns = []
-
-        if not unpredicted_txns:
+        if summary.total == 0:
             return {
                 "status": "success",
                 "message": "No transactions need prediction",
                 "predictions_made": 0,
             }
 
-        # Convert to TransactionInput for prediction
-        txn_inputs = []
-        for txn in unpredicted_txns:
-            txn_input = TransactionInput(
-                date=cast(date, txn.date),
-                value_date=cast(date, txn.value_date or txn.date),
-                name=str(txn.name),
-                purpose=str(txn.purpose or ""),
-                amount=cast(float, txn.amount),
-                currency=str(txn.currency),
-            )
-            txn_inputs.append(txn_input)
-
-        # Get predictions
-        predictions = categorizer.predict_with_confidence(txn_inputs)
-
-        # Use active learning to set review priorities (same logic as upload)
-        from fafycat.core.models import TransactionPrediction
-        from fafycat.ml.active_learning import ActiveLearningSelector
-
-        al_selector = ActiveLearningSelector(db)
-
-        # Convert predictions to TransactionPrediction format for active learning
-        al_predictions = []
-        for txn, prediction in zip(unpredicted_txns, predictions, strict=True):
-            al_pred = TransactionPrediction(
-                transaction_id=txn.id,
-                predicted_category_id=prediction.predicted_category_id,
-                confidence_score=prediction.confidence_score,
-                feature_contributions=prediction.feature_contributions,
-            )
-            al_predictions.append(al_pred)
-
-        # Get active learning strategic selections
-        max_review_items = min(20, len(al_predictions))  # Limit to 20 strategic selections
-        strategic_selections = set(
-            al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
-        )
-
-        # Apply hybrid categorization: confidence + active learning priority
-        predictions_made = 0
-        auto_accepted = 0
-        high_priority_review = 0
-        standard_review = 0
-        confidence_threshold = get_auto_approve_threshold(db)
-
-        for txn, prediction in zip(unpredicted_txns, predictions, strict=True):
-            txn.predicted_category_id = prediction.predicted_category_id
-            txn.confidence_score = prediction.confidence_score
-
-            if prediction.confidence_score >= confidence_threshold:
-                # High confidence - check if active learning flagged it for quality validation
-                if txn.id in strategic_selections:
-                    # High confidence but flagged for quality check
-                    txn.is_reviewed = False
-                    txn.review_priority = "quality_check"
-                    high_priority_review += 1
-                else:
-                    # High confidence and not flagged - auto accept
-                    txn.is_reviewed = True
-                    txn.review_priority = "auto_accepted"
-                    auto_accepted += 1
-            else:
-                # Lower confidence - definitely needs review
-                txn.is_reviewed = False
-                if txn.id in strategic_selections:
-                    txn.review_priority = "high"
-                    high_priority_review += 1
-                else:
-                    txn.review_priority = "standard"
-                    standard_review += 1
-
-            predictions_made += 1
-
-        db.commit()
-
         return {
             "status": "success",
-            "message": f"Made predictions for {predictions_made} transactions",
-            "predictions_made": predictions_made,
-            "auto_accepted": auto_accepted,
-            "high_priority_review": high_priority_review,
-            "standard_review": standard_review,
-            "remaining_unpredicted": max(0, len(unpredicted_txns) - limit) if len(unpredicted_txns) == limit else 0,
+            "message": f"Made predictions for {summary.total} transactions",
+            "predictions_made": summary.total,
+            "auto_accepted": summary.auto_accepted,
+            "high_priority_review": summary.quality_check + summary.high,
+            "standard_review": summary.standard,
+            "remaining_unpredicted": remaining,
         }
 
     except Exception as e:
