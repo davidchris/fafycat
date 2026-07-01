@@ -19,7 +19,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from fafycat.core.database import AppSettingsORM, Base, CategoryORM, TransactionORM
 from fafycat.core.models import ReviewPriority, TransactionInput, TransactionPrediction
-from fafycat.ml.prediction_pipeline import get_auto_approve_threshold, predict_unpredicted, repredict_unreviewed
+from fafycat.ml.prediction_pipeline import (
+    CategorizationSummary,
+    get_auto_approve_threshold,
+    predict_new,
+    predict_unpredicted,
+    repredict_unreviewed,
+)
 
 
 class FakeCategorizer:
@@ -257,3 +263,37 @@ def test_repredict_limit_and_remaining_unreviewed_rule(session: Session) -> None
 
     assert summary.total == 3
     assert remaining == 1
+
+
+def test_predict_new_selects_only_given_ids_without_predictions(session: Session) -> None:
+    """predict-new predicate: given ids AND not yet predicted; other rows untouched."""
+    txns = [
+        make_txn("new-a"),
+        make_txn("new-already-predicted", predicted_category_id=1, confidence_score=0.99),
+        make_txn("not-in-batch"),
+    ]
+    session.add_all(txns)
+    session.commit()
+
+    summary = predict_new(
+        session,
+        FakeCategorizer({"new-a": 0.60}),
+        transaction_ids=["id-new-a", "id-new-already-predicted"],
+        threshold=0.50,
+    )
+
+    assert summary.total == 1
+    assert summary.auto_accepted == 1
+    new_a, already_predicted, not_in_batch = txns
+    assert new_a.confidence_score == 0.60
+    assert isinstance(new_a.review_priority, ReviewPriority)
+    assert already_predicted.confidence_score == 0.99
+    assert not_in_batch.predicted_category_id is None
+
+
+def test_predict_new_with_no_matching_ids_returns_empty_summary(session: Session) -> None:
+    """No matching transactions -> empty Categorization Summary, no error."""
+    summary = predict_new(session, FakeCategorizer({}), transaction_ids=["missing"], threshold=0.50)
+
+    assert summary.total == 0
+    assert summary == CategorizationSummary()

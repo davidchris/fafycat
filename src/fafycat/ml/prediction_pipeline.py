@@ -73,6 +73,29 @@ def predict_unpredicted(
     return _apply_predictions(db, txns, categorizer, threshold=threshold, strategy=strategy), remaining
 
 
+def predict_new(
+    db: Session,
+    categorizer: ConfidenceCategorizer,
+    transaction_ids: list[str],
+    *,
+    threshold: float | None = None,
+    strategy: str = DEFAULT_STRATEGY,
+) -> CategorizationSummary:
+    """Predict newly imported transactions that are not yet predicted.
+
+    Returns the Categorization Summary. Commits.
+    """
+    txns = (
+        db.query(TransactionORM)
+        .filter(
+            TransactionORM.id.in_(transaction_ids),
+            TransactionORM.predicted_category_id.is_(None),
+        )
+        .all()
+    )
+    return _apply_predictions(db, txns, categorizer, threshold=threshold, strategy=strategy)
+
+
 def repredict_unreviewed(
     db: Session,
     categorizer: ConfidenceCategorizer,
