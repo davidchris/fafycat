@@ -1,7 +1,6 @@
 """API routes for transaction operations."""
 
 import contextlib
-import html
 from datetime import date
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query
@@ -12,7 +11,7 @@ from fafycat.api.dependencies import get_db_session
 from fafycat.api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
 from fafycat.api.services import CategoryService, TransactionService
 from fafycat.core.models import ReviewPriority
-from fafycat.web.components.pagination import create_full_pagination
+from fafycat.web.components.transaction_table import render_row, render_table
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -84,54 +83,8 @@ async def categorize_transaction_htmx(
             status_code=404,
         )
 
-    # Generate updated table row
-    status_color = "text-success" if result.is_reviewed else "text-income"
-    status_text = "Complete" if result.is_reviewed else "Pending"
-    confidence_display = f"{result.confidence:.1%}" if result.confidence else "N/A"
-
-    # Get categories for the dropdown
     categories = CategoryService.get_categories(db)
-    category_options = '<option value="">Select category...</option>'
-    current_category = result.actual_category or result.predicted_category
-    for cat in categories:
-        selected = " selected" if cat.name == current_category else ""
-        escaped = html.escape(cat.name)
-        category_options += f'<option value="{escaped}"{selected}>{escaped}</option>'
-
-    return HTMLResponse(
-        content=f"""
-        <tr id="transaction-{transaction_id}">
-            <td>{result.date}</td>
-            <td>{html.escape(str(result.description))}</td>
-            <td class="amount-cell">${result.amount:,.2f}</td>
-            <td>
-                <span class="badge badge-success">
-                    {html.escape(str(result.actual_category))} ✓
-                </span>
-            </td>
-            <td>
-                <form hx-put="/api/transactions/{transaction_id}/categorize-htmx"
-                      hx-target="#transaction-{transaction_id}"
-                      hx-swap="outerHTML"
-                      hx-indicator="#loading-{transaction_id}"
-                      class="inline-form">
-                    <select name="actual_category" class="form-select">
-                        {category_options}
-                    </select>
-                    <button type="submit" class="btn btn-primary btn-sm">
-                        Save
-                    </button>
-                    <div id="loading-{transaction_id}" class="htmx-indicator text-secondary">
-                        Saving...
-                    </div>
-                </form>
-            </td>
-            <td class="{status_color}">{status_text}</td>
-            <td class="text-center">{confidence_display}</td>
-        </tr>
-        """,
-        status_code=200,
-    )
+    return HTMLResponse(content=render_row(result, categories), status_code=200)
 
 
 @router.get("/table", response_class=HTMLResponse)
@@ -195,107 +148,7 @@ async def get_transactions_table(
 
     categories = CategoryService.get_categories(db)
 
-    return HTMLResponse(
-        content=_generate_transaction_table_htmx(result["transactions"], categories, result["pagination_info"])
-    )
-
-
-def _generate_transaction_table_htmx(transactions, categories, pagination_info=None):
-    """Generate HTMX-enhanced transaction table HTML."""
-    if not transactions:
-        return """
-        <div id="transaction-table" class="card">
-            <p class="text-center text-secondary" style="padding: 2rem 0">No transactions to review at the moment.</p>
-        </div>
-        """
-
-    # Generate table rows
-    table_rows = ""
-    for tx in transactions:
-        confidence_color = (
-            "text-spending"
-            if tx.confidence and tx.confidence < 0.5
-            else "text-income"
-            if tx.confidence and tx.confidence < 0.8
-            else "text-success"
-        )
-        confidence_display = f"{tx.confidence:.1%}" if tx.confidence else "N/A"
-
-        # Generate category options with current category selected
-        current_category = tx.actual_category or tx.predicted_category
-        category_options = '<option value="">Select category...</option>'
-        for cat in categories:
-            selected = " selected" if cat.name == current_category else ""
-            escaped = html.escape(cat.name)
-            category_options += f'<option value="{escaped}"{selected}>{escaped}</option>'
-
-        # Status display
-        status_color = "text-success" if tx.is_reviewed else "text-income"
-        status_text = "Complete" if tx.is_reviewed else "Pending"
-
-        table_rows += f"""
-        <tr id="transaction-{tx.id}">
-            <td>{tx.date}</td>
-            <td style="max-width: 24rem; overflow-wrap: anywhere; word-break: break-word;">{html.escape(str(tx.description))}</td>
-            <td class="amount-cell">${tx.amount:,.2f}</td>
-            <td>
-                <span class="badge badge-saving">
-                    {html.escape(str(tx.actual_category or tx.predicted_category or "Uncategorized"))}
-                </span>
-            </td>
-            <td style="min-width: 18rem;">
-                <form hx-put="/api/transactions/{tx.id}/categorize-htmx"
-                      hx-target="#transaction-{tx.id}"
-                      hx-swap="outerHTML"
-                      hx-indicator="#loading-{tx.id}"
-                      class="inline-form">
-                    <select name="actual_category" class="form-select">
-                        {category_options}
-                    </select>
-                    <button type="submit" class="btn btn-primary btn-sm">
-                        Save
-                    </button>
-                    <div id="loading-{tx.id}" class="htmx-indicator text-secondary">
-                        Saving...
-                    </div>
-                </form>
-            </td>
-            <td class="{status_color}">{status_text}</td>
-            <td class="{confidence_color} font-medium text-center">{confidence_display}</td>
-        </tr>
-        """
-
-    # Generate pagination controls if pagination info is provided
-    pagination_html = ""
-    if pagination_info:
-        page = pagination_info["page"]
-        total_pages = pagination_info["total_pages"]
-        total_count = pagination_info["total_count"]
-
-        pagination_component = create_full_pagination(page, total_pages, total_count)
-        pagination_html = str(pagination_component)
-
-    return f"""
-    <div id="transaction-table" class="table-container">
-        <table>
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Description</th>
-                    <th style="text-align: right">Amount</th>
-                    <th>Current Category</th>
-                    <th>Categorize</th>
-                    <th>Status</th>
-                    <th style="text-align: center">Confidence</th>
-                </tr>
-            </thead>
-            <tbody>
-                {table_rows}
-            </tbody>
-        </table>
-        {pagination_html}
-    </div>
-    """
+    return HTMLResponse(content=render_table(result["transactions"], categories, result["pagination_info"]))
 
 
 @router.post("/bulk-categorize")
