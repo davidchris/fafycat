@@ -2,8 +2,6 @@
 
 import asyncio
 import time
-from datetime import date
-from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -32,6 +30,12 @@ from fafycat.core.database import AppSettingsORM, CategoryORM
 from fafycat.core.models import TransactionInput
 from fafycat.ml.categorizer import TransactionCategorizer
 from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
+from fafycat.ml.prediction_pipeline import (
+    CategorizationSummary,
+    get_auto_approve_threshold,
+    predict_unpredicted,
+    repredict_unreviewed,
+)
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 
@@ -101,17 +105,6 @@ def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategor
             )
 
     return _categorizer
-
-
-def get_auto_approve_threshold(db: Session) -> float:
-    """Read auto_approve_threshold from DB, falling back to MLConfig default."""
-    try:
-        setting = db.query(AppSettingsORM).filter(AppSettingsORM.key == "auto_approve_threshold").first()
-        if setting and setting.value is not None:
-            return float(str(setting.value))
-    except Exception:
-        pass
-    return AppConfig().ml.auto_approve_threshold
 
 
 @router.get("/settings")
@@ -461,6 +454,28 @@ async def get_current_training_status() -> dict:
     return job.to_dict()
 
 
+def _batch_prediction_response(
+    summary: CategorizationSummary, remaining: int, *, empty_message: str, done_message: str, remaining_key: str
+) -> dict:
+    """Build the shared response shape for the batch prediction endpoints."""
+    if summary.total == 0:
+        return {
+            "status": "success",
+            "message": empty_message,
+            "predictions_made": 0,
+        }
+
+    return {
+        "status": "success",
+        "message": done_message,
+        "predictions_made": summary.total,
+        "auto_accepted": summary.auto_accepted,
+        "high_priority_review": summary.high_priority_review,
+        "standard_review": summary.standard,
+        remaining_key: remaining,
+    }
+
+
 @router.post("/predict/batch-unpredicted")
 async def predict_unpredicted_transactions(
     categorizer: TransactionCategorizer = Depends(get_categorizer),
@@ -469,111 +484,14 @@ async def predict_unpredicted_transactions(
 ) -> dict:
     """Run ML predictions on transactions that don't have predictions yet."""
     try:
-        from fafycat.core.database import TransactionORM
-        from fafycat.core.models import TransactionInput
-
-        # Get transactions without predictions
-        try:
-            unpredicted_txns = (
-                db.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None)).limit(limit).all()
-            )
-        except Exception:
-            # Handle case where transactions table doesn't exist (e.g., in tests)
-            unpredicted_txns = []
-
-        if not unpredicted_txns:
-            return {
-                "status": "success",
-                "message": "No transactions need prediction",
-                "predictions_made": 0,
-            }
-
-        # Convert to TransactionInput for prediction
-        txn_inputs = []
-        for txn in unpredicted_txns:
-            txn_input = TransactionInput(
-                date=cast(date, txn.date),
-                value_date=cast(date, txn.value_date or txn.date),
-                name=str(txn.name),
-                purpose=str(txn.purpose or ""),
-                amount=cast(float, txn.amount),
-                currency=str(txn.currency),
-            )
-            txn_inputs.append(txn_input)
-
-        # Get predictions
-        predictions = categorizer.predict_with_confidence(txn_inputs)
-
-        # Use active learning to set review priorities (same logic as upload)
-        from fafycat.core.models import TransactionPrediction
-        from fafycat.ml.active_learning import ActiveLearningSelector
-
-        al_selector = ActiveLearningSelector(db)
-
-        # Convert predictions to TransactionPrediction format for active learning
-        al_predictions = []
-        for txn, prediction in zip(unpredicted_txns, predictions, strict=True):
-            al_pred = TransactionPrediction(
-                transaction_id=txn.id,
-                predicted_category_id=prediction.predicted_category_id,
-                confidence_score=prediction.confidence_score,
-                feature_contributions=prediction.feature_contributions,
-            )
-            al_predictions.append(al_pred)
-
-        # Get active learning strategic selections
-        max_review_items = min(20, len(al_predictions))  # Limit to 20 strategic selections
-        strategic_selections = set(
-            al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
+        summary, remaining = predict_unpredicted(db, categorizer, limit=limit)
+        return _batch_prediction_response(
+            summary,
+            remaining,
+            empty_message="No transactions need prediction",
+            done_message=f"Made predictions for {summary.total} transactions",
+            remaining_key="remaining_unpredicted",
         )
-
-        # Apply hybrid categorization: confidence + active learning priority
-        predictions_made = 0
-        auto_accepted = 0
-        high_priority_review = 0
-        standard_review = 0
-        confidence_threshold = get_auto_approve_threshold(db)
-
-        for txn, prediction in zip(unpredicted_txns, predictions, strict=True):
-            txn.predicted_category_id = prediction.predicted_category_id
-            txn.confidence_score = prediction.confidence_score
-
-            if prediction.confidence_score >= confidence_threshold:
-                # High confidence - check if active learning flagged it for quality validation
-                if txn.id in strategic_selections:
-                    # High confidence but flagged for quality check
-                    txn.is_reviewed = False
-                    txn.review_priority = "quality_check"
-                    high_priority_review += 1
-                else:
-                    # High confidence and not flagged - auto accept
-                    txn.is_reviewed = True
-                    txn.review_priority = "auto_accepted"
-                    auto_accepted += 1
-            else:
-                # Lower confidence - definitely needs review
-                txn.is_reviewed = False
-                if txn.id in strategic_selections:
-                    txn.review_priority = "high"
-                    high_priority_review += 1
-                else:
-                    txn.review_priority = "standard"
-                    standard_review += 1
-
-            predictions_made += 1
-
-        db.commit()
-
-        return {
-            "status": "success",
-            "message": f"Made predictions for {predictions_made} transactions",
-            "predictions_made": predictions_made,
-            "auto_accepted": auto_accepted,
-            "high_priority_review": high_priority_review,
-            "standard_review": standard_review,
-            "remaining_unpredicted": max(0, len(unpredicted_txns) - limit) if len(unpredicted_txns) == limit else 0,
-        }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}") from e
 
@@ -586,108 +504,13 @@ async def repredict_unreviewed_transactions(
 ) -> dict:
     """Re-run ML predictions on unreviewed transactions that already have predictions."""
     try:
-        from fafycat.core.database import TransactionORM
-        from fafycat.core.models import TransactionInput
-
-        # Get unreviewed transactions that already have predictions
-        repredict_txns = (
-            db.query(TransactionORM)
-            .filter(
-                TransactionORM.is_reviewed.is_(False),
-                TransactionORM.predicted_category_id.is_not(None),
-            )
-            .limit(limit)
-            .all()
+        summary, remaining = repredict_unreviewed(db, categorizer, limit=limit)
+        return _batch_prediction_response(
+            summary,
+            remaining,
+            empty_message="No unreviewed transactions need re-prediction",
+            done_message=f"Re-predicted {summary.total} transactions",
+            remaining_key="remaining_unreviewed",
         )
-
-        if not repredict_txns:
-            return {
-                "status": "success",
-                "message": "No unreviewed transactions need re-prediction",
-                "predictions_made": 0,
-            }
-
-        # Convert to TransactionInput for prediction
-        txn_inputs = []
-        for txn in repredict_txns:
-            txn_input = TransactionInput(
-                date=cast(date, txn.date),
-                value_date=cast(date, txn.value_date or txn.date),
-                name=str(txn.name),
-                purpose=str(txn.purpose or ""),
-                amount=cast(float, txn.amount),
-                currency=str(txn.currency),
-            )
-            txn_inputs.append(txn_input)
-
-        # Get predictions
-        predictions = categorizer.predict_with_confidence(txn_inputs)
-
-        # Use active learning to set review priorities
-        from fafycat.core.models import TransactionPrediction
-        from fafycat.ml.active_learning import ActiveLearningSelector
-
-        al_selector = ActiveLearningSelector(db)
-
-        # Convert predictions to TransactionPrediction format for active learning
-        al_predictions = []
-        for txn, prediction in zip(repredict_txns, predictions, strict=True):
-            al_pred = TransactionPrediction(
-                transaction_id=str(txn.id),
-                predicted_category_id=prediction.predicted_category_id,
-                confidence_score=prediction.confidence_score,
-                feature_contributions=prediction.feature_contributions,
-            )
-            al_predictions.append(al_pred)
-
-        # Get active learning strategic selections
-        max_review_items = min(20, len(al_predictions))
-        strategic_selections = set(
-            al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
-        )
-
-        # Apply hybrid categorization: confidence + active learning priority
-        predictions_made = 0
-        auto_accepted = 0
-        high_priority_review = 0
-        standard_review = 0
-        confidence_threshold = get_auto_approve_threshold(db)
-
-        for txn, prediction in zip(repredict_txns, predictions, strict=True):
-            txn.predicted_category_id = prediction.predicted_category_id
-            txn.confidence_score = prediction.confidence_score
-
-            if prediction.confidence_score >= confidence_threshold:
-                if txn.id in strategic_selections:
-                    txn.is_reviewed = False
-                    txn.review_priority = "quality_check"
-                    high_priority_review += 1
-                else:
-                    txn.is_reviewed = True
-                    txn.review_priority = "auto_accepted"
-                    auto_accepted += 1
-            else:
-                txn.is_reviewed = False
-                if txn.id in strategic_selections:
-                    txn.review_priority = "high"
-                    high_priority_review += 1
-                else:
-                    txn.review_priority = "standard"
-                    standard_review += 1
-
-            predictions_made += 1
-
-        db.commit()
-
-        return {
-            "status": "success",
-            "message": f"Re-predicted {predictions_made} transactions",
-            "predictions_made": predictions_made,
-            "auto_accepted": auto_accepted,
-            "high_priority_review": high_priority_review,
-            "standard_review": standard_review,
-            "remaining_unreviewed": max(0, len(repredict_txns) - limit) if len(repredict_txns) == limit else 0,
-        }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Batch re-prediction failed: {str(e)}") from e

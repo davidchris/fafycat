@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_session
 from fafycat.api.models import UploadResponse
-from fafycat.core.models import ReviewPriority
 from fafycat.data.csv_processor import CSVProcessor
+from fafycat.ml.prediction_pipeline import CategorizationSummary, predict_new
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -20,133 +20,40 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 upload_sessions = {}
 
 
-def empty_categorization_summary() -> dict:
-    """Return a zeroed categorization summary."""
+def _summary_to_dict(summary: CategorizationSummary) -> dict:
+    """Map a Categorization Summary to the upload response fields."""
     return {
-        "predictions_made": 0,
-        "auto_accepted": 0,
-        "needs_review": 0,
-        "quality_check": 0,
+        "predictions_made": summary.total,
+        "auto_accepted": summary.auto_accepted,
+        "needs_review": summary.needs_review,
+        "quality_check": summary.quality_check,
     }
 
 
+def empty_categorization_summary() -> dict:
+    """Return a zeroed categorization summary."""
+    return _summary_to_dict(CategorizationSummary())
+
+
 def predict_transaction_categories(db: Session, transactions: list, new_count: int) -> dict:
-    """Predict categories for newly uploaded transactions with active learning selection."""
+    """Predict categories for newly imported transactions via the Prediction Pipeline.
+
+    Gracefully degrades to an empty categorization summary when no trained
+    Categorizer is available - the import itself still succeeds.
+    """
     if new_count <= 0:
         return empty_categorization_summary()
 
     try:
-        return _perform_predictions(db, transactions)
+        from fafycat.api.ml import get_categorizer
+
+        categorizer = get_categorizer(db)
+        summary = predict_new(db, categorizer, [t.generate_id() for t in transactions])
     except Exception as e:
         _handle_prediction_error(e)
         return empty_categorization_summary()
 
-
-def _perform_predictions(db: Session, transactions: list) -> dict:
-    """Perform ML predictions on transactions."""
-    from fafycat.api.ml import get_categorizer
-    from fafycat.core.database import TransactionORM
-
-    categorizer = get_categorizer(db)
-
-    # Get newly imported transactions for prediction
-    new_transaction_ids = [t.generate_id() for t in transactions]
-    new_txns = (
-        db.query(TransactionORM)
-        .filter(TransactionORM.id.in_(new_transaction_ids))
-        .filter(TransactionORM.predicted_category_id.is_(None))
-        .all()
-    )
-
-    if not new_txns:
-        return empty_categorization_summary()
-
-    # Convert and predict
-    txn_inputs = _convert_to_transaction_inputs(new_txns)
-    predictions = categorizer.predict_with_confidence(txn_inputs)
-
-    # Apply hybrid categorization strategy
-    return _apply_hybrid_categorization_strategy(db, new_txns, predictions)
-
-
-def _convert_to_transaction_inputs(new_txns):
-    """Convert ORM transactions to TransactionInput objects."""
-    from fafycat.core.models import TransactionInput
-
-    txn_inputs = []
-    for txn in new_txns:
-        txn_input = TransactionInput(
-            date=txn.date,
-            value_date=txn.value_date or txn.date,
-            name=txn.name,
-            purpose=txn.purpose or "",
-            amount=txn.amount,
-            currency=txn.currency,
-        )
-        txn_inputs.append(txn_input)
-    return txn_inputs
-
-
-def _apply_hybrid_categorization_strategy(db: Session, new_txns, predictions) -> dict:
-    """Apply hybrid categorization using confidence scores and active learning."""
-    from fafycat.core.models import TransactionPrediction
-    from fafycat.ml.active_learning import ActiveLearningSelector
-
-    # Get active learning strategic selections
-    al_selector = ActiveLearningSelector(db)
-    al_predictions = [
-        TransactionPrediction(
-            transaction_id=txn.id,
-            predicted_category_id=prediction.predicted_category_id,
-            confidence_score=prediction.confidence_score,
-            feature_contributions=prediction.feature_contributions,
-        )
-        for txn, prediction in zip(new_txns, predictions, strict=True)
-    ]
-
-    max_review_items = min(20, len(al_predictions))
-    strategic_selections = set(
-        al_selector.select_for_review(al_predictions, max_items=max_review_items, strategy="uncertainty")
-    )
-
-    # Apply categorization logic
-    from fafycat.api.ml import get_auto_approve_threshold
-
-    summary = empty_categorization_summary()
-    confidence_threshold = get_auto_approve_threshold(db)
-
-    for txn, prediction in zip(new_txns, predictions, strict=True):
-        bucket = _categorize_transaction(txn, prediction, strategic_selections, confidence_threshold)
-        summary["predictions_made"] += 1
-        summary[bucket] += 1
-
-    db.commit()
-    return summary
-
-
-def _categorize_transaction(txn, prediction, strategic_selections, confidence_threshold) -> str:
-    """Categorize a single transaction based on confidence and active learning flags.
-
-    Returns the bucket name: "auto_accepted", "quality_check", or "needs_review".
-    """
-    txn.predicted_category_id = prediction.predicted_category_id
-    txn.confidence_score = prediction.confidence_score
-
-    if prediction.confidence_score >= confidence_threshold:
-        if txn.id in strategic_selections:
-            # High confidence but flagged for quality check
-            txn.is_reviewed = False
-            txn.review_priority = ReviewPriority.QUALITY_CHECK
-            return "quality_check"
-        # High confidence and not flagged - auto accept
-        txn.category_id = prediction.predicted_category_id
-        txn.is_reviewed = True
-        txn.review_priority = ReviewPriority.AUTO_ACCEPTED
-        return "auto_accepted"
-    # Lower confidence - needs review
-    txn.is_reviewed = False
-    txn.review_priority = ReviewPriority.HIGH if txn.id in strategic_selections else ReviewPriority.STANDARD
-    return "needs_review"
+    return _summary_to_dict(summary)
 
 
 def _handle_prediction_error(e: Exception):

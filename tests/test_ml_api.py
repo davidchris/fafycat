@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from fafycat.core.database import Base, CategoryORM, TransactionORM
 from fafycat.core.models import TransactionPrediction
@@ -15,7 +16,12 @@ from fafycat.core.models import TransactionPrediction
 @pytest.fixture(scope="function")
 def shared_engine():
     """Create a shared database engine for tests."""
-    engine = create_engine("sqlite:///:memory:", echo=False, connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite:///:memory:",
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     yield engine
     engine.dispose()
@@ -237,11 +243,11 @@ def test_predict_bulk_transactions(test_client):
 
     # Restaurant should be dining
     assert predictions[0]["predicted_category_id"] == 3
-    assert predictions[0]["predicted_category_name"] == "Unknown"  # DB lookup not available in test
+    assert predictions[0]["predicted_category_name"] == "dining"
 
     # Supermarket should be groceries
     assert predictions[1]["predicted_category_id"] == 1
-    assert predictions[1]["predicted_category_name"] == "Unknown"  # DB lookup not available in test
+    assert predictions[1]["predicted_category_name"] == "groceries"
 
 
 def test_predict_batch_unpredicted(test_client, test_db):
