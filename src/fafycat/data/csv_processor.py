@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..core.database import CategoryORM, TransactionORM
 from ..core.models import TransactionInput
-from .dedup import find_fuzzy_duplicate, sort_direct_rows_first
+from .dedup import find_fuzzy_duplicate, keep_preferred_fields, sort_direct_rows_first
 
 
 class CSVProcessor:
@@ -212,7 +212,9 @@ class CSVProcessor:
                 continue
 
             # Fuzzy check: delayed card-settlement row for an already-imported purchase
-            if find_fuzzy_duplicate(self.session, txn) is not None:
+            fuzzy_duplicate = find_fuzzy_duplicate(self.session, txn)
+            if fuzzy_duplicate is not None:
+                keep_preferred_fields(fuzzy_duplicate, txn)
                 duplicate_count += 1
                 continue
 
