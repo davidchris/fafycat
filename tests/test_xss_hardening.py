@@ -76,12 +76,12 @@ class TestReviewPageXSS:
 
     def test_transaction_table_escapes_category_name(self):
         """Category names in the transaction table badge are escaped."""
-        from fafycat.web.pages.review_page import _generate_transaction_table
+        from fafycat.web.components.transaction_table import render_table
 
         categories = [CategoryORM(name=XSS_PAYLOAD, type="spending", budget=0.0)]
         transactions = [_FakeTransaction(predicted_category=XSS_PAYLOAD)]
 
-        html = _generate_transaction_table(transactions, categories)
+        html = render_table(transactions, categories)
 
         assert XSS_PAYLOAD not in html
         assert XSS_ESCAPED in html
