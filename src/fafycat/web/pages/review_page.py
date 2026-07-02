@@ -161,6 +161,7 @@ def render_review_page(request: Request):
         </div>
         """
         transaction_count = 0
+        categories = []
 
     # Get model status alert
     model_alert = _get_model_status_alert()

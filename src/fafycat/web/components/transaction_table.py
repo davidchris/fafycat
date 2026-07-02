@@ -1,6 +1,6 @@
 """Transaction table renderer shared by the review page and HTMX endpoints."""
 
-from fasthtml.common import Button, Div, Form, Option, P, Select, Span, Table, Tbody, Td, Th, Thead, Tr, to_xml
+from fasthtml.common import Button, Div, Form, NotStr, Option, P, Select, Span, Table, Tbody, Td, Th, Thead, Tr, to_xml
 
 from fafycat.web.components.pagination import create_full_pagination
 
@@ -8,7 +8,9 @@ from fafycat.web.components.pagination import create_full_pagination
 def _category_select(tx, categories) -> Select:
     """Category dropdown with the transaction's current category preselected."""
     current = tx.actual_category or tx.predicted_category
-    options = [Option("Select category...", value="")]
+    # NotStr keeps the empty value attribute — fastcore drops falsy attr values,
+    # and the placeholder must submit "" rather than its label text.
+    options = [Option("Select category...", value=NotStr(""))]
     for cat in categories:
         options.append(Option(cat.name, value=cat.name, selected=cat.name == current))
     return Select(*options, name="actual_category", cls="form-select")
@@ -50,6 +52,9 @@ def _row(tx, categories) -> Tr:
                 hx_target=f"#transaction-{tx.id}",
                 hx_swap="outerHTML",
                 hx_indicator=f"#loading-{tx.id}",
+                # FastHTML defaults Form to multipart/form-data; keep the
+                # urlencoded wire format the endpoint has always received.
+                enctype="application/x-www-form-urlencoded",
                 cls="inline-form",
             ),
             style="min-width: 18rem;",
@@ -94,7 +99,10 @@ def render_table(transactions, categories, pagination_info=None) -> str:
     if pagination_info:
         children.append(
             create_full_pagination(
-                pagination_info["page"], pagination_info["total_pages"], pagination_info["total_count"]
+                pagination_info["page"],
+                pagination_info["total_pages"],
+                pagination_info["total_count"],
+                per_page=pagination_info.get("page_size", 50),
             )
         )
 

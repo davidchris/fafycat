@@ -1,25 +1,11 @@
 """Tests for the unified transaction-table renderer."""
 
 import hashlib
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 from fafycat.core.database import CategoryORM, TransactionORM
 from fafycat.core.models import ReviewPriority
-
-
-@dataclass
-class FakeTransaction:
-    """Minimal transaction-like object for rendering tests."""
-
-    id: str = "abc123"
-    date: str = "2025-06-15"
-    description: str = "Test Store"
-    amount: float = -10.0
-    actual_category: str | None = None
-    predicted_category: str | None = None
-    confidence: float | None = 0.75
-    is_reviewed: bool = False
+from fakes import FakeTransaction
 
 
 def make_categories(*names: str) -> list[CategoryORM]:
@@ -96,6 +82,22 @@ class TestRenderRow:
         assert '<option value="Rent" selected' in html
         assert '<option value="Groceries" selected' not in html
 
+    def test_row_form_keeps_urlencoded_enctype(self):
+        """FastHTML defaults Form to multipart; the endpoint contract is urlencoded."""
+        from fafycat.web.components.transaction_table import render_row
+
+        html = render_row(FakeTransaction(), make_categories("Groceries"))
+
+        assert 'enctype="application/x-www-form-urlencoded"' in html
+
+    def test_placeholder_option_submits_empty_value(self):
+        """The placeholder must keep value="" so it never submits its label text."""
+        from fafycat.web.components.transaction_table import render_row
+
+        html = render_row(FakeTransaction(), make_categories("Groceries"))
+
+        assert '<option value="">Select category...</option>' in html
+
 
 class TestRenderTable:
     def test_empty_list_renders_empty_state_card(self):
@@ -126,12 +128,14 @@ class TestRenderTable:
         html = render_table(
             [FakeTransaction()],
             make_categories("Groceries"),
-            pagination_info={"page": 2, "total_pages": 5, "total_count": 230},
+            pagination_info={"page": 2, "total_pages": 3, "total_count": 230, "page_size": 100},
         )
 
         assert "pagination-container" in html
-        assert "Page 2 of 5" in html
+        assert "Page 2 of 3" in html
         assert "230" in html
+        # per_page comes from pagination_info, not the default of 50
+        assert "101" in html and "200" in html
 
 
 def _seed_transaction(session, *, name: str = "REWE", amount: float = -42.50) -> tuple[TransactionORM, CategoryORM]:
