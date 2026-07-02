@@ -7,6 +7,7 @@ from fastapi import Request
 from fafycat.api.dependencies import get_db_manager
 from fafycat.api.services import CategoryService, TransactionService
 from fafycat.web.components.layout import create_page_layout
+from fafycat.web.components.transaction_table import render_table
 
 
 def _get_model_status_alert():
@@ -127,95 +128,6 @@ def _generate_category_options(categories):
     return options
 
 
-def _generate_transaction_table(transactions, categories):
-    """Generate HTML table for transactions with HTMX enhancements."""
-    if not transactions:
-        return """
-        <div id="transaction-table" class="card">
-            <p class="text-center py-8">No transactions to review at the moment.</p>
-        </div>
-        """
-
-    # Generate table rows
-    table_rows = ""
-    for tx in transactions:
-        confidence_color = (
-            "text-error"
-            if tx.confidence and tx.confidence < 0.5
-            else "text-income"
-            if tx.confidence and tx.confidence < 0.8
-            else "text-success"
-        )
-        confidence_display = f"{tx.confidence:.1%}" if tx.confidence else "N/A"
-
-        # Generate category options with current category selected
-        current_category = tx.actual_category or tx.predicted_category
-        category_options = '<option value="">Select category...</option>'
-        for cat in categories:
-            escaped_cat = html.escape(cat.name)
-            selected = " selected" if cat.name == current_category else ""
-            category_options += f'<option value="{escaped_cat}"{selected}>{escaped_cat}</option>'
-
-        # Status display
-        status_color = "text-success" if tx.is_reviewed else "text-income"
-        status_text = "Complete" if tx.is_reviewed else "Pending"
-
-        table_rows += f"""
-        <tr id="transaction-{tx.id}">
-            <td class="px-4 py-3 text-sm">{tx.date}</td>
-            <td class="px-4 py-3 text-sm font-medium" style="max-width: 24rem; overflow-wrap: anywhere; word-break: break-word;">{html.escape(tx.description)}</td>
-            <td class="px-4 py-3 text-sm text-right">${tx.amount:,.2f}</td>
-            <td class="px-4 py-3 text-sm">
-                <span class="badge badge-neutral">
-                    {html.escape(tx.actual_category or tx.predicted_category or "Uncategorized")}
-                </span>
-            </td>
-            <td class="px-4 py-3 text-sm" style="min-width: 18rem;">
-                <form hx-put="/api/transactions/{tx.id}/categorize-htmx"
-                      hx-target="#transaction-{tx.id}"
-                      hx-swap="outerHTML"
-                      hx-indicator="#loading-{tx.id}"
-                      class="flex gap-2 items-center">
-                    <select name="actual_category" class="form-select">
-                        {category_options}
-                    </select>
-                    <button type="submit" class="btn btn-primary btn-sm">
-                        Save
-                    </button>
-                    <div id="loading-{tx.id}" class="htmx-indicator text-xs">
-                        Saving...
-                    </div>
-                </form>
-            </td>
-            <td class="px-4 py-3 text-sm {status_color}">{status_text}</td>
-            <td class="px-4 py-3 text-sm {confidence_color} font-medium text-center">{confidence_display}</td>
-        </tr>
-        """
-
-    return f"""
-    <div id="transaction-table" class="table-container">
-        <div class="overflow-x-auto">
-            <table class="min-w-full">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Description</th>
-                        <th>Amount</th>
-                        <th>Current Category</th>
-                        <th>Categorize</th>
-                        <th>Status</th>
-                        <th>Confidence</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {table_rows}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    """
-
-
 def render_review_page(request: Request):
     """Render the review and categorize transactions page."""
     db_manager = get_db_manager(request)
@@ -237,12 +149,7 @@ def render_review_page(request: Request):
 
             categories = CategoryService.get_categories(session)
 
-            # Generate transaction table with pagination
-            from fafycat.api.transactions import _generate_transaction_table_htmx
-
-            transactions_html = _generate_transaction_table_htmx(
-                result["transactions"], categories, result["pagination_info"]
-            )
+            transactions_html = render_table(result["transactions"], categories, result["pagination_info"])
 
             transaction_count = result["pagination_info"]["total_count"]
 
@@ -254,6 +161,7 @@ def render_review_page(request: Request):
         </div>
         """
         transaction_count = 0
+        categories = []
 
     # Get model status alert
     model_alert = _get_model_status_alert()

@@ -1,28 +1,13 @@
 """Tests for XSS hardening across pages."""
 
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 from fafycat.core.database import CategoryORM
-
+from fakes import FakeTransaction
 
 XSS_PAYLOAD = "<img src=x onerror=alert(1)>"
 XSS_ESCAPED = "&lt;img src=x onerror=alert(1)&gt;"
-
-
-@dataclass
-class _FakeTransaction:
-    """Minimal transaction-like object for rendering tests."""
-
-    id: str = "abc123"
-    date: str = "2025-06-15"
-    description: str = "Test Store"
-    amount: float = -10.0
-    actual_category: str | None = None
-    predicted_category: str | None = None
-    confidence: float | None = 0.75
-    is_reviewed: bool = False
 
 
 class TestUploadXSSEscaping:
@@ -76,12 +61,12 @@ class TestReviewPageXSS:
 
     def test_transaction_table_escapes_category_name(self):
         """Category names in the transaction table badge are escaped."""
-        from fafycat.web.pages.review_page import _generate_transaction_table
+        from fafycat.web.components.transaction_table import render_table
 
         categories = [CategoryORM(name=XSS_PAYLOAD, type="spending", budget=0.0)]
-        transactions = [_FakeTransaction(predicted_category=XSS_PAYLOAD)]
+        transactions = [FakeTransaction(predicted_category=XSS_PAYLOAD)]
 
-        html = _generate_transaction_table(transactions, categories)
+        html = render_table(transactions, categories)
 
         assert XSS_PAYLOAD not in html
         assert XSS_ESCAPED in html
