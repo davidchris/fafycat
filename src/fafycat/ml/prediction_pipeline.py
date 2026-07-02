@@ -5,6 +5,7 @@ Strategic Selection, Review Priority bucketing against the Auto-approve
 Threshold, and persists the outcome. Entry points commit before returning.
 """
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol, cast
@@ -18,9 +19,6 @@ from .active_learning import ActiveLearningSelector
 
 MAX_REVIEW_ITEMS = 20
 """Cap on Strategic Selection review items per pipeline run."""
-
-DEFAULT_STRATEGY = "uncertainty"
-"""Default Strategic Selection strategy."""
 
 
 class ConfidenceCategorizer(Protocol):
@@ -43,6 +41,16 @@ class CategorizationSummary:
         """Number of transactions the run predicted."""
         return self.auto_accepted + self.quality_check + self.high + self.standard
 
+    @property
+    def high_priority_review(self) -> int:
+        """Transactions flagged for priority review (Strategic Selection buckets)."""
+        return self.quality_check + self.high
+
+    @property
+    def needs_review(self) -> int:
+        """Transactions below the Auto-approve Threshold awaiting review."""
+        return self.high + self.standard
+
 
 def get_auto_approve_threshold(db: Session) -> float:
     """Resolve the Auto-approve Threshold: DB setting with config fallback."""
@@ -61,7 +69,6 @@ def predict_unpredicted(
     *,
     limit: int = 1000,
     threshold: float | None = None,
-    strategy: str = DEFAULT_STRATEGY,
 ) -> tuple[CategorizationSummary, int]:
     """Predict transactions that have no Prediction yet.
 
@@ -70,7 +77,7 @@ def predict_unpredicted(
     """
     query = db.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None))
     txns, remaining = _select_with_limit(query, limit)
-    return _apply_predictions(db, txns, categorizer, threshold=threshold, strategy=strategy), remaining
+    return _apply_predictions(db, txns, categorizer, threshold=threshold), remaining
 
 
 def predict_new(
@@ -79,7 +86,6 @@ def predict_new(
     transaction_ids: list[str],
     *,
     threshold: float | None = None,
-    strategy: str = DEFAULT_STRATEGY,
 ) -> CategorizationSummary:
     """Predict newly imported transactions that are not yet predicted.
 
@@ -93,7 +99,7 @@ def predict_new(
         )
         .all()
     )
-    return _apply_predictions(db, txns, categorizer, threshold=threshold, strategy=strategy)
+    return _apply_predictions(db, txns, categorizer, threshold=threshold)
 
 
 def repredict_unreviewed(
@@ -102,7 +108,6 @@ def repredict_unreviewed(
     *,
     limit: int = 1000,
     threshold: float | None = None,
-    strategy: str = DEFAULT_STRATEGY,
 ) -> tuple[CategorizationSummary, int]:
     """Re-predict unreviewed transactions that already have a Prediction.
 
@@ -114,21 +119,15 @@ def repredict_unreviewed(
         TransactionORM.predicted_category_id.is_not(None),
     )
     txns, remaining = _select_with_limit(query, limit)
-    return _apply_predictions(db, txns, categorizer, threshold=threshold, strategy=strategy), remaining
+    return _apply_predictions(db, txns, categorizer, threshold=threshold), remaining
 
 
 def _select_with_limit(query, limit: int) -> tuple[list[TransactionORM], int]:
-    """Fetch up to ``limit`` matches and count how many are left beyond it.
-
-    A failing selection query (e.g. missing table in a fresh database) is
-    treated as "nothing to predict" rather than an error.
-    """
-    try:
-        total_matching = query.count()
-        txns = query.limit(limit).all()
-    except Exception:
-        return [], 0
-    return txns, max(0, total_matching - len(txns))
+    """Fetch up to ``limit`` matches and count how many are left beyond it."""
+    txns = query.limit(limit).all()
+    if len(txns) < limit:
+        return txns, 0
+    return txns, max(0, query.count() - len(txns))
 
 
 def _to_input(txn: TransactionORM) -> TransactionInput:
@@ -148,7 +147,6 @@ def _apply_predictions(
     categorizer: ConfidenceCategorizer,
     *,
     threshold: float | None,
-    strategy: str,
 ) -> CategorizationSummary:
     """Predict, run Strategic Selection, bucket, persist, and commit."""
     if not txns:
@@ -168,17 +166,17 @@ def _apply_predictions(
     selector = ActiveLearningSelector(db)
     strategic_selections = set(
         selector.select_for_review(
-            al_predictions, max_items=min(MAX_REVIEW_ITEMS, len(al_predictions)), strategy=strategy
+            al_predictions, max_items=min(MAX_REVIEW_ITEMS, len(al_predictions)), strategy="uncertainty"
         )
     )
 
     if threshold is None:
         threshold = get_auto_approve_threshold(db)
 
-    counts = {priority: 0 for priority in ReviewPriority}
-    for txn, prediction in zip(txns, predictions, strict=True):
-        priority = _bucket_transaction(txn, prediction, strategic_selections, threshold)
-        counts[priority] += 1
+    counts = Counter(
+        _bucket_transaction(txn, prediction, strategic_selections, threshold)
+        for txn, prediction in zip(txns, predictions, strict=True)
+    )
 
     db.commit()
     return CategorizationSummary(
@@ -200,18 +198,12 @@ def _bucket_transaction(
     txn.confidence_score = prediction.confidence_score
 
     if prediction.confidence_score >= threshold:
-        if txn.id in strategic_selections:
-            txn.is_reviewed = False
-            txn.review_priority = ReviewPriority.QUALITY_CHECK
-            return ReviewPriority.QUALITY_CHECK
-        txn.category_id = prediction.predicted_category_id
-        txn.is_reviewed = True
-        txn.review_priority = ReviewPriority.AUTO_ACCEPTED
-        return ReviewPriority.AUTO_ACCEPTED
+        priority = ReviewPriority.QUALITY_CHECK if txn.id in strategic_selections else ReviewPriority.AUTO_ACCEPTED
+    else:
+        priority = ReviewPriority.HIGH if txn.id in strategic_selections else ReviewPriority.STANDARD
 
-    txn.is_reviewed = False
-    if txn.id in strategic_selections:
-        txn.review_priority = ReviewPriority.HIGH
-        return ReviewPriority.HIGH
-    txn.review_priority = ReviewPriority.STANDARD
-    return ReviewPriority.STANDARD
+    txn.review_priority = priority
+    txn.is_reviewed = priority is ReviewPriority.AUTO_ACCEPTED
+    if priority is ReviewPriority.AUTO_ACCEPTED:
+        txn.category_id = prediction.predicted_category_id
+    return priority

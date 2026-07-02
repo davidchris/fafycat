@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from fafycat.api.dependencies import get_db_session
 from fafycat.api.models import UploadResponse
 from fafycat.data.csv_processor import CSVProcessor
-from fafycat.ml.prediction_pipeline import predict_new
+from fafycat.ml.prediction_pipeline import CategorizationSummary, predict_new
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -20,14 +20,19 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 upload_sessions = {}
 
 
+def _summary_to_dict(summary: CategorizationSummary) -> dict:
+    """Map a Categorization Summary to the upload response fields."""
+    return {
+        "predictions_made": summary.total,
+        "auto_accepted": summary.auto_accepted,
+        "needs_review": summary.needs_review,
+        "quality_check": summary.quality_check,
+    }
+
+
 def empty_categorization_summary() -> dict:
     """Return a zeroed categorization summary."""
-    return {
-        "predictions_made": 0,
-        "auto_accepted": 0,
-        "needs_review": 0,
-        "quality_check": 0,
-    }
+    return _summary_to_dict(CategorizationSummary())
 
 
 def predict_transaction_categories(db: Session, transactions: list, new_count: int) -> dict:
@@ -48,12 +53,7 @@ def predict_transaction_categories(db: Session, transactions: list, new_count: i
         _handle_prediction_error(e)
         return empty_categorization_summary()
 
-    return {
-        "predictions_made": summary.total,
-        "auto_accepted": summary.auto_accepted,
-        "needs_review": summary.high + summary.standard,
-        "quality_check": summary.quality_check,
-    }
+    return _summary_to_dict(summary)
 
 
 def _handle_prediction_error(e: Exception):

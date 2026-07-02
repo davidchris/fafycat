@@ -30,7 +30,12 @@ from fafycat.core.database import AppSettingsORM, CategoryORM
 from fafycat.core.models import TransactionInput
 from fafycat.ml.categorizer import TransactionCategorizer
 from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
-from fafycat.ml.prediction_pipeline import get_auto_approve_threshold, predict_unpredicted, repredict_unreviewed
+from fafycat.ml.prediction_pipeline import (
+    CategorizationSummary,
+    get_auto_approve_threshold,
+    predict_unpredicted,
+    repredict_unreviewed,
+)
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 
@@ -449,6 +454,28 @@ async def get_current_training_status() -> dict:
     return job.to_dict()
 
 
+def _batch_prediction_response(
+    summary: CategorizationSummary, remaining: int, *, empty_message: str, done_message: str, remaining_key: str
+) -> dict:
+    """Build the shared response shape for the batch prediction endpoints."""
+    if summary.total == 0:
+        return {
+            "status": "success",
+            "message": empty_message,
+            "predictions_made": 0,
+        }
+
+    return {
+        "status": "success",
+        "message": done_message,
+        "predictions_made": summary.total,
+        "auto_accepted": summary.auto_accepted,
+        "high_priority_review": summary.high_priority_review,
+        "standard_review": summary.standard,
+        remaining_key: remaining,
+    }
+
+
 @router.post("/predict/batch-unpredicted")
 async def predict_unpredicted_transactions(
     categorizer: TransactionCategorizer = Depends(get_categorizer),
@@ -458,24 +485,13 @@ async def predict_unpredicted_transactions(
     """Run ML predictions on transactions that don't have predictions yet."""
     try:
         summary, remaining = predict_unpredicted(db, categorizer, limit=limit)
-
-        if summary.total == 0:
-            return {
-                "status": "success",
-                "message": "No transactions need prediction",
-                "predictions_made": 0,
-            }
-
-        return {
-            "status": "success",
-            "message": f"Made predictions for {summary.total} transactions",
-            "predictions_made": summary.total,
-            "auto_accepted": summary.auto_accepted,
-            "high_priority_review": summary.quality_check + summary.high,
-            "standard_review": summary.standard,
-            "remaining_unpredicted": remaining,
-        }
-
+        return _batch_prediction_response(
+            summary,
+            remaining,
+            empty_message="No transactions need prediction",
+            done_message=f"Made predictions for {summary.total} transactions",
+            remaining_key="remaining_unpredicted",
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}") from e
 
@@ -489,23 +505,12 @@ async def repredict_unreviewed_transactions(
     """Re-run ML predictions on unreviewed transactions that already have predictions."""
     try:
         summary, remaining = repredict_unreviewed(db, categorizer, limit=limit)
-
-        if summary.total == 0:
-            return {
-                "status": "success",
-                "message": "No unreviewed transactions need re-prediction",
-                "predictions_made": 0,
-            }
-
-        return {
-            "status": "success",
-            "message": f"Re-predicted {summary.total} transactions",
-            "predictions_made": summary.total,
-            "auto_accepted": summary.auto_accepted,
-            "high_priority_review": summary.quality_check + summary.high,
-            "standard_review": summary.standard,
-            "remaining_unreviewed": remaining,
-        }
-
+        return _batch_prediction_response(
+            summary,
+            remaining,
+            empty_message="No unreviewed transactions need re-prediction",
+            done_message=f"Re-predicted {summary.total} transactions",
+            remaining_key="remaining_unreviewed",
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Batch re-prediction failed: {str(e)}") from e
