@@ -244,7 +244,9 @@ class TestEndpointsServeUnifiedMarkup:
         # amount asc puts -42.50 first, so page 2 holds -7.99
         assert "€-7.99" in resp.text
         assert "€-42.50" not in resp.text
-        for include in re.findall(r'hx-include="([^"]*)"', resp.text):
+        includes = re.findall(r'hx-include="([^"]*)"', resp.text)
+        assert includes, "pagination buttons missing from endpoint response"
+        for include in includes:
             assert "[name='sort_by']" in include
             assert "[name='category_filter']" in include
 
