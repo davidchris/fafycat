@@ -2,6 +2,14 @@
 
 from fasthtml.common import Button, Div, Nav, P, Span
 
+# Every filter the /api/transactions/table endpoint accepts. Pagination must
+# carry the full set, otherwise changing pages silently resets filters (#48).
+FILTER_HX_INCLUDE = (
+    "[name='status']:checked, [name='confidence_lt'], [name='search'], "
+    "[name='sort_by'], [name='sort_order'], [name='category_filter'], "
+    "[name='start_date'], [name='end_date']"
+)
+
 
 def create_pagination_info(page: int, total_count: int, per_page: int = 50) -> Div:
     """Create pagination info display."""
@@ -40,8 +48,6 @@ def create_pagination_button(
 
 def create_mobile_pagination(page: int, total_pages: int, has_prev: bool, has_next: bool) -> Div:
     """Create mobile-friendly pagination (Previous/Next only)."""
-    htmx_include = "[name='status']:checked, [name='confidence_lt'], [name='search']"
-
     prev_button = create_pagination_button(
         page - 1 if has_prev else 1,
         "Previous",
@@ -49,7 +55,7 @@ def create_mobile_pagination(page: int, total_pages: int, has_prev: bool, has_ne
         {
             "hx_get": f"/api/transactions/table?page={page - 1 if has_prev else 1}",
             "hx_target": "#transaction-table",
-            "hx_include": htmx_include,
+            "hx_include": FILTER_HX_INCLUDE,
         },
     )
 
@@ -60,7 +66,7 @@ def create_mobile_pagination(page: int, total_pages: int, has_prev: bool, has_ne
         {
             "hx_get": f"/api/transactions/table?page={page + 1 if has_next else total_pages}",
             "hx_target": "#transaction-table",
-            "hx_include": htmx_include,
+            "hx_include": FILTER_HX_INCLUDE,
         },
     )
 
@@ -69,13 +75,15 @@ def create_mobile_pagination(page: int, total_pages: int, has_prev: bool, has_ne
 
 def create_desktop_pagination(page: int, total_pages: int, has_prev: bool, has_next: bool) -> Nav:
     """Create full desktop pagination with First/Prev/Next/Last buttons."""
-    htmx_include = "[name='status']:checked, [name='confidence_lt'], [name='search']"
-
     first_button = create_pagination_button(
         1,
         "First",
         not has_prev,
-        {"hx_get": "/api/transactions/table?page=1", "hx_target": "#transaction-table", "hx_include": htmx_include},
+        {
+            "hx_get": "/api/transactions/table?page=1",
+            "hx_target": "#transaction-table",
+            "hx_include": FILTER_HX_INCLUDE,
+        },
     )
 
     prev_button = create_pagination_button(
@@ -85,7 +93,7 @@ def create_desktop_pagination(page: int, total_pages: int, has_prev: bool, has_n
         {
             "hx_get": f"/api/transactions/table?page={page - 1 if has_prev else 1}",
             "hx_target": "#transaction-table",
-            "hx_include": htmx_include,
+            "hx_include": FILTER_HX_INCLUDE,
         },
     )
 
@@ -101,7 +109,7 @@ def create_desktop_pagination(page: int, total_pages: int, has_prev: bool, has_n
         {
             "hx_get": f"/api/transactions/table?page={page + 1 if has_next else total_pages}",
             "hx_target": "#transaction-table",
-            "hx_include": htmx_include,
+            "hx_include": FILTER_HX_INCLUDE,
         },
     )
 
@@ -112,7 +120,7 @@ def create_desktop_pagination(page: int, total_pages: int, has_prev: bool, has_n
         {
             "hx_get": f"/api/transactions/table?page={total_pages}",
             "hx_target": "#transaction-table",
-            "hx_include": htmx_include,
+            "hx_include": FILTER_HX_INCLUDE,
         },
     )
 

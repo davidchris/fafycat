@@ -1,6 +1,7 @@
 """Tests for the unified transaction-table renderer."""
 
 import hashlib
+import re
 from datetime import UTC, date, datetime
 
 from fafycat.core.database import CategoryORM, TransactionORM
@@ -138,6 +139,37 @@ class TestRenderTable:
         assert "101" in html and "200" in html
 
 
+class TestPaginationKeepsFilters:
+    """Pagination buttons must carry every filter the table endpoint accepts (#48)."""
+
+    FILTER_NAMES = (
+        "status",
+        "confidence_lt",
+        "search",
+        "sort_by",
+        "sort_order",
+        "category_filter",
+        "start_date",
+        "end_date",
+    )
+
+    def test_every_pagination_button_includes_full_filter_set(self):
+        from fafycat.web.components.transaction_table import render_table
+
+        html = render_table(
+            [FakeTransaction()],
+            make_categories("Groceries"),
+            pagination_info={"page": 2, "total_pages": 3, "total_count": 230, "page_size": 100},
+        )
+
+        includes = re.findall(r'hx-include="([^"]*)"', html)
+        # mobile Prev/Next + desktop First/Prev/Next/Last, all enabled on a middle page
+        assert len(includes) == 6
+        for include in includes:
+            for filter_name in self.FILTER_NAMES:
+                assert f"[name='{filter_name}']" in include
+
+
 def _seed_transaction(session, *, name: str = "REWE", amount: float = -42.50) -> tuple[TransactionORM, CategoryORM]:
     """Insert one category and one unreviewed transaction predicted into it."""
     cat = CategoryORM(name="Groceries", type="spending", budget=0.0)
@@ -175,6 +207,46 @@ class TestEndpointsServeUnifiedMarkup:
         assert 'id="transaction-table"' in resp.text
         assert "€-42.50" in resp.text
         assert "$" not in resp.text
+
+    def test_paginating_with_category_filter_and_sort_keeps_filters_in_buttons(self, test_client, db_session):
+        """Regression for #48: page 2 with filters applied must emit buttons that resend them."""
+        _, cat = _seed_transaction(db_session, name="REWE", amount=-42.50)
+        second = TransactionORM(
+            id="feedbeef00000002",
+            date=date(2025, 6, 16),
+            name="EDEKA",
+            purpose="",
+            amount=-7.99,
+            currency="EUR",
+            predicted_category_id=cat.id,
+            confidence_score=0.6,
+            is_reviewed=False,
+            review_priority=ReviewPriority.HIGH,
+            import_batch="test-batch",
+            imported_at=datetime.now(UTC),
+        )
+        db_session.add(second)
+        db_session.flush()
+
+        resp = test_client.get(
+            "/api/transactions/table",
+            params={
+                "status": "all",
+                "page": 2,
+                "page_size": 1,
+                "sort_by": "amount",
+                "sort_order": "asc",
+                "category_filter": cat.name,
+            },
+        )
+
+        assert resp.status_code == 200
+        # amount asc puts -42.50 first, so page 2 holds -7.99
+        assert "€-7.99" in resp.text
+        assert "€-42.50" not in resp.text
+        for include in re.findall(r'hx-include="([^"]*)"', resp.text):
+            assert "[name='sort_by']" in include
+            assert "[name='category_filter']" in include
 
     def test_categorize_htmx_returns_unified_row(self, test_client, db_session):
         txn, cat = _seed_transaction(db_session)
