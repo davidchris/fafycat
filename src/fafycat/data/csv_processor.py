@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..core.database import CategoryORM, TransactionORM
 from ..core.models import TransactionInput
+from .dedup import find_fuzzy_duplicate, keep_preferred_fields, sort_direct_rows_first
 
 
 class CSVProcessor:
@@ -198,13 +199,22 @@ class CSVProcessor:
         new_count = 0
         duplicate_count = 0
 
-        for txn in transactions:
+        # Insert account-direct rows before card-settlement rows so the row
+        # with the real purchase date survives fuzzy dedup.
+        for txn in sort_direct_rows_first(transactions):
             txn_id = txn.generate_id()
 
             # Check for existing transaction
             existing = self.session.query(TransactionORM).filter(TransactionORM.id == txn_id).first()
 
             if existing:
+                duplicate_count += 1
+                continue
+
+            # Fuzzy check: delayed card-settlement row for an already-imported purchase
+            fuzzy_duplicate = find_fuzzy_duplicate(self.session, txn)
+            if fuzzy_duplicate is not None:
+                keep_preferred_fields(fuzzy_duplicate, txn)
                 duplicate_count += 1
                 continue
 
@@ -237,6 +247,9 @@ class CSVProcessor:
                     db_txn.category_id = category.id
 
             self.session.add(db_txn)
+            # Session runs with autoflush=False: flush so later rows in this
+            # batch can dedup (exact and fuzzy) against this one.
+            self.session.flush()
             new_count += 1
 
         self.session.commit()
