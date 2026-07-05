@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-07-01T09:47:26.693522Z"
+exclude-newer = "2026-07-04T22:33:21.423194Z"
 exclude-newer-span = "P1D"
 
 [[package]]
@@ -450,7 +450,7 @@ wheels = [
 
 [[package]]
 name = "fafycat"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

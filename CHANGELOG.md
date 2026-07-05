@@ -7,6 +7,29 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-06
+
+### Fixed
+- **Pagination no longer drops your filters.** Clicking First/Prev/Next/Last
+  in the transaction table used to silently reset sorting, the category
+  filter, and the date range. All active filters now carry through
+  pagination.
+- **Duplicate transactions from card settlements are now caught.** Some
+  banks export the same card purchase twice — once as the direct account
+  booking, once as a delayed VISA settlement line days later. Import now
+  recognizes and collapses these as one transaction.
+- **Reviewed transactions keep their checkmark after a page reload.** The
+  checkmark used to only show right after saving, then disappear again.
+- **Transaction amounts consistently show in EUR** across all transaction
+  views.
+- **`tx list` and `analytics top` reject invalid `--limit` values** instead
+  of silently clamping or accepting out-of-range numbers.
+
+### Security
+- Patched further Dependabot alerts: `starlette` (form-parsing DoS),
+  `python-multipart` (parsing DoS/smuggling), `bleach` (XSS), and
+  `jupyter-server`/`jupyterlab` (stored XSS).
+
 ## [0.1.0] - 2026-06-13
 
 ### Fixed
@@ -53,5 +76,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - The repository was prepared for wider public sharing with updated
   documentation.
 
-[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/davidchris/fafycat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/davidchris/fafycat/releases/tag/v0.1.0
