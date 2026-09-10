@@ -53,8 +53,16 @@ One Prediction Pipeline run's full output for one transaction: what the Merchant
 _Avoid_: prediction record, explanation
 
 **Review Event**:
-One category assignment on a transaction, with its actor: the reviewer, an auto-accept, a bulk approve, or a labelled import.
+One category assignment on a transaction, with its actor: the reviewer, an auto-accept, a bulk approve, a labelled import, or a propagation from a sibling transaction.
 _Avoid_: correction, change log
+
+**Merchant Pattern**:
+The cleaned merchant name stored on a transaction. It groups the sibling transactions a correction propagates to and keys the transaction's Merchant Rule.
+_Avoid_: merchant, cleaned name
+
+**Propagation**:
+Applying a category the reviewer just saved to every unreviewed transaction sharing its Merchant Pattern. Each affected transaction gets its own Review Event.
+_Avoid_: bulk apply, mass update
 
 **Categorization Summary**:
 The auto-accepted and needs-review counts reported after one Prediction Pipeline run.
