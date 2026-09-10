@@ -193,7 +193,28 @@ class TestEnsembleCategorizerTraining:
         assert "best_weights" in results
         assert "validation_accuracy" in results
         weights = results["best_weights"]
-        assert abs(weights["lgbm"] + weights["nb"] - 1.0) < 1e-6
+        assert set(weights) == {"lgbm", "nb", "rule"}
+        assert abs(weights["lgbm"] + weights["nb"] + weights["rule"] - 1.0) < 1e-6
+
+    def test_weight_optimisation_scores_the_validation_split_with_training_split_rules(
+        self, seeded_db, ml_config, monkeypatch
+    ):
+        session, transactions = seeded_db
+        derive = EnsembleCategorizer._training_split_rules
+        seen: list[int] = []
+
+        def spy(txns, labels):
+            seen.append(len(txns))
+            return derive(txns, labels)
+
+        monkeypatch.setattr(EnsembleCategorizer, "_training_split_rules", staticmethod(spy))
+
+        results = EnsembleCategorizer(session, ml_config).train_with_validation_optimization()
+
+        assert seen, "weight optimisation must derive its own rules"
+        # 80/20 split: the rules must not see the fifth of the data they are scored against.
+        assert seen[0] < results["n_training_samples"]
+        assert seen[0] == pytest.approx(0.8 * results["n_training_samples"], abs=1)
 
     def test_ensemble_enables_predictions(self, seeded_db, ml_config):
         session, transactions = seeded_db
@@ -207,4 +228,5 @@ class TestEnsembleCategorizerTraining:
             assert isinstance(pred, TransactionPrediction)
             assert 0.0 <= pred.confidence_score <= 1.0
             # Ensemble predictions include weight keys
-            assert "ensemble_lgbm_weight" in pred.feature_contributions or "merchant_rule" in pred.feature_contributions
+            assert "ensemble_lgbm_weight" in pred.feature_contributions
+            assert pred.detail is not None and pred.detail.source == "ensemble"

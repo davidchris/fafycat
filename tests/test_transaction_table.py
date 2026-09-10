@@ -144,7 +144,6 @@ class TestPaginationKeepsFilters:
 
     FILTER_NAMES = (
         "status",
-        "confidence_lt",
         "search",
         "sort_by",
         "sort_order",
@@ -163,8 +162,9 @@ class TestPaginationKeepsFilters:
         )
 
         includes = re.findall(r'hx-include="([^"]*)"', html)
-        # mobile Prev/Next + desktop First/Prev/Next/Last, all enabled on a middle page
-        assert len(includes) == 6
+        # mobile Prev/Next + desktop First/Prev/Next/Last, all enabled on a middle
+        # page, plus the container's own transactions-changed refresh
+        assert len(includes) == 7
         for include in includes:
             for filter_name in self.FILTER_NAMES:
                 assert f"[name='{filter_name}']" in include

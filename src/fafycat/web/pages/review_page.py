@@ -3,9 +3,14 @@
 import html
 
 from fastapi import Request
+from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_manager
+from fafycat.api.ml_insights import TrainingRecency, get_training_recency
 from fafycat.api.services import CategoryService, TransactionService
+from fafycat.core.config import AppConfig
+from fafycat.core.database import TransactionORM
+from fafycat.ml.prediction_pipeline import get_auto_approve_threshold
 from fafycat.web.components.layout import create_page_layout
 from fafycat.web.components.transaction_table import render_table
 
@@ -14,14 +19,15 @@ def _get_model_status_alert():
     """Get model status and return HTML alert if model needs training."""
     try:
         # Get ML status directly without HTTP call
-        from fafycat.core.config import AppConfig
-        from fafycat.core.database import DatabaseManager, TransactionORM
+        from fafycat.core.database import DatabaseManager
 
         config = AppConfig()
         db_manager = DatabaseManager(config)
 
         with db_manager.get_session() as db_session:
-            model_path = config.ml.model_dir / "categorizer.pkl"
+            # Same filename rule as the ML API, which picks by config.
+            model_filename = "ensemble_categorizer.pkl" if config.ml.use_ensemble else "categorizer.pkl"
+            model_path = config.ml.model_dir / model_filename
 
             # Check training data readiness
             reviewed_count = (
@@ -84,7 +90,8 @@ def _get_model_status_alert():
                         </div>
                         <div class="ml-auto">
                             <button type="button"
-                                    onclick="this.parentElement.parentElement.parentElement.style.display='none'"
+                                    data-dismiss-alert
+                                    aria-label="Dismiss"
                                     class="opacity-60 hover:opacity-100">
                                 &times;
                             </button>
@@ -119,6 +126,62 @@ def _get_model_status_alert():
     return ""
 
 
+def _recency_sentence(recency: TrainingRecency) -> str:
+    """Phrase the training-recency counter. Mirrors ``recencyText`` in review.js."""
+    count = recency.reviews_since_training
+    noun = "review" if count == 1 else "reviews"
+    if recency.last_trained_at is None:
+        return f"{count} {noun} recorded. The model has never been trained."
+    return f"{count} {noun} since the model was last trained ({recency.last_trained_at.strftime('%d %b %Y')})"
+
+
+def _render_training_recency(session: Session) -> str:
+    """Render the training-recency counter with the retrain-and-re-predict button.
+
+    The button is the whole feedback loop in one click: retrain on everything
+    reviewed so far, then re-score the transactions still in the queue. It is
+    hidden until there is enough labelled data to train at all.
+
+    Args:
+        session: Open database session.
+
+    Returns:
+        An HTML fragment to place above the review queue.
+    """
+    recency = get_training_recency(session)
+    min_samples = AppConfig().ml.min_training_samples
+    reviewed_count = (
+        session.query(TransactionORM)
+        .filter(TransactionORM.is_reviewed, TransactionORM.category_id.is_not(None))
+        .count()
+    )
+
+    if reviewed_count >= min_samples:
+        action = """
+            <button type="button" id="retrain-repredict-btn" class="btn btn-sm btn-primary">
+                Retrain and re-predict the queue
+            </button>"""
+    else:
+        action = f"""
+            <span class="text-sm text-secondary">
+                Need at least {min_samples} reviewed transactions to train ({reviewed_count} so far).
+            </span>"""
+
+    return f"""
+    <div id="training-recency" class="card mb-6">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <p id="training-recency-text" class="text-sm font-medium">{_recency_sentence(recency)}</p>
+                <p class="text-xs text-secondary mt-1">
+                    Retraining folds your corrections into the model, then re-scores everything left in the queue.
+                </p>
+            </div>{action}
+        </div>
+        <div id="retrain-alert" hidden></div>
+    </div>
+    """
+
+
 def _generate_category_options(categories):
     """Generate category options for the filter dropdown."""
     options = ""
@@ -131,27 +194,28 @@ def _generate_category_options(categories):
 def render_review_page(request: Request):
     """Render the review and categorize transactions page."""
     db_manager = get_db_manager(request)
+    threshold = 0.0
 
     try:
         with db_manager.get_session() as session:
-            # Use the new paginated service to get initial transaction data (default to high priority)
+            # Default view: everything not yet reviewed, least confident first.
             result = TransactionService.get_transactions_with_pagination(
                 session=session,
                 skip=0,
                 limit=50,
-                is_reviewed=False,  # Default to pending
-                review_priority="high_priority",  # Default to high priority transactions
-                confidence_lt=0.8,  # Default confidence threshold
-                sort_by="date",
-                sort_order="desc",
+                is_reviewed=False,
+                sort_by="confidence_score",
+                sort_order="asc",
                 search="",
             )
+            threshold = get_auto_approve_threshold(session)
 
             categories = CategoryService.get_categories(session)
 
             transactions_html = render_table(result["transactions"], categories, result["pagination_info"])
 
             transaction_count = result["pagination_info"]["total_count"]
+            training_recency_html = _render_training_recency(session)
 
     except Exception as e:
         # Fallback in case of database error
@@ -162,6 +226,7 @@ def render_review_page(request: Request):
         """
         transaction_count = 0
         categories = []
+        training_recency_html = ""
 
     # Get model status alert
     model_alert = _get_model_status_alert()
@@ -172,9 +237,11 @@ def render_review_page(request: Request):
 
         {model_alert}
 
+        {training_recency_html}
+
         <div class="mb-8">
-            <h2 class="text-lg font-semibold mb-4">Priority Review Queue ({transaction_count} transactions)</h2>
-            <p class="text-secondary mb-4">Showing high-priority transactions selected by active learning, plus quality check samples from high-confidence predictions. Only transactions above 95% confidence are auto-accepted.</p>
+            <h2 class="text-lg font-semibold mb-4">Needs review ({transaction_count} transactions)</h2>
+            <p class="text-secondary mb-4">Predictions at or above {threshold:.0%} confidence are auto-accepted. Everything else is listed here, least confident first, until you save a category.</p>
             {transactions_html}
         </div>
 
@@ -183,47 +250,38 @@ def render_review_page(request: Request):
             <div class="card space-y-4">
                 <!-- Status Filter -->
                 <div>
-                    <label class="block text-sm font-medium mb-2">Queue:</label>
+                    <label class="block text-sm font-medium mb-2">Show:</label>
                     <div class="flex gap-4 flex-wrap">
                         <label class="flex items-center">
-                            <input type="radio" name="status" value="high_priority" checked
+                            <input type="radio" name="status" value="pending" checked
                                    hx-get="/api/transactions/table"
                                    hx-trigger="change"
                                    hx-target="#transaction-table"
-                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                                   hx-include="[name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                    class="mr-2">
-                            Priority Review
-                        </label>
-                        <label class="flex items-center">
-                            <input type="radio" name="status" value="pending"
-                                   hx-get="/api/transactions/table"
-                                   hx-trigger="change"
-                                   hx-target="#transaction-table"
-                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
-                                   class="mr-2">
-                            All Pending
+                            Needs review
                         </label>
                         <label class="flex items-center">
                             <input type="radio" name="status" value="reviewed"
                                    hx-get="/api/transactions/table"
                                    hx-trigger="change"
                                    hx-target="#transaction-table"
-                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                                   hx-include="[name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                    class="mr-2">
-                            Auto-Accepted
+                            Reviewed
                         </label>
                         <label class="flex items-center">
                             <input type="radio" name="status" value="all"
                                    hx-get="/api/transactions/table"
                                    hx-trigger="change"
                                    hx-target="#transaction-table"
-                                   hx-include="[name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                                   hx-include="[name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                    class="mr-2">
-                            All Transactions
+                            All transactions
                         </label>
                     </div>
                 </div>
-                
+
                 <!-- Search -->
                 <div>
                     <label class="block text-sm font-medium mb-2">Search:</label>
@@ -231,7 +289,7 @@ def render_review_page(request: Request):
                            hx-get="/api/transactions/table"
                            hx-trigger="input changed delay:300ms"
                            hx-target="#transaction-table"
-                           hx-include="[name='status']:checked, [name='confidence_lt'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                           hx-include="[name='status']:checked, [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                            class="form-input">
                 </div>
                 
@@ -242,7 +300,7 @@ def render_review_page(request: Request):
                             hx-get="/api/transactions/table"
                             hx-trigger="change"
                             hx-target="#transaction-table"
-                            hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                            hx-include="[name='status']:checked, [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                             class="form-select">
                         <option value="">All Categories</option>
                         <option value="uncategorized">Uncategorized</option>
@@ -258,7 +316,7 @@ def render_review_page(request: Request):
                                hx-get="/api/transactions/table"
                                hx-trigger="change"
                                hx-target="#transaction-table"
-                               hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                               hx-include="[name='status']:checked, [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                class="form-select">
                     </div>
                     <div>
@@ -267,26 +325,11 @@ def render_review_page(request: Request):
                                hx-get="/api/transactions/table"
                                hx-trigger="change"
                                hx-target="#transaction-table"
-                               hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                               hx-include="[name='status']:checked, [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                class="form-select">
                     </div>
                 </div>
 
-                <!-- Confidence Threshold (only for pending) -->
-                <div id="confidence-filter">
-                    <label class="block text-sm font-medium mb-2">Confidence threshold:</label>
-                    <input type="range" name="confidence_lt"
-                           min="0" max="1" step="0.1" value="0.8"
-                           hx-get="/api/transactions/table"
-                           hx-trigger="change throttle:500ms"
-                           hx-target="#transaction-table"
-                           hx-include="[name='status']:checked, [name='search'], [name='sort_by'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
-                           class="w-full">
-                    <p id="threshold-display" class="text-sm text-secondary mt-2">
-                        Show transactions with confidence below 80%
-                    </p>
-                </div>
-                
                 <!-- Sorting -->
                 <div class="flex gap-4">
                     <div class="flex-1">
@@ -295,10 +338,10 @@ def render_review_page(request: Request):
                                 hx-get="/api/transactions/table"
                                 hx-trigger="change"
                                 hx-target="#transaction-table"
-                                hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                                hx-include="[name='status']:checked, [name='search'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                 class="form-select">
-                            <option value="date" selected>Date</option>
-                            <option value="confidence_score">Confidence</option>
+                            <option value="confidence_score" selected>Confidence</option>
+                            <option value="date">Date</option>
                             <option value="amount">Amount</option>
                             <option value="name">Description</option>
                         </select>
@@ -309,16 +352,18 @@ def render_review_page(request: Request):
                                 hx-get="/api/transactions/table"
                                 hx-trigger="change"
                                 hx-target="#transaction-table"
-                                hx-include="[name='status']:checked, [name='confidence_lt'], [name='search'], [name='sort_by'], [name='category_filter'], [name='start_date'], [name='end_date']"
+                                hx-include="[name='status']:checked, [name='search'], [name='sort_by'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                 class="form-select">
-                            <option value="desc" selected>Descending</option>
-                            <option value="asc">Ascending</option>
+                            <option value="asc" selected>Ascending</option>
+                            <option value="desc">Descending</option>
                         </select>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <script src="/static/js/review.js" defer></script>
     """
 
     return create_page_layout("Review & Categorize - FafyCat", content)

@@ -20,9 +20,10 @@ from sqlalchemy.orm import Session
 
 from ..core.config import MLConfig
 from ..core.database import CategoryORM, ModelMetadataORM, TransactionORM
-from ..core.models import ModelMetrics, TransactionInput, TransactionPrediction
+from ..core.models import ModelMetrics, PredictionDetail, TransactionInput, TransactionPrediction
 from .feature_extractor import FeatureExtractor
-from .merchant_mapper import MerchantMapper
+from .merchant_mapper import RULE_OVERRIDE_CONFIDENCE, MerchantMapper
+from .model_identity import model_fingerprint, probs_by_category
 
 
 class TransactionCategorizer:
@@ -47,6 +48,7 @@ class TransactionCategorizer:
         self.classes_: np.ndarray | None = None
         self.is_trained = False
         self.model_version = "1.0"
+        self.model_id = "untrained"
 
     def prepare_training_data(self) -> tuple[pd.DataFrame, np.ndarray]:
         """Prepare training data from database transactions."""
@@ -236,61 +238,70 @@ class TransactionCategorizer:
     def predict_with_confidence(self, transactions: list[TransactionInput]) -> list[TransactionPrediction]:
         """Predict categories with confidence scores.
 
-        Uses batch ML inference for all transactions not resolved by merchant
-        mapping, avoiding per-transaction feature extraction and model calls.
+        The model scores every transaction in one batch. A Merchant Rule that
+        matches at or above ``RULE_OVERRIDE_CONFIDENCE`` decides instead, but
+        the model's probabilities are still captured for the Audit Trail.
+
+        This hard override is kept only for the single-model fallback. The
+        default ensemble treats a rule as a weighted voter instead.
         """
         if not self.is_trained:
             raise ValueError("Model must be trained before prediction")
         if self.classes_ is None:
             raise ValueError("Model has no classes_ — was it trained?")
+        if not transactions:
+            return []
 
-        predictions: list[TransactionPrediction | None] = [None] * len(transactions)
-        ml_indices: list[int] = []
-        ml_transactions: list[TransactionInput] = []
+        # Reviews and propagations write rules between imports; this
+        # long-lived singleton would otherwise keep a stale rule cache.
+        self.merchant_mapper.reload()
 
-        # Phase 1: Merchant mapper (fast, rule-based)
+        features_list = self.feature_extractor.extract_batch_features(transactions)
+        X_prepared = self._prepare_features(pd.DataFrame(features_list), fit=False)
+        try:
+            probas = (
+                self.calibrated_classifier.predict_proba(X_prepared)
+                if self.calibrated_classifier
+                else self.classifier.predict_proba(X_prepared)
+            )
+        except ValueError:
+            probas = self.classifier.predict_proba(X_prepared)
+        class_ids = [int(c) for c in self.classes_]
+
+        predictions: list[TransactionPrediction] = []
         for i, txn in enumerate(transactions):
-            merchant_match = self.merchant_mapper.get_category(txn.name)
-            if merchant_match and merchant_match.confidence >= 0.95:
-                predictions[i] = TransactionPrediction(
-                    transaction_id=txn.generate_id(),
-                    predicted_category_id=merchant_match.category_id,
-                    confidence_score=merchant_match.confidence,
-                    feature_contributions={"merchant_rule": 1.0},
-                )
+            proba = probas[i]
+            pred_idx = int(np.argmax(proba))
+            lgbm_probs = probs_by_category(class_ids, proba)
+            rule = self.merchant_mapper.get_category(txn.name)
+            detail = PredictionDetail(
+                source="lgbm",
+                rule_pattern=rule.merchant_pattern if rule else None,
+                rule_category_id=rule.category_id if rule else None,
+                rule_confidence=rule.confidence if rule else None,
+                lgbm_probs=lgbm_probs,
+                ensemble_probs=lgbm_probs,
+                lgbm_weight=1.0,
+            )
+            if rule and rule.confidence >= RULE_OVERRIDE_CONFIDENCE:
+                detail.source = "merchant_rule"
+                category_id, confidence = rule.category_id, rule.confidence
+                contributions = {"merchant_rule": 1.0}
             else:
-                ml_indices.append(i)
-                ml_transactions.append(txn)
+                category_id, confidence = class_ids[pred_idx], float(proba[pred_idx])
+                contributions = self._get_feature_contributions(X_prepared[i], pred_idx)
 
-        # Phase 2: Batch ML prediction for remaining
-        if ml_transactions:
-            features_list = self.feature_extractor.extract_batch_features(ml_transactions)
-            X_df = pd.DataFrame(features_list)
-            X_prepared = self._prepare_features(X_df, fit=False)
-
-            try:
-                if self.calibrated_classifier:
-                    probas = self.calibrated_classifier.predict_proba(X_prepared)
-                else:
-                    probas = self.classifier.predict_proba(X_prepared)
-            except ValueError:
-                probas = self.classifier.predict_proba(X_prepared)
-
-            for j, idx in enumerate(ml_indices):
-                proba = probas[j]
-                pred_idx = np.argmax(proba)
-                confidence = float(proba[pred_idx])
-                predicted_category_id = int(self.classes_[pred_idx])
-                feature_contributions = self._get_feature_contributions(X_prepared[j], int(pred_idx))
-
-                predictions[idx] = TransactionPrediction(
-                    transaction_id=ml_transactions[j].generate_id(),
-                    predicted_category_id=predicted_category_id,
+            predictions.append(
+                TransactionPrediction(
+                    transaction_id=txn.generate_id(),
+                    predicted_category_id=category_id,
                     confidence_score=confidence,
-                    feature_contributions=feature_contributions,
+                    feature_contributions=contributions,
+                    detail=detail,
                 )
+            )
 
-        return [p for p in predictions if p is not None]
+        return predictions
 
     def predict_proba(self, transactions: list[TransactionInput]) -> np.ndarray:
         """Get full calibrated probability vectors, bypassing merchant mapper.
@@ -426,6 +437,7 @@ class TransactionCategorizer:
 
         with open(model_path, "wb") as f:
             pickle.dump(model_data, f)
+        self.model_id = model_fingerprint(model_path)
 
     def load_model(self, model_path: Path) -> None:
         """Load trained model from disk."""
@@ -463,6 +475,7 @@ class TransactionCategorizer:
         self.feature_names = model_data["feature_names"]
         self.classes_ = model_data["classes_"]
         self.model_version = model_data["model_version"]
+        self.model_id = model_fingerprint(model_path)
 
         # Load vectorizers with backward compat for old pickles
         self.char_vectorizer = model_data.get("char_vectorizer", model_data.get("text_vectorizer"))

@@ -11,7 +11,12 @@ from fafycat.api.dependencies import get_db_session
 from fafycat.api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
 from fafycat.api.services import CategoryService, TransactionService
 from fafycat.core.models import ReviewPriority
-from fafycat.web.components.transaction_table import render_row, render_table
+from fafycat.web.components.transaction_table import (
+    render_propagation_result,
+    render_row,
+    render_row_with_prompt,
+    render_table,
+)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -84,17 +89,53 @@ async def categorize_transaction_htmx(
         )
 
     categories = CategoryService.get_categories(db)
-    return HTMLResponse(content=render_row(result, categories), status_code=200)
+    pattern, sibling_count = TransactionService.count_unreviewed_siblings(db, transaction_id)
+    if sibling_count > 0:
+        html = render_row_with_prompt(
+            result,
+            categories,
+            pattern=pattern,
+            sibling_count=sibling_count,
+            # The stored name, not the submitted one: it is what propagate looks up.
+            category_name=result.actual_category or actual_category,
+        )
+    else:
+        html = render_row(result, categories)
+    return HTMLResponse(content=html, status_code=200)
+
+
+@router.post("/propagate", response_class=HTMLResponse)
+async def propagate_category(
+    source_id: str = Form(...),
+    actual_category: str = Form(...),
+    db: Session = Depends(get_db_session),
+) -> HTMLResponse:
+    """Apply a just-saved category to every unreviewed transaction with the same merchant pattern.
+
+    Replaces the inline prompt with a confirmation and fires
+    ``transactions-changed`` so the table reloads the rows that changed
+    underneath the user.
+    """
+    result = TransactionService.propagate_category(session=db, source_id=source_id, category_name=actual_category)
+    return HTMLResponse(
+        content=render_propagation_result(source_id, result["applied"]),
+        headers={"HX-Trigger": "transactions-changed"},
+    )
+
+
+@router.get("/propagate/dismiss", response_class=HTMLResponse)
+async def dismiss_propagation_prompt() -> HTMLResponse:
+    """Remove the propagation prompt row. Lets the prompt be dismissed without inline JS."""
+    return HTMLResponse(content="")
 
 
 @router.get("/table", response_class=HTMLResponse)
 async def get_transactions_table(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    status: str = Query("high_priority"),  # high_priority, pending, reviewed, all
-    confidence_lt: float = Query(0.8, ge=0, le=1),
-    sort_by: str = Query("date"),  # date, confidence, amount, description, category
-    sort_order: str = Query("desc"),  # asc, desc
+    status: str = Query("pending"),  # pending, reviewed, all
+    sort_by: str = Query("confidence_score"),  # date, confidence_score, amount, name
+    sort_order: str = Query("asc"),  # asc, desc
     search: str = Query(""),
     category_filter: str = Query(""),
     start_date: str = Query(""),
@@ -102,18 +143,8 @@ async def get_transactions_table(
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
     """Get transactions table fragment for HTMX filtering with pagination."""
-    # Convert status parameter to filters
-    is_reviewed = None
-    review_priority = None
-
-    if status == "high_priority":
-        is_reviewed = False
-        review_priority = "high_priority"  # Special value for high + quality_check
-    elif status == "pending":
-        is_reviewed = False
-    elif status == "reviewed":
-        is_reviewed = True
-    # status == "all" means no filters
+    # Convert status parameter to filters ("all" means no filter)
+    is_reviewed = {"pending": False, "reviewed": True}.get(status)
 
     # Parse date filters
     parsed_start_date = None
@@ -136,8 +167,6 @@ async def get_transactions_table(
         skip=skip,
         limit=page_size,
         is_reviewed=is_reviewed,
-        confidence_lt=confidence_lt if status in ["pending", "high_priority"] else None,
-        review_priority=review_priority,
         category=category_filter if category_filter else None,
         sort_by=sort_by,
         sort_order=sort_order,
@@ -174,9 +203,9 @@ async def bulk_approve_transactions(
 ) -> dict:
     """Bulk approve unreviewed transactions by trusting ML predictions.
 
-    Sets is_reviewed=True and category_id=predicted_category_id for transactions
-    matching the given review_priority (default: quality_check) that have not
-    yet been reviewed.
+    Sets is_reviewed=True and category_id=predicted_category_id for unreviewed
+    transactions matching ``review_priority`` and/or ``min_confidence``. With
+    neither given, the Auto-approve Threshold is the confidence floor.
     """
     return TransactionService.bulk_approve(
         session=db, review_priority=request.review_priority, min_confidence=request.min_confidence

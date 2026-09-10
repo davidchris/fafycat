@@ -20,7 +20,7 @@ FafyCat is a privacy-focused financial transaction categorization tool that uses
 
 - **🤖 Smart Categorization**: Machine learning categorizes transactions from your own reviewed history
 - **🔒 Privacy First**: Transaction data stays on your device, with local static assets and no hosted backend
-- **📊 Intelligent Review**: Active learning reduces manual work by 70-90%
+- **📊 Transparent Review**: Confident predictions are auto-accepted; everything else lands in one review queue, least confident first
 - **🏪 Merchant Memory**: Learns from your patterns to improve over time
 - **📈 Export Ready**: Multiple export formats for your favorite analysis tools
 - **⚡ Fast & Efficient**: Process thousands of transactions in seconds
@@ -126,7 +126,7 @@ uv run python scripts/reset_and_import.py --labeled-data-path /path/to/your/data
                                  ▼
                         ┌──────────────────┐
                         │   Review UI      │
-                        │  Active Learning │
+                        │  Single queue    │
                         └──────────────────┘
                                  │
                                  ▼
@@ -157,7 +157,7 @@ Common bank formats supported:
 
 1. **Initial Training**: Learn from your categorized transactions
 2. **Prediction**: Automatically categorize new transactions
-3. **Active Learning**: Intelligently select which transactions need review
+3. **Review Queue**: Everything below the auto-approve threshold waits for you, least confident first
 4. **Continuous Improvement**: Learn from corrections over time
 
 ### Privacy & Security

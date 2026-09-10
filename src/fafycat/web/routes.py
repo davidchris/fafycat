@@ -18,9 +18,25 @@ router = APIRouter()
 @router.get("/", response_class=HTMLResponse)
 async def home_page(request: Request) -> HTMLResponse:
     """Home page with workflow navigation."""
+    from calendar import monthrange
+    from datetime import date
+
+    from fafycat.api.services import AnalyticsService
     from fafycat.web.pages.home_page import render_home_page
 
-    return HTMLResponse(create_page_layout("FafyCat - Family Finance Categorizer", render_home_page()))
+    today = date.today()
+    month_start = today.replace(day=1)
+    month_end = today.replace(day=monthrange(today.year, today.month)[1])
+
+    db_manager = get_db_manager(request)
+    with db_manager.get_session() as db_session:
+        unreviewed_this_month = AnalyticsService.get_unreviewed_count(db_session, month_start, month_end)
+
+    return HTMLResponse(
+        create_page_layout(
+            "FafyCat - Family Finance Categorizer", render_home_page(unreviewed_this_month=unreviewed_this_month)
+        )
+    )
 
 
 @router.get("/app", response_class=HTMLResponse)
@@ -43,6 +59,28 @@ async def review_page(request: Request) -> HTMLResponse:
     from fafycat.web.pages.review_page import render_review_page
 
     return render_review_page(request)
+
+
+@router.get("/rules", response_class=HTMLResponse)
+async def rules_page(request: Request) -> HTMLResponse:
+    """Merchant Rules derived from reviewed transactions."""
+    from fafycat.web.pages.rules_page import render_rules_page
+
+    with get_db_manager(request).get_session() as session:
+        return HTMLResponse(render_rules_page(session))
+
+
+@router.get("/transactions/{transaction_id}/trail", response_class=HTMLResponse)
+async def transaction_trail_page(request: Request, transaction_id: str) -> HTMLResponse:
+    """Audit Trail for one transaction."""
+    from fafycat.core.audit_trail import get_trail
+    from fafycat.web.pages.trail_page import render_trail_page
+
+    with get_db_manager(request).get_session() as session:
+        trail = get_trail(session, transaction_id)
+        if trail is None:
+            return HTMLResponse(create_page_layout("Not found - FafyCat", "<p>Transaction not found.</p>"), 404)
+        return HTMLResponse(render_trail_page(trail))
 
 
 @router.get("/export", response_class=HTMLResponse)
@@ -126,7 +164,7 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
             new_count, duplicate_count = processor.save_transactions(transactions)
 
             # Auto-predict categories for new transactions if model is available
-            from fafycat.api.upload import empty_categorization_summary, predict_transaction_categories
+            from fafycat.api.upload import _kept_clause, empty_categorization_summary, predict_transaction_categories
 
             if new_count > 0:
                 cat_summary = predict_transaction_categories(db_session, transactions, new_count)
@@ -151,7 +189,9 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
                 prediction_component = str(
                     create_purple_alert(
                         "ML Predictions Made",
-                        f"{predictions_made} transactions received automatic category predictions",
+                        f"{predictions_made} transactions got predictions: "
+                        f"{cat_summary['auto_accepted']} auto-accepted, {cat_summary['needs_review']} need your review"
+                        f"{_kept_clause(cat_summary['already_reviewed'])}",
                     )
                 )
             elif new_count > 0:

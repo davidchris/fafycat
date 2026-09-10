@@ -410,3 +410,32 @@ def test_analytics_breakdown_invalid_type_exits_with_argparse_error(cli_runner):
     assert result.returncode == 2, (
         f"expected exit 2, got {result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("subcommand", ["monthly", "breakdown", "variance", "savings", "yoy", "top"])
+def test_analytics_accepts_exclude_unreviewed_and_reports_summary(cli_runner, subcommand):
+    """Every analytics subcommand takes --exclude-unreviewed and reports the unreviewed summary."""
+    cli_runner("init")
+
+    included = cli_runner("analytics", subcommand)
+    excluded = cli_runner("analytics", subcommand, "--exclude-unreviewed")
+
+    assert included.returncode == 0, f"stderr={included.stderr!r}\nstdout={included.stdout!r}"
+    assert excluded.returncode == 0, f"stderr={excluded.stderr!r}\nstdout={excluded.stdout!r}"
+
+    included_payload = json.loads(included.stdout)
+    excluded_payload = json.loads(excluded.stdout)
+    assert included_payload["unreviewed"]["included"] is True
+    assert excluded_payload["unreviewed"]["included"] is False
+    for key in ("count", "amount", "date_range"):
+        assert key in excluded_payload["unreviewed"], f"missing unreviewed key {key!r}"
+
+
+def test_skill_documents_exclude_unreviewed_flag():
+    """SKILL.md must document the --exclude-unreviewed flag and the unreviewed summary."""
+    import importlib.resources
+
+    content = importlib.resources.files("fafycat.data.skill").joinpath("SKILL.md").read_text(encoding="utf-8")
+    assert "--exclude-unreviewed" in content
+    assert "`unreviewed`" in content

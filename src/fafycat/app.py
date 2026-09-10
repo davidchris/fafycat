@@ -40,6 +40,12 @@ def create_app() -> FastAPI:
     db_manager = DatabaseManager(config)
     db_manager.create_tables()
 
+    # Older databases predate merchant_pattern; fill it in before serving.
+    from fafycat.data.merchant_pattern import backfill_merchant_patterns
+
+    with db_manager.get_session() as session:
+        backfill_merchant_patterns(session)
+
     # Store in app state
     app.state.config = config
     app.state.db_manager = db_manager
@@ -88,8 +94,8 @@ def create_app() -> FastAPI:
     return app
 
 
-app = create_app()
-
-
+# No module-level ``app``: building it opens the configured database and runs
+# schema upgrades, which must not happen as an import side effect (pytest
+# collection, tooling). uvicorn gets the factory instead.
 if __name__ == "__main__":
-    uvicorn.run("fafycat.app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("fafycat.app:create_app", factory=True, host="0.0.0.0", port=8000, reload=True, log_level="info")

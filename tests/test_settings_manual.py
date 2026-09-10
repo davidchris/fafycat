@@ -18,7 +18,7 @@ os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_dev.db"
 os.environ["FAFYCAT_ENV"] = "development"
 
 from fastapi.testclient import TestClient
-from fafycat.app import app
+from fafycat.app import create_app
 
 
 def test_settings_page_basic():
@@ -26,7 +26,7 @@ def test_settings_page_basic():
     print("🧪 Testing Settings Page ML Training")
     print("=" * 50)
 
-    client = TestClient(app)
+    client = TestClient(create_app())
 
     try:
         response = client.get("/settings")
@@ -104,7 +104,7 @@ def test_ml_status_api():
     print("\n🔍 Testing ML Status API")
     print("-" * 30)
 
-    client = TestClient(app)
+    client = TestClient(create_app())
 
     try:
         response = client.get("/api/ml/status")

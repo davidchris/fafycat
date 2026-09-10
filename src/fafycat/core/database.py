@@ -92,6 +92,9 @@ class TransactionORM(Base):
     confidence_score = Column(Float)
     is_reviewed = Column(Boolean, default=False)
     review_priority = Column(String(20), default="standard")  # standard, high, quality_check
+    # Cleaned merchant name (see MerchantCleaner). Groups the siblings a
+    # correction propagates to and keys the Merchant Rule for this row.
+    merchant_pattern = Column(String, index=True)
     imported_at = Column(DateTime, default=_utc_now)
     import_batch = Column(String, nullable=False)
 
@@ -155,6 +158,60 @@ class ModelMetadataORM(Base):
     is_active = Column(Boolean, default=False)
 
 
+class PredictionEventORM(Base):
+    """One Prediction Event: what every model component said in one pipeline run.
+
+    Append-only. Probability columns hold JSON objects keyed by category id.
+    """
+
+    __tablename__ = "prediction_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    transaction_id = Column(String(16), ForeignKey("transactions.id"), nullable=False)
+    created_at = Column(DateTime, default=_utc_now, nullable=False)
+    trigger = Column(String(32), nullable=False)  # import, batch_unpredicted, repredict
+    model_id = Column(String(32), nullable=False)  # fingerprint of the model file
+    threshold = Column(Float, nullable=False)
+    decision = Column(String(20), nullable=False)  # ReviewPriority value
+    source = Column(String(20), nullable=False)  # merchant_rule, ensemble, lgbm
+    final_category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    final_confidence = Column(Float, nullable=False)
+    rule_pattern = Column(Text)
+    rule_category_id = Column(Integer, ForeignKey("categories.id"))
+    rule_confidence = Column(Float)
+    lgbm_weight = Column(Float)
+    nb_weight = Column(Float)
+    rule_weight = Column(Float)
+    lgbm_probs = Column(Text)  # JSON {category_id: prob}
+    nb_probs = Column(Text)  # JSON
+    rule_probs = Column(Text)  # JSON, absent when no Merchant Rule matched
+    ensemble_probs = Column(Text)  # JSON
+    feature_contributions = Column(Text)  # JSON
+
+    __table_args__ = (Index("idx_prediction_events_transaction", "transaction_id", "created_at"),)
+
+
+class ReviewEventORM(Base):
+    """One Review Event: a category being set on a transaction, by whom.
+
+    Append-only. Together with Prediction Events this is the Audit Trail.
+    """
+
+    __tablename__ = "review_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    transaction_id = Column(String(16), ForeignKey("transactions.id"), nullable=False)
+    created_at = Column(DateTime, default=_utc_now, nullable=False)
+    actor = Column(String(32), nullable=False)  # ReviewActor value
+    from_category_id = Column(Integer, ForeignKey("categories.id"))
+    to_category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    predicted_category_id = Column(Integer, ForeignKey("categories.id"))
+    confidence_score = Column(Float)
+    note = Column(Text)
+
+    __table_args__ = (Index("idx_review_events_transaction", "transaction_id", "created_at"),)
+
+
 class DatabaseManager:
     """Database connection and session management."""
 
@@ -181,9 +238,27 @@ class DatabaseManager:
         Base.metadata.create_all(bind=self.engine)
         with self.engine.connect() as conn:
             for table in Base.metadata.tables.values():
+                self._add_missing_columns(conn, table)
+            for table in Base.metadata.tables.values():
                 for index in table.indexes:
                     index.create(bind=conn, checkfirst=True)
             conn.commit()
+
+    @staticmethod
+    def _add_missing_columns(conn, table) -> None:
+        """Add columns the ORM declares but an older database lacks (SQLite ``ALTER TABLE ADD COLUMN``).
+
+        Only nullable or defaulted columns can be added this way; that is the
+        contract for evolving existing tables in this project.
+        """
+        existing = {row[1] for row in conn.exec_driver_sql(f'PRAGMA table_info("{table.name}")')}
+        if not existing:
+            return
+        for column in table.columns:
+            if column.name in existing:
+                continue
+            ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column.type.compile(conn.dialect)}'
+            conn.exec_driver_sql(ddl)
 
     def get_session(self) -> Session:
         """Get database session."""

@@ -58,8 +58,8 @@ def _insert_transaction(
 class TestBulkApproveEndpoint:
     """Tests for POST /api/transactions/bulk-approve."""
 
-    def test_bulk_approve_quality_check(self, test_client, db_session):
-        """Quality-check transactions become reviewed with correct category."""
+    def test_bulk_approve_by_priority(self, test_client, db_session):
+        """An explicit review_priority approves exactly that bucket."""
         cat = _insert_category(db_session)
         txn = _insert_transaction(
             db_session,
@@ -71,8 +71,7 @@ class TestBulkApproveEndpoint:
         )
         db_session.commit()
 
-        # Default review_priority is now "quality_check"
-        resp = test_client.post("/api/transactions/bulk-approve")
+        resp = test_client.post("/api/transactions/bulk-approve", json={"review_priority": "quality_check"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["approved"] == 1
@@ -114,20 +113,17 @@ class TestBulkApproveEndpoint:
         db_session.refresh(low)
         assert low.is_reviewed is False
 
-    def test_bulk_approve_empty_body_uses_defaults(self, test_client, db_session):
-        """POST with empty body uses default review_priority='quality_check'."""
+    def test_bulk_approve_empty_body_uses_auto_approve_threshold(self, test_client, db_session):
+        """POST with empty body approves pending predictions at or above the auto-approve threshold."""
         cat = _insert_category(db_session)
-        _insert_transaction(
-            db_session,
-            predicted_category_id=cat.id,
-            confidence_score=0.9,
-            review_priority=ReviewPriority.QUALITY_CHECK,
-        )
+        confident = _insert_transaction(db_session, name="A", predicted_category_id=cat.id, confidence_score=0.9)
+        _insert_transaction(db_session, name="B", predicted_category_id=cat.id, confidence_score=0.5)
         db_session.commit()
 
         resp = test_client.post("/api/transactions/bulk-approve")
         assert resp.status_code == 200
         assert resp.json()["approved"] == 1
+        assert resp.json()["transaction_ids"] == [confident.id]
 
     def test_bulk_approve_ignores_already_auto_accepted(self, test_client, db_session):
         """Auto-accepted transactions (is_reviewed=True) are not matched by default."""
@@ -212,7 +208,7 @@ class TestEnrichedUploadResponse:
     """Tests that upload response includes categorization summary fields."""
 
     def test_upload_response_has_categorization_fields(self, test_client, db_session):
-        """Upload CSV response contains auto_accepted, needs_review, quality_check fields."""
+        """Upload CSV response contains auto_accepted and needs_review fields."""
         import tempfile
         from pathlib import Path
 
@@ -230,7 +226,7 @@ class TestEnrichedUploadResponse:
             # These fields must be present (even if 0)
             assert "auto_accepted" in data
             assert "needs_review" in data
-            assert "quality_check" in data
+            assert "already_reviewed" in data
             assert "predictions_made" in data
         finally:
             csv_path.unlink()

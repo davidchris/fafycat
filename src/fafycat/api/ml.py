@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_session
+from fafycat.api.ml_insights import get_calibration_report, get_training_recency
 from fafycat.api.ml_training_job import (
     TrainingPhase,
     complete_job,
@@ -245,7 +246,7 @@ async def predict_transactions_bulk(
 async def get_ml_status(
     db: Session = Depends(get_db_session),
 ) -> dict:
-    """Get ML model status and training readiness information."""
+    """Get ML model status, training readiness, and how stale the model is."""
     try:
         from fafycat.core.database import TransactionORM
 
@@ -264,24 +265,29 @@ async def get_ml_status(
         # Check unpredicted transactions
         unpredicted_count = db.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None)).count()
 
+        common = {
+            "model_path": str(model_path),
+            "training_ready": training_ready,
+            "reviewed_transactions": reviewed_count,
+            "min_training_samples": min_training_samples,
+            "unpredicted_transactions": unpredicted_count,
+            **get_training_recency(db).to_dict(),
+        }
+
         if not model_path.exists():
             return {
+                **common,
                 "model_loaded": False,
-                "model_path": str(model_path),
                 "status": "No model found - ready to train" if training_ready else "Not enough training data",
                 "can_predict": False,
-                "training_ready": training_ready,
-                "reviewed_transactions": reviewed_count,
-                "min_training_samples": min_training_samples,
-                "unpredicted_transactions": unpredicted_count,
             }
 
         # Try to get categorizer
         try:
             categorizer = get_categorizer(db)
             return {
+                **common,
                 "model_loaded": True,
-                "model_path": str(model_path),
                 "model_version": categorizer.model_version,
                 "is_trained": categorizer.is_trained,
                 "status": "Model loaded and ready",
@@ -291,23 +297,15 @@ async def get_ml_status(
                     if hasattr(categorizer, "classes_") and categorizer.classes_ is not None
                     else 0
                 ),
-                "training_ready": training_ready,
-                "reviewed_transactions": reviewed_count,
-                "min_training_samples": min_training_samples,
-                "unpredicted_transactions": unpredicted_count,
             }
         except HTTPException as he:
             # Extract the specific error message from the HTTPException
             error_detail = he.detail if hasattr(he, "detail") else str(he)
             return {
+                **common,
                 "model_loaded": False,
-                "model_path": str(model_path),
                 "status": f"Model failed to load: {error_detail}",
                 "can_predict": False,
-                "training_ready": training_ready,
-                "reviewed_transactions": reviewed_count,
-                "min_training_samples": min_training_samples,
-                "unpredicted_transactions": unpredicted_count,
             }
 
     except Exception as e:
@@ -319,7 +317,15 @@ async def get_ml_status(
             "reviewed_transactions": 0,
             "min_training_samples": 50,
             "unpredicted_transactions": 0,
+            "last_trained_at": None,
+            "reviews_since_training": 0,
         }
+
+
+@router.get("/calibration")
+async def get_calibration(db: Session = Depends(get_db_session)) -> dict:
+    """Report how often reviewers kept the prediction, per confidence band."""
+    return get_calibration_report(db).to_dict()
 
 
 def _run_training_sync() -> None:
@@ -470,8 +476,8 @@ def _batch_prediction_response(
         "message": done_message,
         "predictions_made": summary.total,
         "auto_accepted": summary.auto_accepted,
-        "high_priority_review": summary.high_priority_review,
-        "standard_review": summary.standard,
+        "needs_review": summary.needs_review,
+        "already_reviewed": summary.already_reviewed,
         remaining_key: remaining,
     }
 

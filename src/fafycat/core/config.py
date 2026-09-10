@@ -105,7 +105,10 @@ class MLConfig(BaseModel):
 
     confidence_thresholds: dict[str, float] = Field(default_factory=lambda: {"high": 0.9, "medium": 0.7, "low": 0.5})
 
-    auto_approve_threshold: float = 0.95
+    # Measured on real review history: the 0.8-0.95 band was corrected 0 times
+    # in 62 reviews, so 0.90 costs nothing and removes a lot of manual work.
+    # The DB setting `auto_approve_threshold` overrides this.
+    auto_approve_threshold: float = 0.90
 
     model_dir: Path = Field(default_factory=_default_model_dir)
     min_training_samples: int = 50

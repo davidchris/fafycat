@@ -41,9 +41,13 @@ class BulkCategorizeRequest(BaseModel):
 
 
 class BulkApproveRequest(BaseModel):
-    """Request model for bulk approval of auto-accepted transactions."""
+    """Request model for bulk-approving unreviewed predictions.
 
-    review_priority: ReviewPriority = ReviewPriority.QUALITY_CHECK
+    With neither field set, every unreviewed prediction at or above the
+    Auto-approve Threshold is approved.
+    """
+
+    review_priority: ReviewPriority | None = None
     min_confidence: float | None = Field(None, ge=0, le=1)
 
 
@@ -89,7 +93,8 @@ class UploadResponse(BaseModel):
     predictions_made: int = 0
     auto_accepted: int = 0
     needs_review: int = 0
-    quality_check: int = 0
+    already_reviewed: int = 0
+    """Rows that came with a category in the CSV and kept it."""
 
 
 class ExportRequest(BaseModel):
