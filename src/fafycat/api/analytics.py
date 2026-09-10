@@ -21,6 +21,7 @@ async def get_budget_variance(
     start_date: date | None = Query(None, description="Start date for analysis"),
     end_date: date | None = Query(None, description="End date for analysis"),
     year: int | None = Query(None, description="Year for analysis (defaults to current year)"),
+    include_unreviewed: bool = Query(True, description="Count unreviewed transactions under their predicted category"),
 ) -> dict[str, Any]:
     """Get budget vs actual spending variance by category."""
     try:
@@ -29,7 +30,7 @@ async def get_budget_variance(
             start_date = date(year, 1, 1)
             end_date = date(year, 12, 31)
 
-        result = AnalyticsService.get_budget_variance(session, start_date, end_date)
+        result = AnalyticsService.get_budget_variance(session, start_date, end_date, include_unreviewed)
 
         # Add date range information for frontend charts
         if start_date and end_date:
@@ -49,6 +50,7 @@ async def get_monthly_summary(
     year: int | None = Query(None, description="Year for analysis (defaults to current year)"),
     start_date: date | None = Query(None, description="Start date for analysis"),
     end_date: date | None = Query(None, description="End date for analysis"),
+    include_unreviewed: bool = Query(True, description="Count unreviewed transactions under their predicted category"),
 ) -> dict[str, Any]:
     """Get monthly income/spending/saving breakdown."""
     try:
@@ -57,7 +59,7 @@ async def get_monthly_summary(
             start_date = date(year, 1, 1)
             end_date = date(year, 12, 31)
 
-        result = AnalyticsService.get_monthly_summary(session, year, start_date, end_date)
+        result = AnalyticsService.get_monthly_summary(session, year, start_date, end_date, include_unreviewed)
         # Add date range information for frontend charts
         if year:
             result["year"] = year
@@ -75,10 +77,13 @@ async def get_category_breakdown(
     start_date: date | None = Query(None, description="Start date for analysis"),
     end_date: date | None = Query(None, description="End date for analysis"),
     category_type: str | None = Query(None, description="Filter by category type"),
+    include_unreviewed: bool = Query(True, description="Count unreviewed transactions under their predicted category"),
 ) -> dict[str, Any]:
     """Get category-wise spending analysis."""
     try:
-        result = AnalyticsService.get_category_breakdown(session, start_date, end_date, category_type)
+        result = AnalyticsService.get_category_breakdown(
+            session, start_date, end_date, category_type, include_unreviewed
+        )
         # Add date range information for frontend charts
         if start_date and end_date:
             result["start_date"] = start_date.isoformat()
@@ -94,6 +99,7 @@ async def get_savings_tracking(
     year: int | None = Query(None, description="Year for analysis (defaults to current year)"),
     start_date: date | None = Query(None, description="Start date for analysis"),
     end_date: date | None = Query(None, description="End date for analysis"),
+    include_unreviewed: bool = Query(True, description="Count unreviewed transactions under their predicted category"),
 ) -> dict[str, Any]:
     """Get savings analysis with monthly and cumulative tracking."""
     try:
@@ -102,7 +108,7 @@ async def get_savings_tracking(
             start_date = date(year, 1, 1)
             end_date = date(year, 12, 31)
 
-        result = AnalyticsService.get_savings_tracking(session, year, start_date, end_date)
+        result = AnalyticsService.get_savings_tracking(session, year, start_date, end_date, include_unreviewed)
         # Add date range information for frontend charts
         if year:
             result["year"] = year
@@ -120,10 +126,11 @@ async def get_top_transactions(
     year: int | None = Query(None, description="Year for analysis (defaults to current year)"),
     month: int | None = Query(None, description="Month for analysis (1-12)"),
     limit: int = Query(5, description="Number of top transactions to return"),
+    include_unreviewed: bool = Query(True, description="Count unreviewed transactions under their predicted category"),
 ) -> dict[str, Any]:
     """Get top spending transactions by month."""
     try:
-        result = AnalyticsService.get_top_transactions_by_month(session, year, month, limit)
+        result = AnalyticsService.get_top_transactions_by_month(session, year, month, limit, include_unreviewed)
         if year:
             result["year"] = year
         if month:
@@ -138,6 +145,7 @@ async def get_year_over_year_comparison(
     session: Session = Depends(get_db_session),
     category_type: str | None = Query(None, description="Filter by category type (spending/income/saving)"),
     years: str | None = Query(None, description="Comma-separated list of years to compare"),
+    include_unreviewed: bool = Query(True, description="Count unreviewed transactions under their predicted category"),
 ) -> dict[str, Any]:
     """Get year-over-year category comparison with totals and monthly averages."""
     try:
@@ -151,7 +159,7 @@ async def get_year_over_year_comparison(
                     status_code=400, detail="Invalid years format. Use comma-separated integers."
                 ) from None
 
-        result = AnalyticsService.get_year_over_year_comparison(session, category_type, years_list)
+        result = AnalyticsService.get_year_over_year_comparison(session, category_type, years_list, include_unreviewed)
         return result
     except HTTPException:
         raise
@@ -164,6 +172,7 @@ async def get_category_cumulative_data(
     session: Session = Depends(get_db_session),
     category_id: int = Query(..., description="Category ID for cumulative data"),
     years: str | None = Query(None, description="Comma-separated list of years"),
+    include_unreviewed: bool = Query(True, description="Count unreviewed transactions under their predicted category"),
 ) -> dict[str, Any]:
     """Get monthly cumulative data for a specific category across multiple years."""
     try:
@@ -177,7 +186,7 @@ async def get_category_cumulative_data(
                     status_code=400, detail="Invalid years format. Use comma-separated integers."
                 ) from None
 
-        result = AnalyticsService.get_category_cumulative_data(session, category_id, years_list)
+        result = AnalyticsService.get_category_cumulative_data(session, category_id, years_list, include_unreviewed)
         return result
     except HTTPException:
         raise
@@ -207,19 +216,52 @@ async def get_available_years(session: Session = Depends(get_db_session)) -> dic
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def _render_unreviewed_notice(unreviewed: dict[str, Any]) -> str:
+    """Render the unreviewed-transactions notice for an HTML analytics fragment.
+
+    Args:
+        unreviewed: The ``unreviewed`` summary returned by ``AnalyticsService``.
+
+    Returns:
+        HTML string: a warning alert when the unreviewed rows are counted, a muted note when
+        they are excluded, and an empty string when the range has none.
+    """
+    count = int(unreviewed.get("count", 0))
+    if count <= 0:
+        return ""
+
+    amount = float(unreviewed.get("amount", 0.0))
+    if unreviewed.get("included", True):
+        return (
+            f'<div class="alert alert-warning">{count} unreviewed transactions '
+            f"(€{amount:.2f}) in this range are counted under their predicted category. "
+            f'<a href="/review">Review them</a></div>'
+        )
+    return (
+        f'<div class="text-secondary text-sm">{count} unreviewed transactions '
+        f"(€{amount:.2f}) are excluded from these numbers.</div>"
+    )
+
+
 # HTML endpoints for HTMX integration
 @router.get("/budget-variance-html", response_class=HTMLResponse)
 async def get_budget_variance_html(
     session: Session = Depends(get_db_session),
     start_date: date | None = Query(None, description="Start date for analysis"),
     end_date: date | None = Query(None, description="End date for analysis"),
+    include_unreviewed: bool = Query(True, description="Count unreviewed transactions under their predicted category"),
 ) -> HTMLResponse:
     """Get budget variance data as HTML table for HTMX."""
     try:
-        data = AnalyticsService.get_budget_variance(session, start_date, end_date)
+        data = AnalyticsService.get_budget_variance(session, start_date, end_date, include_unreviewed)
 
         # Generate HTML table
-        table_html = """
+        unreviewed = data.get("unreviewed", {})
+        table_html = ""
+        if unreviewed.get("count"):
+            table_html += _render_unreviewed_notice(unreviewed)
+
+        table_html += """
         <div class="table-container">
             <table class="min-w-full">
                 <thead>
@@ -238,13 +280,20 @@ async def get_budget_variance_html(
             status_style = "color: var(--color-spending)" if variance["is_overspent"] else "color: var(--color-success)"
             status_text = "Over Budget" if variance["is_overspent"] else "Under Budget"
 
+            unreviewed_amount = float(variance.get("unreviewed_amount", 0.0))
+            unreviewed_note = (
+                f'<div class="text-secondary text-sm">of which €{abs(unreviewed_amount):.2f} unreviewed</div>'
+                if variance.get("unreviewed_count")
+                else ""
+            )
+
             table_html += f"""
                     <tr>
                         <td>
                             {html.escape(str(variance["category_name"]))}
                         </td>
                         <td>€{variance["budget"]:.2f}</td>
-                        <td>€{variance["actual"]:.2f}</td>
+                        <td>€{variance["actual"]:.2f}{unreviewed_note}</td>
                         <td>
                             €{variance["variance"]:.2f} ({variance["variance_percentage"]:.1f}%)
                         </td>

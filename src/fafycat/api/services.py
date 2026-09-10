@@ -5,7 +5,7 @@ import statistics
 from datetime import date, datetime
 from typing import Any, cast
 
-from sqlalchemy import and_, func, or_, update
+from sqlalchemy import and_, case, func, or_, update
 from sqlalchemy.orm import Session, joinedload
 
 from fafycat.api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
@@ -398,20 +398,136 @@ class AnalyticsService:
     """Service for analytics operations."""
 
     @staticmethod
-    def get_budget_variance(
-        session: Session, start_date: date | None = None, end_date: date | None = None
+    def _unreviewed_condition():
+        """Return the SQL condition matching unreviewed transactions.
+
+        A transaction counts as unreviewed unless ``is_reviewed`` is explicitly true, so legacy
+        rows with a NULL flag are treated as unreviewed too.
+        """
+        return TransactionORM.is_reviewed.is_not(True)
+
+    @staticmethod
+    def _apply_review_filter(query, include_unreviewed: bool):
+        """Restrict a transaction query to reviewed rows when unreviewed rows are excluded.
+
+        Args:
+            query: SQLAlchemy query selecting from ``TransactionORM``.
+            include_unreviewed: When False, keep only rows with ``is_reviewed = 1``.
+
+        Returns:
+            The query, filtered when ``include_unreviewed`` is False.
+        """
+        if include_unreviewed:
+            return query
+        return query.filter(TransactionORM.is_reviewed.is_(True))
+
+    @staticmethod
+    def _unreviewed_amount_sum():
+        """Return the aggregate expression summing amounts of unreviewed rows (signed)."""
+        return func.coalesce(
+            func.sum(case((AnalyticsService._unreviewed_condition(), TransactionORM.amount), else_=0.0)), 0.0
+        )
+
+    @staticmethod
+    def _unreviewed_row_count():
+        """Return the aggregate expression counting unreviewed rows."""
+        return func.coalesce(func.sum(case((AnalyticsService._unreviewed_condition(), 1), else_=0)), 0)
+
+    @staticmethod
+    def _get_unreviewed_summary(
+        session: Session,
+        start_date: date,
+        end_date: date,
+        include_unreviewed: bool = True,
     ) -> dict[str, Any]:
-        """Get budget vs actual spending variance by category with year-specific budgets."""
+        """Summarize the unreviewed transactions of a date range.
+
+        The summary always describes the range itself, so callers can warn about unreviewed
+        transactions even when the aggregation excluded them.
+
+        Args:
+            session: Database session.
+            start_date: First day of the range (inclusive).
+            end_date: Last day of the range (inclusive).
+            include_unreviewed: Whether the surrounding aggregation counted these transactions.
+
+        Returns:
+            Dict with ``count``, ``amount`` (total absolute value at stake), ``included`` and
+            ``date_range``.
+        """
+        row = (
+            session.query(
+                func.count(TransactionORM.id).label("count"),
+                func.coalesce(func.sum(func.abs(TransactionORM.amount)), 0.0).label("amount"),
+            )
+            .filter(TransactionORM.date.between(start_date, end_date))
+            .filter(AnalyticsService._unreviewed_condition())
+            .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
+            .one()
+        )
+
+        return {
+            "count": int(row.count or 0),
+            "amount": float(row.amount or 0.0),
+            "included": include_unreviewed,
+            "date_range": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+        }
+
+    @staticmethod
+    def get_unreviewed_count(session: Session, start_date: date, end_date: date) -> int:
+        """Count unreviewed transactions in a date range.
+
+        Args:
+            session: Database session.
+            start_date: First day of the range (inclusive).
+            end_date: Last day of the range (inclusive).
+
+        Returns:
+            Number of unreviewed transactions in the range.
+        """
+        count = (
+            session.query(func.count(TransactionORM.id))
+            .filter(TransactionORM.date.between(start_date, end_date))
+            .filter(AnalyticsService._unreviewed_condition())
+            .scalar()
+        )
+        return int(count or 0)
+
+    @staticmethod
+    def get_budget_variance(
+        session: Session,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        include_unreviewed: bool = True,
+    ) -> dict[str, Any]:
+        """Get budget vs actual spending variance by category with year-specific budgets.
+
+        Args:
+            session: Database session.
+            start_date: First day of the range; defaults to the start of the current month.
+            end_date: Last day of the range; defaults to today.
+            include_unreviewed: When False, only reviewed transactions count towards actuals.
+
+        Returns:
+            Variance payload with per-category ``unreviewed_amount``/``unreviewed_count`` and a
+            top-level ``unreviewed`` summary.
+        """
         start_date, end_date = AnalyticsService._get_default_dates(start_date, end_date)
 
         # Get transaction data grouped by category and year
-        category_data = AnalyticsService._get_transaction_category_data(session, start_date, end_date)
+        category_data = AnalyticsService._get_transaction_category_data(
+            session, start_date, end_date, include_unreviewed
+        )
 
         # Include categories with budgets but no transactions
         AnalyticsService._add_budgeted_categories_without_transactions(session, category_data, start_date, end_date)
 
         # Build final variance data
-        return AnalyticsService._build_variance_result(category_data, start_date, end_date)
+        result = AnalyticsService._build_variance_result(category_data, start_date, end_date)
+        result["unreviewed"] = AnalyticsService._get_unreviewed_summary(
+            session, start_date, end_date, include_unreviewed
+        )
+        return result
 
     @staticmethod
     def _get_default_dates(start_date: date | None, end_date: date | None) -> tuple[date, date]:
@@ -424,8 +540,20 @@ class AnalyticsService:
         return start_date, end_date
 
     @staticmethod
-    def _get_transaction_category_data(session: Session, start_date: date, end_date: date) -> dict[int, dict]:
-        """Get transaction data grouped by category and year."""
+    def _get_transaction_category_data(
+        session: Session, start_date: date, end_date: date, include_unreviewed: bool = True
+    ) -> dict[int, dict]:
+        """Get transaction data grouped by category and year.
+
+        Args:
+            session: Database session.
+            start_date: First day of the range (inclusive).
+            end_date: Last day of the range (inclusive).
+            include_unreviewed: When False, only reviewed transactions are aggregated.
+
+        Returns:
+            Mapping of category id to budget/actual data, including unreviewed shares.
+        """
         # Group transactions by year and category to handle cross-year periods
         query = (
             session.query(
@@ -434,6 +562,8 @@ class AnalyticsService:
                 CategoryORM.type,
                 func.strftime("%Y", TransactionORM.date).label("year"),
                 func.coalesce(func.sum(TransactionORM.amount), 0).label("actual_amount"),
+                AnalyticsService._unreviewed_amount_sum().label("unreviewed_amount"),
+                AnalyticsService._unreviewed_row_count().label("unreviewed_count"),
             )
             .join(
                 CategoryORM,
@@ -445,6 +575,7 @@ class AnalyticsService:
             .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
             .group_by(CategoryORM.id, CategoryORM.name, CategoryORM.type, func.strftime("%Y", TransactionORM.date))
         )
+        query = AnalyticsService._apply_review_filter(query, include_unreviewed)
 
         results = query.all()
         category_data = {}
@@ -461,6 +592,8 @@ class AnalyticsService:
                     "yearly_data": {},
                     "total_actual": 0,
                     "total_budget": 0,
+                    "unreviewed_amount": 0.0,
+                    "unreviewed_count": 0,
                 }
 
             # Get year-specific budget and calculate period budget
@@ -470,14 +603,21 @@ class AnalyticsService:
             months_in_year = (year_end.year - year_start.year) * 12 + year_end.month - year_start.month + 1
             period_budget = year_budget * months_in_year
 
+            unreviewed_amount = float(result.unreviewed_amount or 0.0)
+            unreviewed_count = int(result.unreviewed_count or 0)
+
             category_data[category_id]["yearly_data"][year] = {
                 "budget": period_budget,
                 "actual": actual_amount,
                 "months": months_in_year,
+                "unreviewed_amount": unreviewed_amount,
+                "unreviewed_count": unreviewed_count,
             }
 
             category_data[category_id]["total_actual"] += actual_amount
             category_data[category_id]["total_budget"] += period_budget
+            category_data[category_id]["unreviewed_amount"] += unreviewed_amount
+            category_data[category_id]["unreviewed_count"] += unreviewed_count
 
         return category_data
 
@@ -503,6 +643,8 @@ class AnalyticsService:
                         "yearly_data": {},
                         "total_actual": 0,
                         "total_budget": total_budget,
+                        "unreviewed_amount": 0.0,
+                        "unreviewed_count": 0,
                     }
 
     @staticmethod
@@ -539,10 +681,13 @@ class AnalyticsService:
         for category_id, data in category_data.items():
             budget = data["total_budget"]
             actual = data["total_actual"]
+            unreviewed_amount = data.get("unreviewed_amount", 0.0)
 
             # Calculate variance based on spending vs income categories
             if budget > 0 and actual <= 0:  # Spending category
                 displayed_actual = abs(actual)
+                # Mirror the sign convention of the displayed actual so both read the same way.
+                unreviewed_amount = abs(unreviewed_amount)
                 variance = budget - displayed_actual
                 variance_pct = (variance / budget * 100) if budget > 0 else 0
             else:  # Income/saving categories
@@ -556,6 +701,8 @@ class AnalyticsService:
                     "category_name": data["category_name"],
                     "budget": budget,
                     "actual": displayed_actual,
+                    "unreviewed_amount": unreviewed_amount,
+                    "unreviewed_count": data.get("unreviewed_count", 0),
                     "variance": variance,
                     "variance_percentage": variance_pct,
                     "is_overspent": variance < 0,
@@ -583,20 +730,40 @@ class AnalyticsService:
 
     @staticmethod
     def get_monthly_summary(
-        session: Session, year: int | None = None, start_date: date | None = None, end_date: date | None = None
+        session: Session,
+        year: int | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        include_unreviewed: bool = True,
     ) -> dict[str, Any]:
-        """Get monthly income/spending/saving breakdown."""
+        """Get monthly income/spending/saving breakdown.
+
+        Args:
+            session: Database session.
+            year: Calendar year to report; ignored when ``start_date`` is given.
+            start_date: First day of an explicit range.
+            end_date: Last day of an explicit range.
+            include_unreviewed: When False, only reviewed transactions are aggregated.
+
+        Returns:
+            Monthly payload with per-month ``unreviewed_amount``/``unreviewed_count`` and a
+            top-level ``unreviewed`` summary.
+        """
         start_date, end_date, year = AnalyticsService._get_monthly_summary_dates(year, start_date, end_date)
 
         # Query for monthly aggregations by category type
-        results = AnalyticsService._query_monthly_transactions(session, start_date, end_date)
+        results = AnalyticsService._query_monthly_transactions(session, start_date, end_date, include_unreviewed)
 
         # Initialize and populate monthly data
         monthly_data = AnalyticsService._initialize_monthly_data(start_date, end_date)
         AnalyticsService._populate_monthly_data(monthly_data, results)
         AnalyticsService._calculate_profit_loss_and_cumulative(monthly_data)
 
-        return AnalyticsService._build_monthly_summary_result(monthly_data, year)
+        result = AnalyticsService._build_monthly_summary_result(monthly_data, year)
+        result["unreviewed"] = AnalyticsService._get_unreviewed_summary(
+            session, start_date, end_date, include_unreviewed
+        )
+        return result
 
     @staticmethod
     def _get_monthly_summary_dates(
@@ -616,13 +783,27 @@ class AnalyticsService:
         return resolved_start, resolved_end, year
 
     @staticmethod
-    def _query_monthly_transactions(session: Session, start_date: date, end_date: date):
-        """Query monthly transaction aggregations by category type."""
+    def _query_monthly_transactions(
+        session: Session, start_date: date, end_date: date, include_unreviewed: bool = True
+    ):
+        """Query monthly transaction aggregations by category type.
+
+        Args:
+            session: Database session.
+            start_date: First day of the range (inclusive).
+            end_date: Last day of the range (inclusive).
+            include_unreviewed: When False, only reviewed transactions are aggregated.
+
+        Returns:
+            Rows of ``(month, type, total_amount, unreviewed_amount, unreviewed_count)``.
+        """
         query = (
             session.query(
                 func.strftime("%Y-%m", TransactionORM.date).label("month"),
                 CategoryORM.type,
                 func.sum(TransactionORM.amount).label("total_amount"),
+                AnalyticsService._unreviewed_amount_sum().label("unreviewed_amount"),
+                AnalyticsService._unreviewed_row_count().label("unreviewed_count"),
             )
             .join(
                 CategoryORM,
@@ -633,6 +814,7 @@ class AnalyticsService:
             .group_by(func.strftime("%Y-%m", TransactionORM.date), CategoryORM.type)
             .order_by(func.strftime("%Y-%m", TransactionORM.date))
         )
+        query = AnalyticsService._apply_review_filter(query, include_unreviewed)
         return query.all()
 
     @staticmethod
@@ -651,6 +833,8 @@ class AnalyticsService:
                 "spending": 0.0,
                 "saving": 0.0,
                 "profit_loss": 0.0,
+                "unreviewed_amount": 0.0,
+                "unreviewed_count": 0,
             }
 
             # Move to next month
@@ -677,6 +861,9 @@ class AnalyticsService:
                 elif category_type == CategoryType.SAVING:
                     monthly_data[month]["saving"] = amount
 
+                monthly_data[month]["unreviewed_amount"] += float(getattr(result, "unreviewed_amount", 0.0) or 0.0)
+                monthly_data[month]["unreviewed_count"] += int(getattr(result, "unreviewed_count", 0) or 0)
+
     @staticmethod
     def _calculate_profit_loss_and_cumulative(monthly_data: dict[str, dict]) -> None:
         """Calculate profit/loss and cumulative profit/loss for each month."""
@@ -702,9 +889,25 @@ class AnalyticsService:
 
     @staticmethod
     def get_category_breakdown(
-        session: Session, start_date: date | None = None, end_date: date | None = None, category_type: str | None = None
+        session: Session,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        category_type: str | None = None,
+        include_unreviewed: bool = True,
     ) -> dict[str, Any]:
-        """Get category-wise spending analysis."""
+        """Get category-wise spending analysis.
+
+        Args:
+            session: Database session.
+            start_date: First day of the range; defaults to the start of the current month.
+            end_date: Last day of the range; defaults to today.
+            category_type: Optional category type filter (spending/income/saving).
+            include_unreviewed: When False, only reviewed transactions are aggregated.
+
+        Returns:
+            Breakdown payload with per-category ``unreviewed_amount``/``unreviewed_count`` and a
+            top-level ``unreviewed`` summary.
+        """
         # Default to current month if no dates provided
         if not start_date:
             today = date.today()
@@ -722,6 +925,8 @@ class AnalyticsService:
                 CategoryORM.budget,
                 func.count(TransactionORM.id).label("transaction_count"),
                 func.sum(TransactionORM.amount).label("total_amount"),
+                AnalyticsService._unreviewed_amount_sum().label("unreviewed_amount"),
+                AnalyticsService._unreviewed_row_count().label("unreviewed_count"),
             )
             .join(
                 CategoryORM,
@@ -731,6 +936,7 @@ class AnalyticsService:
             .filter(CategoryORM.is_active)
             .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
         )
+        query = AnalyticsService._apply_review_filter(query, include_unreviewed)
 
         # Apply category type filter if provided
         if category_type:
@@ -755,6 +961,8 @@ class AnalyticsService:
                     "category_type": result.type,
                     "budget": budget,
                     "amount": amount,
+                    "unreviewed_amount": float(result.unreviewed_amount or 0.0),
+                    "unreviewed_count": int(result.unreviewed_count or 0),
                     "transaction_count": result.transaction_count,
                     "budget_variance": budget - amount if result.type == CategoryType.SPENDING else None,
                 }
@@ -770,13 +978,30 @@ class AnalyticsService:
             "categories": categories,
             "summary": {"total_amount": total_amount, "total_categories": len(categories)},
             "date_range": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+            "unreviewed": AnalyticsService._get_unreviewed_summary(session, start_date, end_date, include_unreviewed),
         }
 
     @staticmethod
     def get_savings_tracking(
-        session: Session, year: int | None = None, start_date: date | None = None, end_date: date | None = None
+        session: Session,
+        year: int | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        include_unreviewed: bool = True,
     ) -> dict[str, Any]:
-        """Get savings analysis with monthly and cumulative tracking."""
+        """Get savings analysis with monthly and cumulative tracking.
+
+        Args:
+            session: Database session.
+            year: Calendar year to report; ignored when ``start_date`` is given.
+            start_date: First day of an explicit range.
+            end_date: Last day of an explicit range.
+            include_unreviewed: When False, only reviewed transactions are aggregated.
+
+        Returns:
+            Savings payload with per-month ``unreviewed_amount``/``unreviewed_count`` and a
+            top-level ``unreviewed`` summary.
+        """
         if not year and not start_date:
             year = date.today().year
 
@@ -794,6 +1019,8 @@ class AnalyticsService:
             session.query(
                 func.strftime("%Y-%m", TransactionORM.date).label("month"),
                 func.sum(TransactionORM.amount).label("savings_amount"),
+                AnalyticsService._unreviewed_amount_sum().label("unreviewed_amount"),
+                AnalyticsService._unreviewed_row_count().label("unreviewed_count"),
             )
             .join(
                 CategoryORM,
@@ -805,6 +1032,7 @@ class AnalyticsService:
             .group_by(func.strftime("%Y-%m", TransactionORM.date))
             .order_by(func.strftime("%Y-%m", TransactionORM.date))
         )
+        query = AnalyticsService._apply_review_filter(query, include_unreviewed)
 
         results = query.all()
 
@@ -818,7 +1046,12 @@ class AnalyticsService:
         while current_date <= end_month:
             # Year-qualified key so multi-year ranges don't collapse same-named months
             month_str = f"{current_date.year}-{current_date.month:02d}"
-            monthly_savings[month_str] = {"month": month_str, "amount": 0.0}
+            monthly_savings[month_str] = {
+                "month": month_str,
+                "amount": 0.0,
+                "unreviewed_amount": 0.0,
+                "unreviewed_count": 0,
+            }
             # Move to next month
             if current_date.month == 12:
                 current_date = current_date.replace(year=current_date.year + 1, month=1)
@@ -830,6 +1063,8 @@ class AnalyticsService:
             month = result.month
             amount = float(result.savings_amount) if result.savings_amount else 0
             monthly_savings[month]["amount"] = amount
+            monthly_savings[month]["unreviewed_amount"] = float(result.unreviewed_amount or 0.0)
+            monthly_savings[month]["unreviewed_count"] = int(result.unreviewed_count or 0)
 
         # Calculate cumulative savings
         cumulative_savings = 0
@@ -847,13 +1082,36 @@ class AnalyticsService:
             "months_with_savings": len(amounts),
         }
 
-        return {"year": year, "monthly_savings": list(monthly_savings.values()), "statistics": stats}
+        return {
+            "year": year,
+            "monthly_savings": list(monthly_savings.values()),
+            "statistics": stats,
+            "unreviewed": AnalyticsService._get_unreviewed_summary(
+                session, resolved_start, resolved_end, include_unreviewed
+            ),
+        }
 
     @staticmethod
     def get_top_transactions_by_month(
-        session: Session, year: int | None = None, month: int | None = None, limit: int = 5
+        session: Session,
+        year: int | None = None,
+        month: int | None = None,
+        limit: int = 5,
+        include_unreviewed: bool = True,
     ) -> dict[str, Any]:
-        """Get top spending transactions by month."""
+        """Get top spending transactions by month.
+
+        Args:
+            session: Database session.
+            year: Calendar year; defaults to the current year.
+            month: Calendar month (1-12); defaults to the current month.
+            limit: Maximum number of transactions to return.
+            include_unreviewed: When False, only reviewed transactions are considered.
+
+        Returns:
+            Payload with ``top_transactions`` (each carrying ``is_reviewed``) and a top-level
+            ``unreviewed`` summary for the month.
+        """
         if not year:
             year = date.today().year
         if not month:
@@ -871,9 +1129,9 @@ class AnalyticsService:
             .filter(func.strftime("%m", TransactionORM.date) == f"{month:02d}")
             .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
             .filter(TransactionORM.amount < 0)  # Only negative amounts (spending)
-            .order_by(TransactionORM.amount.asc())  # Most negative first (largest spending)
-            .limit(limit)
         )
+        query = AnalyticsService._apply_review_filter(query, include_unreviewed)
+        query = query.order_by(TransactionORM.amount.asc()).limit(limit)  # Most negative first (largest spending)
 
         transactions = query.all()
 
@@ -893,6 +1151,7 @@ class AnalyticsService:
                     "amount": abs(_to_float(transaction.amount)),  # Show as positive for display
                     "category": category.name if category else "Unknown",
                     "merchant": transaction.name,
+                    "is_reviewed": _to_bool(transaction.is_reviewed),
                 }
             )
 
@@ -908,6 +1167,7 @@ class AnalyticsService:
             .filter(func.strftime("%m", TransactionORM.date) == f"{month:02d}")
             .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
         )
+        total_query = AnalyticsService._apply_review_filter(total_query, include_unreviewed)
 
         total_spending = float(total_query.scalar() or 0)
 
@@ -917,13 +1177,18 @@ class AnalyticsService:
                 (transaction["amount"] / abs(total_spending) * 100) if total_spending != 0 else 0
             )
 
+        month_start = date(year, month, 1)
+        month_end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+        month_end = date.fromordinal(month_end.toordinal() - 1)
+
         return {
             "year": year,
             "month": month,
-            "month_name": date(year, month, 1).strftime("%B"),
+            "month_name": month_start.strftime("%B"),
             "top_transactions": top_transactions,
             "total_spending": abs(total_spending),
             "transactions_count": len(top_transactions),
+            "unreviewed": AnalyticsService._get_unreviewed_summary(session, month_start, month_end, include_unreviewed),
         }
 
     @staticmethod
@@ -976,14 +1241,37 @@ class AnalyticsService:
 
     @staticmethod
     def get_year_over_year_comparison(
-        session: Session, category_type: str | None = None, years: list[int] | None = None
+        session: Session,
+        category_type: str | None = None,
+        years: list[int] | None = None,
+        include_unreviewed: bool = True,
     ) -> dict[str, Any]:
-        """Get year-over-year comparison of categories with totals and monthly averages."""
+        """Get year-over-year comparison of categories with totals and monthly averages.
+
+        Args:
+            session: Database session.
+            category_type: Optional category type filter (spending/income/saving).
+            years: Years to compare; defaults to the three most recent years with data.
+            include_unreviewed: When False, only reviewed transactions are aggregated.
+
+        Returns:
+            Comparison payload where each year entry carries ``unreviewed_amount``/
+            ``unreviewed_count``, plus a top-level ``unreviewed`` summary spanning the years.
+        """
         if not years:
             years = AnalyticsService._get_available_years(session)
 
         if not years:
-            return {"categories": [], "summary": {"years": [], "total_by_year": {}}}
+            return {
+                "categories": [],
+                "summary": {"years": [], "total_by_year": {}},
+                "unreviewed": {
+                    "count": 0,
+                    "amount": 0.0,
+                    "included": include_unreviewed,
+                    "date_range": {"start_date": None, "end_date": None},
+                },
+            }
 
         current_year = date.today().year
         latest_transaction_date = (
@@ -1003,6 +1291,8 @@ class AnalyticsService:
                 func.strftime("%Y", TransactionORM.date).label("year"),
                 func.count(TransactionORM.id).label("transaction_count"),
                 func.sum(TransactionORM.amount).label("total_amount"),
+                AnalyticsService._unreviewed_amount_sum().label("unreviewed_amount"),
+                AnalyticsService._unreviewed_row_count().label("unreviewed_count"),
             )
             .join(
                 CategoryORM,
@@ -1012,6 +1302,7 @@ class AnalyticsService:
             .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
             .filter(func.strftime("%Y", TransactionORM.date).in_([str(y) for y in years]))
         )
+        query = AnalyticsService._apply_review_filter(query, include_unreviewed)
 
         if latest_transaction_date:
             comparison_basis = "aligned_to_current_year_latest_transaction"
@@ -1047,7 +1338,12 @@ class AnalyticsService:
                     "type": result.type,
                     "yearly_data": {},
                     "changes": {},
+                    "unreviewed_amount": 0.0,
+                    "unreviewed_count": 0,
                 }
+
+            category_data[category_id]["unreviewed_amount"] += float(result.unreviewed_amount or 0.0)
+            category_data[category_id]["unreviewed_count"] += int(result.unreviewed_count or 0)
 
             # Calculate months with data for accurate monthly average
             query_start_date = date(year, 1, 1) if latest_transaction_date else None
@@ -1065,6 +1361,8 @@ class AnalyticsService:
                 "monthly_avg": total_amount / months_with_data if months_with_data > 0 else 0,
                 "transactions": result.transaction_count,
                 "months_with_data": months_with_data,
+                "unreviewed_amount": float(result.unreviewed_amount or 0.0),
+                "unreviewed_count": int(result.unreviewed_count or 0),
             }
             yearly_totals[year] += total_amount
 
@@ -1092,6 +1390,9 @@ class AnalyticsService:
                 "comparison_end_date": latest_transaction_date.isoformat() if latest_transaction_date else None,
                 "aligned_to_year": current_year if latest_transaction_date else None,
             },
+            "unreviewed": AnalyticsService._get_unreviewed_summary(
+                session, date(min(years), 1, 1), date(max(years), 12, 31), include_unreviewed
+            ),
         }
 
     @staticmethod
@@ -1127,9 +1428,19 @@ class AnalyticsService:
 
     @staticmethod
     def get_category_cumulative_data(
-        session: Session, category_id: int, years: list[int] | None = None
+        session: Session, category_id: int, years: list[int] | None = None, include_unreviewed: bool = True
     ) -> dict[str, Any]:
-        """Get monthly cumulative data for a specific category across multiple years."""
+        """Get monthly cumulative data for a specific category across multiple years.
+
+        Args:
+            session: Database session.
+            category_id: Category to chart.
+            years: Years to include; defaults to the three most recent years with data.
+            include_unreviewed: When False, only reviewed transactions are aggregated.
+
+        Returns:
+            Cumulative payload plus a top-level ``unreviewed`` summary spanning the years.
+        """
         if not years:
             years = AnalyticsService._get_available_years(session)
 
@@ -1154,6 +1465,7 @@ class AnalyticsService:
             .group_by(func.strftime("%Y", TransactionORM.date), func.strftime("%m", TransactionORM.date))
             .order_by(func.strftime("%Y", TransactionORM.date), func.strftime("%m", TransactionORM.date))
         )
+        query = AnalyticsService._apply_review_filter(query, include_unreviewed)
 
         results = query.all()
 
@@ -1186,6 +1498,9 @@ class AnalyticsService:
             "monthly_data": yearly_data,
             "category_name": category.name,
             "category_type": category.type,
+            "unreviewed": AnalyticsService._get_unreviewed_summary(
+                session, date(min(years), 1, 1), date(max(years), 12, 31), include_unreviewed
+            ),
         }
 
     @staticmethod
