@@ -223,3 +223,56 @@ class TestCalibrationReport:
         }
         assert payload["auto_accepted_overridden"] == 0
         assert "caveat" in payload
+
+
+class TestMLStatusEndpoint:
+    """/api/ml/status carries the training-recency fields."""
+
+    def test_reports_never_trained(self, test_client, db_session):
+        db_session.query(TransactionORM).delete()
+        db_session.commit()
+
+        status = test_client.get("/api/ml/status").json()
+
+        assert status["last_trained_at"] is None
+        assert status["reviews_since_training"] == 0
+
+    def test_counts_reviews_recorded_after_training(self, test_client, db_session, categories):
+        groceries, _ = categories
+        trained_at = datetime(2025, 6, 1, 12, 0)
+        db_session.add(ModelMetadataORM(model_version="v1", training_date=trained_at, is_active=True))
+        _add_review_event(db_session, "user_review", trained_at - timedelta(days=1), groceries)
+        _add_review_event(db_session, "user_review", trained_at + timedelta(days=1), groceries)
+        db_session.commit()
+
+        status = test_client.get("/api/ml/status").json()
+
+        assert status["last_trained_at"] == "2025-06-01T12:00:00+00:00"
+        assert status["reviews_since_training"] == 1
+
+
+class TestCalibrationEndpoint:
+    """/api/ml/calibration returns the report as JSON."""
+
+    def test_json_shape(self, test_client, db_session, categories):
+        groceries, restaurants = categories
+        _add_transaction(db_session, "e1", confidence=0.99, category_id=groceries, predicted_category_id=groceries)
+        _add_transaction(db_session, "e2", confidence=0.20, category_id=restaurants, predicted_category_id=groceries)
+        db_session.commit()
+
+        payload = test_client.get("/api/ml/calibration").json()
+
+        assert payload["threshold"] == pytest.approx(0.9)
+        assert payload["auto_accepted_overridden"] == 0
+        assert [band["label"] for band in payload["bands"]] == [
+            "0.00-0.50",
+            "0.50-0.80",
+            "0.80-0.90",
+            "0.90-0.95",
+            "0.95-1.00",
+        ]
+        by_label = {band["label"]: band for band in payload["bands"]}
+        assert by_label["0.95-1.00"]["kept"] == 1
+        assert by_label["0.00-0.50"]["overridden"] == 1
+        assert by_label["0.00-0.50"]["agreement_rate"] == 0.0
+        assert by_label["0.50-0.80"]["agreement_rate"] is None

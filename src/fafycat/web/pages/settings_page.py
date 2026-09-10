@@ -166,7 +166,7 @@ def render_empty_categories_state(ml_status):
     </div>
 
     <script>
-        window._autoApproveThreshold = 0.95;
+        window._autoApproveThreshold = 0.90;
         fetch('/api/ml/settings').then(r => r.json()).then(d => {{ window._autoApproveThreshold = parseFloat(d.auto_approve_threshold); }}).catch(() => {{}});
 
         function showCreateCategoryModal() {{
@@ -592,7 +592,7 @@ def render_categories_management(category_groups, inactive_categories, ml_status
 
     <script>
         if (!window._autoApproveThreshold) {
-            window._autoApproveThreshold = 0.95;
+            window._autoApproveThreshold = 0.90;
             fetch('/api/ml/settings').then(r => r.json()).then(d => { window._autoApproveThreshold = parseFloat(d.auto_approve_threshold); }).catch(() => {});
         }
 
@@ -1417,10 +1417,10 @@ def render_ml_settings_subsection():
             Lower values auto-approve more transactions; higher values require more manual review.
         </p>
         <div class="flex items-center gap-4">
-            <input type="range" id="thresholdSlider" min="0.50" max="0.99" step="0.01" value="0.95"
+            <input type="range" id="thresholdSlider" min="0.50" max="0.99" step="0.01" value="0.90"
                    class="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
                    oninput="document.getElementById('thresholdValue').textContent = parseFloat(this.value).toFixed(2)">
-            <span id="thresholdValue" class="text-sm font-mono font-bold w-12 text-right">0.95</span>
+            <span id="thresholdValue" class="text-sm font-mono font-bold w-12 text-right">0.90</span>
         </div>
         <div class="flex justify-between text-xs mt-1 mb-3">
             <span>0.50 (more auto-approve)</span>
@@ -1435,7 +1435,7 @@ def render_ml_settings_subsection():
 
     <script>
         // Load current threshold on page load
-        window._autoApproveThreshold = 0.95;
+        window._autoApproveThreshold = 0.90;
         document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/ml/settings')
                 .then(r => r.json())
