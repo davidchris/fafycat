@@ -3,9 +3,13 @@
 import html
 
 from fastapi import Request
+from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_manager
+from fafycat.api.ml_insights import TrainingRecency, get_training_recency
 from fafycat.api.services import CategoryService, TransactionService
+from fafycat.core.config import AppConfig
+from fafycat.core.database import TransactionORM
 from fafycat.ml.prediction_pipeline import get_auto_approve_threshold
 from fafycat.web.components.layout import create_page_layout
 from fafycat.web.components.transaction_table import render_table
@@ -15,14 +19,15 @@ def _get_model_status_alert():
     """Get model status and return HTML alert if model needs training."""
     try:
         # Get ML status directly without HTTP call
-        from fafycat.core.config import AppConfig
-        from fafycat.core.database import DatabaseManager, TransactionORM
+        from fafycat.core.database import DatabaseManager
 
         config = AppConfig()
         db_manager = DatabaseManager(config)
 
         with db_manager.get_session() as db_session:
-            model_path = config.ml.model_dir / "categorizer.pkl"
+            # Same filename rule as the ML API, which picks by config.
+            model_filename = "ensemble_categorizer.pkl" if config.ml.use_ensemble else "categorizer.pkl"
+            model_path = config.ml.model_dir / model_filename
 
             # Check training data readiness
             reviewed_count = (
@@ -85,7 +90,8 @@ def _get_model_status_alert():
                         </div>
                         <div class="ml-auto">
                             <button type="button"
-                                    onclick="this.parentElement.parentElement.parentElement.style.display='none'"
+                                    data-dismiss-alert
+                                    aria-label="Dismiss"
                                     class="opacity-60 hover:opacity-100">
                                 &times;
                             </button>
@@ -118,6 +124,62 @@ def _get_model_status_alert():
         pass
 
     return ""
+
+
+def _recency_sentence(recency: TrainingRecency) -> str:
+    """Phrase the training-recency counter. Mirrors ``recencyText`` in review.js."""
+    count = recency.reviews_since_training
+    noun = "review" if count == 1 else "reviews"
+    if recency.last_trained_at is None:
+        return f"{count} {noun} recorded. The model has never been trained."
+    return f"{count} {noun} since the model was last trained ({recency.last_trained_at.strftime('%d %b %Y')})"
+
+
+def _render_training_recency(session: Session) -> str:
+    """Render the training-recency counter with the retrain-and-re-predict button.
+
+    The button is the whole feedback loop in one click: retrain on everything
+    reviewed so far, then re-score the transactions still in the queue. It is
+    hidden until there is enough labelled data to train at all.
+
+    Args:
+        session: Open database session.
+
+    Returns:
+        An HTML fragment to place above the review queue.
+    """
+    recency = get_training_recency(session)
+    min_samples = AppConfig().ml.min_training_samples
+    reviewed_count = (
+        session.query(TransactionORM)
+        .filter(TransactionORM.is_reviewed, TransactionORM.category_id.is_not(None))
+        .count()
+    )
+
+    if reviewed_count >= min_samples:
+        action = """
+            <button type="button" id="retrain-repredict-btn" class="btn btn-sm btn-primary">
+                Retrain and re-predict the queue
+            </button>"""
+    else:
+        action = f"""
+            <span class="text-sm text-secondary">
+                Need at least {min_samples} reviewed transactions to train ({reviewed_count} so far).
+            </span>"""
+
+    return f"""
+    <div id="training-recency" class="card mb-6">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <p id="training-recency-text" class="text-sm font-medium">{_recency_sentence(recency)}</p>
+                <p class="text-xs text-secondary mt-1">
+                    Retraining folds your corrections into the model, then re-scores everything left in the queue.
+                </p>
+            </div>{action}
+        </div>
+        <div id="retrain-alert" hidden></div>
+    </div>
+    """
 
 
 def _generate_category_options(categories):
@@ -153,6 +215,7 @@ def render_review_page(request: Request):
             transactions_html = render_table(result["transactions"], categories, result["pagination_info"])
 
             transaction_count = result["pagination_info"]["total_count"]
+            training_recency_html = _render_training_recency(session)
 
     except Exception as e:
         # Fallback in case of database error
@@ -163,6 +226,7 @@ def render_review_page(request: Request):
         """
         transaction_count = 0
         categories = []
+        training_recency_html = ""
 
     # Get model status alert
     model_alert = _get_model_status_alert()
@@ -172,6 +236,8 @@ def render_review_page(request: Request):
         <h1 class="text-2xl font-bold mb-6">Review & Categorize</h1>
 
         {model_alert}
+
+        {training_recency_html}
 
         <div class="mb-8">
             <h2 class="text-lg font-semibold mb-4">Needs review ({transaction_count} transactions)</h2>
@@ -296,6 +362,8 @@ def render_review_page(request: Request):
             </div>
         </div>
     </div>
+
+    <script src="/static/js/review.js" defer></script>
     """
 
     return create_page_layout("Review & Categorize - FafyCat", content)

@@ -6,6 +6,7 @@ import json
 from fastapi import Request
 from sqlalchemy.orm import Session
 
+from fafycat.api.ml_insights import get_calibration_report
 from fafycat.core.database import get_categories
 from fafycat.web.components.layout import create_page_layout
 
@@ -108,24 +109,25 @@ def render_settings_page(request: Request, db: Session):
 
     # Get ML model status
     ml_status = _get_ml_model_status()
+    calibration = get_calibration_report(db)
 
     if not has_categories:
         # Empty state - no categories exist
-        content = render_empty_categories_state(ml_status)
+        content = render_empty_categories_state(ml_status, calibration)
     else:
         # Normal state - show category management
-        content = render_categories_management(category_groups, inactive_categories, ml_status)
+        content = render_categories_management(category_groups, inactive_categories, ml_status, calibration)
 
     return create_page_layout("Settings & Categories - FafyCat", content)
 
 
-def render_empty_categories_state(ml_status):
+def render_empty_categories_state(ml_status, calibration=None):
     """Render empty state when no categories exist."""
     return f"""
     <div class="container mx-auto px-4 py-8">
         <h1 class="text-2xl font-bold mb-6">Settings & Categories</h1>
 
-        {render_ml_training_section(ml_status)}
+        {render_ml_training_section(ml_status, calibration)}
 
         <div class="card text-center">
             <div class="mb-6">
@@ -166,7 +168,7 @@ def render_empty_categories_state(ml_status):
     </div>
 
     <script>
-        window._autoApproveThreshold = 0.95;
+        window._autoApproveThreshold = 0.90;
         fetch('/api/ml/settings').then(r => r.json()).then(d => {{ window._autoApproveThreshold = parseFloat(d.auto_approve_threshold); }}).catch(() => {{}});
 
         function showCreateCategoryModal() {{
@@ -453,7 +455,7 @@ def render_empty_categories_state(ml_status):
     """
 
 
-def render_categories_management(category_groups, inactive_categories, ml_status):
+def render_categories_management(category_groups, inactive_categories, ml_status, calibration=None):
     """Render category management interface."""
 
     # Count categories with and without budgets
@@ -468,7 +470,7 @@ def render_categories_management(category_groups, inactive_categories, ml_status
     <div class="container mx-auto px-4 py-8">
         <h1 class="text-2xl font-bold mb-6">Settings & Categories</h1>
 
-        {render_ml_training_section(ml_status)}
+        {render_ml_training_section(ml_status, calibration)}
 
         <!-- Summary Stats -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -599,7 +601,7 @@ def render_categories_management(category_groups, inactive_categories, ml_status
 
     <script>
         if (!window._autoApproveThreshold) {
-            window._autoApproveThreshold = 0.95;
+            window._autoApproveThreshold = 0.90;
             fetch('/api/ml/settings').then(r => r.json()).then(d => { window._autoApproveThreshold = parseFloat(d.auto_approve_threshold); }).catch(() => {});
         }
 
@@ -1421,9 +1423,75 @@ def render_yearly_budget_management(current_year):
     """
 
 
-def render_ml_settings_subsection():
-    """Render ML auto-approve threshold slider subsection."""
-    return """
+def render_calibration_table(calibration):
+    """Render the per-band agreement report that justifies the threshold.
+
+    Args:
+        calibration: A ``CalibrationReport`` from ``fafycat.api.ml_insights``.
+
+    Returns:
+        An HTML fragment: one row per confidence band, with the bands the
+        current Auto-approve Threshold already auto-accepts marked.
+    """
+    rows = ""
+    for band in calibration.bands:
+        auto_accepted = band.upper > calibration.threshold
+        marker = (
+            ' <span class="text-xs text-secondary" title="Auto-accepted at the current threshold">auto</span>'
+            if auto_accepted
+            else ""
+        )
+        row_style = "background: var(--bg-subtle, rgba(255,255,255,0.04))" if auto_accepted else ""
+        agreement = f"{band.agreement_rate:.0%}" if band.agreement_rate is not None else "&mdash;"
+        rows += f"""
+                <tr style="{row_style}">
+                    <td class="font-mono">{band.label}{marker}</td>
+                    <td>{band.reviewed}</td>
+                    <td>{band.kept}</td>
+                    <td>{band.overridden}</td>
+                    <td>{agreement}</td>
+                </tr>"""
+
+    return f"""
+    <div class="mt-4">
+        <h4 class="form-label mb-2">How well calibrated is the model?</h4>
+        <p class="text-xs mb-3">
+            Bands where agreement is at or near 100% are safe to auto-accept, so the threshold belongs at the
+            lower edge of the lowest such band. Auto-accepted transactions later corrected:
+            {calibration.auto_accepted_overridden}.
+        </p>
+        <div class="table-container">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr>
+                        <th>Confidence</th>
+                        <th>Reviewed</th>
+                        <th>Kept</th>
+                        <th>Overridden</th>
+                        <th>Agreement</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-xs mt-2 text-secondary">
+            Counted over every reviewed transaction that has a prediction. Confidence is the latest prediction's
+            score, which is not always the score shown when the transaction was reviewed.
+        </p>
+    </div>
+    """
+
+
+def render_ml_settings_subsection(calibration=None):
+    """Render the auto-approve threshold control and its calibration evidence.
+
+    Args:
+        calibration: A ``CalibrationReport``, or None to omit the table.
+    """
+    calibration_table = render_calibration_table(calibration) if calibration is not None else ""
+    return (
+        """
     <div class="mt-4 pt-4 border-t" style="border-color: var(--border-subtle)">
         <h4 class="form-label mb-2">Auto-Approve Threshold</h4>
         <p class="text-xs mb-3">
@@ -1431,10 +1499,10 @@ def render_ml_settings_subsection():
             Lower values auto-approve more transactions; higher values require more manual review.
         </p>
         <div class="flex items-center gap-4">
-            <input type="range" id="thresholdSlider" min="0.50" max="0.99" step="0.01" value="0.95"
+            <input type="range" id="thresholdSlider" min="0.50" max="0.99" step="0.01" value="0.90"
                    class="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
                    oninput="document.getElementById('thresholdValue').textContent = parseFloat(this.value).toFixed(2)">
-            <span id="thresholdValue" class="text-sm font-mono font-bold w-12 text-right">0.95</span>
+            <span id="thresholdValue" class="text-sm font-mono font-bold w-12 text-right">0.90</span>
         </div>
         <div class="flex justify-between text-xs mt-1 mb-3">
             <span>0.50 (more auto-approve)</span>
@@ -1445,11 +1513,14 @@ def render_ml_settings_subsection():
             Save Threshold
         </button>
         <span id="thresholdSaveStatus" class="text-xs ml-2"></span>
+"""
+        + calibration_table
+        + """
     </div>
 
     <script>
         // Load current threshold on page load
-        window._autoApproveThreshold = 0.95;
+        window._autoApproveThreshold = 0.90;
         document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/ml/settings')
                 .then(r => r.json())
@@ -1493,9 +1564,10 @@ def render_ml_settings_subsection():
         }
     </script>
     """
+    )
 
 
-def render_ml_training_section(ml_status):
+def render_ml_training_section(ml_status, calibration=None):
     """Render ML model training section based on current status."""
     model_loaded = ml_status.get("model_loaded", False)
     can_predict = ml_status.get("can_predict", False)
@@ -1553,7 +1625,7 @@ def render_ml_training_section(ml_status):
                             Retrain Model
                         </button>{predict_button}{repredict_button}
                     </div>
-                    {render_ml_settings_subsection()}
+                    {render_ml_settings_subsection(calibration)}
                     </div>
                 </div>
             </div>
