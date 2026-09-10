@@ -94,8 +94,8 @@ def create_app() -> FastAPI:
     return app
 
 
-app = create_app()
-
-
+# No module-level ``app``: building it opens the configured database and runs
+# schema upgrades, which must not happen as an import side effect (pytest
+# collection, tooling). uvicorn gets the factory instead.
 if __name__ == "__main__":
-    uvicorn.run("fafycat.app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("fafycat.app:create_app", factory=True, host="0.0.0.0", port=8000, reload=True, log_level="info")

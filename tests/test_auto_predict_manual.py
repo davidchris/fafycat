@@ -18,7 +18,7 @@ os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_dev.db"
 os.environ["FAFYCAT_ENV"] = "development"
 
 from fastapi.testclient import TestClient
-from fafycat.app import app
+from fafycat.app import create_app
 from fafycat.core.config import AppConfig
 from fafycat.core.database import DatabaseManager, TransactionORM, CategoryORM
 from fafycat.core.models import TransactionInput
@@ -112,7 +112,7 @@ def test_ml_status_shows_ready_to_train():
     print("\n🔍 Testing ML Status API")
     print("-" * 30)
 
-    client = TestClient(app)
+    client = TestClient(create_app())
     response = client.get("/api/ml/status")
 
     assert response.status_code == 200, f"ML Status API failed: {response.status_code}"
@@ -140,7 +140,7 @@ def test_settings_page_auto_predict_ui():
     print("\n🎨 Testing Settings Page Auto-Prediction UI")
     print("-" * 45)
 
-    client = TestClient(app)
+    client = TestClient(create_app())
     response = client.get("/settings")
 
     assert response.status_code == 200, f"Settings page failed to load: {response.status_code}"
@@ -170,7 +170,7 @@ def test_batch_unpredicted_api():
     print("\n🔗 Testing Batch Unpredicted API")
     print("-" * 35)
 
-    client = TestClient(app)
+    client = TestClient(create_app())
     response = client.post("/api/ml/predict/batch-unpredicted")
 
     print(f"Status Code: {response.status_code}")

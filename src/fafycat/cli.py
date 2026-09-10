@@ -169,7 +169,8 @@ def cmd_serve(args: argparse.Namespace) -> None:
     import uvicorn
 
     uvicorn.run(
-        "fafycat.app:app",
+        "fafycat.app:create_app",
+        factory=True,
         host=host,
         port=port,
         reload=args.dev,

@@ -4,7 +4,6 @@ import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
-from fafycat.app import app
 from fafycat.core.database import TransactionORM, CategoryORM
 from fafycat.core.models import TransactionInput
 from fafycat.data.csv_processor import CSVProcessor
