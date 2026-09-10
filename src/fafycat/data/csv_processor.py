@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..core.audit_trail import ReviewActor, record_review_event
 from ..core.database import CategoryORM, TransactionORM
 from ..core.models import TransactionInput
+from ..ml.feature_extractor import MerchantCleaner
 from .dedup import find_fuzzy_duplicate, keep_preferred_fields, sort_direct_rows_first
 
 
@@ -20,6 +21,7 @@ class CSVProcessor:
 
     def __init__(self, session: Session):
         self.session = session
+        self.merchant_cleaner = MerchantCleaner()
 
     def import_csv(self, file_path: Path, csv_format: str = "generic") -> tuple[list[TransactionInput], list[str]]:
         """Import transactions from CSV file.
@@ -234,6 +236,7 @@ class CSVProcessor:
                 imported_at=datetime.now(UTC),
                 import_batch=import_batch,
                 is_reviewed=is_reviewed,
+                merchant_pattern=self.merchant_cleaner.clean(txn.name),
             )
 
             # Try to match existing category if provided

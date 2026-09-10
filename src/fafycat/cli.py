@@ -103,12 +103,14 @@ def _setup_dev_database() -> None:
     from fafycat.core.config import AppConfig
     from fafycat.core.database import DatabaseManager
     from fafycat.data.csv_processor import CSVProcessor, create_synthetic_transactions
+    from fafycat.data.merchant_pattern import backfill_merchant_patterns
 
     config = AppConfig()
     db_manager = DatabaseManager(config)
     db_manager.create_tables()
 
     with db_manager.get_session() as session:
+        backfill_merchant_patterns(session)
         categories = CategoryService.get_categories(session)
         if not categories:
             print("🔄 Initializing default categories...")
@@ -188,6 +190,7 @@ def cmd_import(args: argparse.Namespace) -> None:
     from fafycat.core.config import AppConfig
     from fafycat.core.database import DatabaseManager
     from fafycat.data.csv_processor import CSVProcessor
+    from fafycat.data.merchant_pattern import backfill_merchant_patterns
 
     config = AppConfig()
     config.ensure_dirs()
@@ -195,6 +198,7 @@ def cmd_import(args: argparse.Namespace) -> None:
     db_manager.create_tables()
 
     with db_manager.get_session() as session:
+        backfill_merchant_patterns(session)
         processor = CSVProcessor(session)
         transactions, errors = processor.import_csv(csv_path)
 

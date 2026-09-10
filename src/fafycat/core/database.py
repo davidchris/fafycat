@@ -92,6 +92,9 @@ class TransactionORM(Base):
     confidence_score = Column(Float)
     is_reviewed = Column(Boolean, default=False)
     review_priority = Column(String(20), default="standard")  # standard, high, quality_check
+    # Cleaned merchant name (see MerchantCleaner). Groups the siblings a
+    # correction propagates to and keys the Merchant Rule for this row.
+    merchant_pattern = Column(String, index=True)
     imported_at = Column(DateTime, default=_utc_now)
     import_batch = Column(String, nullable=False)
 

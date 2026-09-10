@@ -40,6 +40,12 @@ def create_app() -> FastAPI:
     db_manager = DatabaseManager(config)
     db_manager.create_tables()
 
+    # Older databases predate merchant_pattern; fill it in before serving.
+    from fafycat.data.merchant_pattern import backfill_merchant_patterns
+
+    with db_manager.get_session() as session:
+        backfill_merchant_patterns(session)
+
     # Store in app state
     app.state.config = config
     app.state.db_manager = db_manager
