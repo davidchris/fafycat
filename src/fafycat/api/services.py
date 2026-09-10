@@ -22,12 +22,31 @@ def _pattern_of(transaction: TransactionORM | None) -> str:
     return str(transaction.merchant_pattern) if transaction is not None and transaction.merchant_pattern else ""
 
 
-def _unreviewed_siblings(session: Session, pattern: str, source_id: str):
-    """Query for the unreviewed transactions sharing ``pattern``, excluding the source."""
+def _unreviewed_siblings(session: Session, source: TransactionORM, category_id: int | None):
+    """Query for the unreviewed transactions sharing ``source``'s merchant pattern that the model saw the same way.
+
+    A sibling qualifies when it has no prediction, or its prediction equals
+    the source's prediction (a correction reaches every row the model got
+    wrong in the same way) or the category being applied (a confirmation
+    reaches every row the model already agrees with). Siblings the model
+    predicted differently are left for review: the merchant is shared, but
+    purpose or amount told the model something else, as with transfers to
+    one's own name that split into savings plans and pocket money.
+    """
+    predicted = source.predicted_category_id
+    same_as_source = (
+        TransactionORM.predicted_category_id.is_(None)
+        if predicted is None
+        else TransactionORM.predicted_category_id == predicted
+    )
+    seen_the_same_way = [TransactionORM.predicted_category_id.is_(None), same_as_source]
+    if category_id is not None:
+        seen_the_same_way.append(TransactionORM.predicted_category_id == category_id)
     return session.query(TransactionORM).filter(
-        TransactionORM.merchant_pattern == pattern,
-        TransactionORM.id != source_id,
+        TransactionORM.merchant_pattern == source.merchant_pattern,
+        TransactionORM.id != source.id,
         TransactionORM.is_reviewed == False,  # noqa: E712
+        or_(*seen_the_same_way),
     )
 
 
@@ -321,7 +340,7 @@ class TransactionService:
 
     @staticmethod
     def count_unreviewed_siblings(session: Session, transaction_id: str) -> tuple[str, int]:
-        """Count the unreviewed transactions that share a transaction's merchant pattern.
+        """Count the unreviewed siblings a just-saved category would propagate to.
 
         Args:
             session: Open database session.
@@ -334,14 +353,14 @@ class TransactionService:
         """
         transaction = session.query(TransactionORM).filter(TransactionORM.id == transaction_id).first()
         pattern = _pattern_of(transaction)
-        if not pattern:
+        if transaction is None or not pattern:
             return "", 0
 
-        return pattern, _unreviewed_siblings(session, pattern, transaction_id).count()
+        return pattern, _unreviewed_siblings(session, transaction, _to_int_or_none(transaction.category_id)).count()
 
     @staticmethod
     def propagate_category(session: Session, source_id: str, category_name: str) -> dict:
-        """Apply a category to every unreviewed transaction sharing the source's merchant pattern.
+        """Apply a category to the unreviewed siblings the model saw like the source.
 
         Each affected transaction is marked reviewed and gets its own Review
         Event with the ``propagation`` actor, so the Audit Trail names the
@@ -360,10 +379,10 @@ class TransactionService:
         source = session.query(TransactionORM).filter(TransactionORM.id == source_id).first()
         pattern = _pattern_of(source)
         category = session.query(CategoryORM).filter(CategoryORM.name == category_name).first()
-        if not pattern or category is None:
+        if source is None or not pattern or category is None:
             return {"applied": 0, "pattern": pattern, "category": category_name}
 
-        siblings = _unreviewed_siblings(session, pattern, source_id).all()
+        siblings = _unreviewed_siblings(session, source, _to_int(category.id)).all()
 
         for txn in siblings:
             record_review_event(

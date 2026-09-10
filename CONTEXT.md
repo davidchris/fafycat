@@ -61,7 +61,7 @@ The cleaned merchant name stored on a transaction. It groups the sibling transac
 _Avoid_: merchant, cleaned name
 
 **Propagation**:
-Applying a category the reviewer just saved to every unreviewed transaction sharing its Merchant Pattern. Each affected transaction gets its own Review Event.
+Applying a category the reviewer just saved to the unreviewed transactions sharing its Merchant Pattern that the model predicted the same way (like the source, or as the saved category, or not at all). Siblings the model predicted differently stay in the queue. Each affected transaction gets its own Review Event.
 _Avoid_: bulk apply, mass update
 
 **Categorization Summary**:
