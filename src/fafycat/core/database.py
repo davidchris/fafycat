@@ -1,5 +1,6 @@
 """Database operations using SQLAlchemy."""
 
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import (
@@ -20,6 +21,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 
 from .config import AppConfig
+
+logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 
@@ -242,6 +245,7 @@ class DatabaseManager:
             for table in Base.metadata.tables.values():
                 for index in table.indexes:
                     index.create(bind=conn, checkfirst=True)
+            self._repair_review_flags(conn)
             conn.commit()
 
     @staticmethod
@@ -259,6 +263,44 @@ class DatabaseManager:
                 continue
             ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column.type.compile(conn.dialect)}'
             conn.exec_driver_sql(ddl)
+
+    @staticmethod
+    def _repair_review_flags(conn) -> tuple[int, int]:
+        """Restore the invariant ``is_reviewed = 1`` if and only if ``category_id`` is set.
+
+        A category is a human decision (a labelled import, a review, an
+        auto-accept that copied the prediction); the reviewed flag tells the
+        queue, training, Merchant Rules and calibration to trust it. Two
+        historical bugs broke the pairing in the user's data:
+
+        * Before 2025-06-06 the labelled CSV import wrote the category but not
+          the flag, so human labels sat in the review queue and could be
+          overwritten by a confident re-predict. Those rows get the flag.
+        * Between 2025-06-10 and 2026-07-02 the batch-predict endpoints set the
+          flag on auto-accept without copying the predicted category, hiding
+          unlabelled rows from the queue and from training. Those rows lose the
+          flag and Review Priority, so the next re-predict scores them again:
+          confident ones are auto-accepted with a category, the rest surface
+          in the queue.
+
+        Idempotent; runs on every ``create_tables``.
+
+        Returns:
+            ``(flagged, reset)``: rows that gained the reviewed flag and rows
+            that lost it.
+        """
+        flagged = conn.exec_driver_sql(
+            "UPDATE transactions SET is_reviewed = 1 WHERE is_reviewed IS NOT 1 AND category_id IS NOT NULL"
+        ).rowcount
+        reset = conn.exec_driver_sql(
+            "UPDATE transactions SET is_reviewed = 0, review_priority = NULL "
+            "WHERE is_reviewed = 1 AND category_id IS NULL"
+        ).rowcount
+        if flagged:
+            logger.warning("Marked %d transactions with a category as reviewed", flagged)
+        if reset:
+            logger.warning("Reset %d transactions that were marked reviewed without a category", reset)
+        return flagged, reset
 
     def get_session(self) -> Session:
         """Get database session."""
