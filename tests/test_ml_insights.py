@@ -168,6 +168,18 @@ class TestCalibrationReport:
 
         assert sum(band.reviewed for band in get_calibration_report(db_session).bands) == 0
 
+    def test_skips_rows_flagged_reviewed_but_left_uncategorised(self, db_session, categories):
+        """A missing category is stale data, not the reviewer disagreeing."""
+        groceries, _ = categories
+        _add_transaction(db_session, "n1", confidence=0.97, category_id=None, predicted_category_id=groceries)
+        _add_transaction(db_session, "n2", confidence=0.97, category_id=groceries, predicted_category_id=groceries)
+        db_session.commit()
+
+        top_band = get_calibration_report(db_session).bands[-1]
+
+        assert (top_band.reviewed, top_band.kept, top_band.overridden) == (1, 1, 0)
+        assert top_band.agreement_rate == 1.0
+
     def test_counts_auto_accepted_transactions_the_user_corrected(self, db_session, categories):
         groceries, restaurants = categories
         _add_transaction(

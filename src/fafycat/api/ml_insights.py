@@ -75,7 +75,7 @@ class CalibrationBand:
     lower: float
     upper: float
     reviewed: int
-    """Reviewed transactions in this band that carry a Prediction."""
+    """Reviewed transactions in this band that carry both a category and a Prediction."""
 
     kept: int
     """Of those, how many ended up with the predicted category."""
@@ -114,9 +114,13 @@ class CalibrationReport:
 
     Computed from the ``transactions`` table rather than from Prediction Events
     because it covers all history, including transactions reviewed before the
-    Audit Trail existed. The caveat that comes with that: ``confidence_score``
-    holds the *latest* Prediction for a transaction, which is not necessarily
-    the one the reviewer saw when they made their decision.
+    Audit Trail existed. Two caveats come with that:
+
+    * ``confidence_score`` holds the *latest* Prediction for a transaction,
+      which is not necessarily the one the reviewer saw at the time.
+    * Rows flagged reviewed but left without a category are skipped. They are
+      not reviewer disagreements, and counting them as such badly distorts the
+      high-confidence bands.
     """
 
     bands: tuple[CalibrationBand, ...]
@@ -184,6 +188,7 @@ def get_calibration_report(session: Session) -> CalibrationReport:
         )
         .filter(
             TransactionORM.is_reviewed.is_(True),
+            TransactionORM.category_id.is_not(None),
             TransactionORM.predicted_category_id.is_not(None),
             TransactionORM.confidence_score.is_not(None),
         )
