@@ -51,7 +51,7 @@ Categories where the LLM is notably worse than the ensemble:
 | haushalt | 0.884 | 0.419 | -0.47 |
 | sonstiges | 0.889 | 0.098 | -0.79 |
 | bargeld | 0.984 | 0.480 | -0.50 |
-| flora61 | 0.917 | 0.385 | -0.53 |
+| vendor-a | 0.917 | 0.385 | -0.53 |
 | lebensmittel | 0.937 | 0.711 | -0.23 |
 
 Categories where the LLM does comparably well:
@@ -71,7 +71,7 @@ The LLM matches the ensemble only on categories that are already easy (distincti
 
 1. **The ensemble already exploits the signal well.** Transaction categorization is primarily a text classification task over short, structured text (name + purpose). The LightGBM + Naive Bayes ensemble with engineered features captures the relevant patterns effectively — there's little headroom for a generative model to add value.
 
-2. **LLMs lack domain-specific training signal.** The ensemble is trained directly on the user's labeled data and learns personal category boundaries (e.g., "flora61" is a specific vendor). The LLM can only rely on general knowledge and the 52 few-shot examples, which is insufficient for idiosyncratic personal categories.
+2. **LLMs lack domain-specific training signal.** The ensemble is trained directly on the user's labeled data and learns personal category boundaries (e.g., "vendor-a" is a specific vendor). The LLM can only rely on general knowledge and the 52 few-shot examples, which is insufficient for idiosyncratic personal categories.
 
 3. **Ambiguous categories confuse the LLM.** Categories like "sonstiges" (miscellaneous), "haushalt" (household), and "kind" (children) have overlapping descriptions. The ensemble learns the decision boundaries from hundreds of labeled examples; the LLM with 2 examples per category cannot.
 
@@ -107,7 +107,7 @@ A reasonable extrapolation: a frontier model might reach 0.78-0.85 standalone F1
 
 1. **The ensemble is trained on the user's full labeled dataset (~1,500 training examples per fold).** No amount of few-shot prompting (limited by context window and cost) can substitute for supervised training on hundreds of examples per category. The ensemble learns the exact decision boundaries for this specific user's categorization scheme.
 
-2. **Personal/idiosyncratic categories are fundamentally hard for general models.** "flora61" is a specific vendor only this user knows. "sonstiges" (miscellaneous) has no semantic pattern — it's defined by exclusion. No pre-trained model, however large, has knowledge of these personal categories. It can only rely on the few-shot examples, which provide sparse coverage.
+2. **Personal/idiosyncratic categories are fundamentally hard for general models.** "vendor-a" is a specific vendor only this user knows. "sonstiges" (miscellaneous) has no semantic pattern — it's defined by exclusion. No pre-trained model, however large, has knowledge of these personal categories. It can only rely on the few-shot examples, which provide sparse coverage.
 
 3. **Feature engineering captures signals LLMs can't access from text alone.** The ensemble uses amount buckets, IBAN patterns, SEPA creditor IDs, and cross-feature interactions that are difficult to convey in a natural language prompt. A transaction of "-4.50 EUR" from "REWE" is obviously groceries, but the amount pattern for distinguishing "haushalt" from "lebensmittel" at the same merchant requires learned numerical boundaries.
 
