@@ -74,7 +74,12 @@ def _prediction_card(ev: PredictionEventView) -> Div:
         Div(
             _ranked_table("LightGBM", ev.lgbm_top, ev.lgbm_weight),
             _ranked_table("Naive Bayes", ev.nb_top, ev.nb_weight),
-            _ranked_table("Merchant rule", ev.rule_top, ev.rule_weight, empty="no rule matched"),
+            _ranked_table(
+                "Merchant rule",
+                ev.rule_top,
+                ev.rule_weight,
+                empty="no rule matched" if ev.rule_pattern is None else "not recorded",
+            ),
             _ranked_table("Ensemble", ev.ensemble_top),
             cls="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-3",
         ),
