@@ -249,6 +249,10 @@ class TransactionCategorizer:
         if not transactions:
             return []
 
+        # Reviews and propagations write rules between imports; this
+        # long-lived singleton would otherwise keep a stale rule cache.
+        self.merchant_mapper.reload()
+
         features_list = self.feature_extractor.extract_batch_features(transactions)
         X_prepared = self._prepare_features(pd.DataFrame(features_list), fit=False)
         try:

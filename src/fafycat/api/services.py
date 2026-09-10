@@ -13,6 +13,7 @@ from fafycat.core.audit_trail import ReviewActor, record_review_event
 from fafycat.core.database import BudgetPlanORM, CategoryORM, TransactionORM
 from fafycat.core.database import get_categories as db_get_categories
 from fafycat.core.models import CategoryType, ReviewPriority
+from fafycat.ml.merchant_mapper import refresh_rule_for_pattern
 
 
 def _to_int(value: Any) -> int:
@@ -280,6 +281,9 @@ class TransactionService:
         transaction.is_reviewed = update.is_reviewed
         session.commit()
 
+        if update.is_reviewed:
+            refresh_rule_for_pattern(session, _to_str(transaction.merchant_pattern or ""))
+
         # Return updated transaction
         return TransactionResponse(
             id=_to_str(transaction.id),
@@ -299,6 +303,85 @@ class TransactionService:
             created_at=_to_datetime(transaction.imported_at),
             updated_at=_to_datetime(transaction.imported_at),
         )
+
+    @staticmethod
+    def count_unreviewed_siblings(session: Session, transaction_id: str) -> tuple[str, int]:
+        """Count the unreviewed transactions that share a transaction's merchant pattern.
+
+        Args:
+            session: Open database session.
+            transaction_id: The transaction whose siblings are counted. It is
+                itself excluded from the count.
+
+        Returns:
+            A ``(merchant_pattern, count)`` pair. The pattern is empty and the
+            count zero when the transaction is unknown or has no pattern.
+        """
+        transaction = session.query(TransactionORM).filter(TransactionORM.id == transaction_id).first()
+        pattern = _to_str(transaction.merchant_pattern) if transaction and transaction.merchant_pattern else ""
+        if not pattern:
+            return "", 0
+
+        count = (
+            session.query(func.count(TransactionORM.id))
+            .filter(
+                TransactionORM.merchant_pattern == pattern,
+                TransactionORM.id != transaction_id,
+                TransactionORM.is_reviewed == False,  # noqa: E712
+            )
+            .scalar()
+        )
+        return pattern, int(count or 0)
+
+    @staticmethod
+    def propagate_category(session: Session, source_id: str, category_name: str) -> dict:
+        """Apply a category to every unreviewed transaction sharing the source's merchant pattern.
+
+        Each affected transaction is marked reviewed and gets its own Review
+        Event with the ``propagation`` actor, so the Audit Trail names the
+        correction it came from. Already reviewed transactions are left alone.
+        The pattern's Merchant Rule is recomputed afterwards.
+
+        Args:
+            session: Open database session. Committed by this function.
+            source_id: The transaction the user corrected.
+            category_name: Name of the category to apply.
+
+        Returns:
+            A dict with the number of transactions ``applied``, the
+            ``pattern``, and the ``category`` name.
+        """
+        source = session.query(TransactionORM).filter(TransactionORM.id == source_id).first()
+        pattern = _to_str(source.merchant_pattern) if source and source.merchant_pattern else ""
+        category = session.query(CategoryORM).filter(CategoryORM.name == category_name).first()
+        if not pattern or category is None:
+            return {"applied": 0, "pattern": pattern, "category": category_name}
+
+        siblings = (
+            session.query(TransactionORM)
+            .filter(
+                TransactionORM.merchant_pattern == pattern,
+                TransactionORM.id != source_id,
+                TransactionORM.is_reviewed == False,  # noqa: E712
+            )
+            .all()
+        )
+
+        for txn in siblings:
+            record_review_event(
+                session,
+                txn,
+                actor=ReviewActor.PROPAGATION,
+                from_category_id=_to_int_or_none(txn.category_id),
+                to_category_id=_to_int(category.id),
+                note=f"propagated from {source_id}",
+            )
+            txn.category_id = category.id
+            txn.is_reviewed = True
+
+        session.commit()
+        refresh_rule_for_pattern(session, pattern)
+        return {"applied": len(siblings), "pattern": pattern, "category": _to_str(category.name)}
 
     @staticmethod
     def bulk_approve(

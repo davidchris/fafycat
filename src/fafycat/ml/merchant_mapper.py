@@ -26,6 +26,70 @@ RULE_MIN_SHARE = 0.8
 RULE_MAX_CONFIDENCE = 0.98
 """Rules never claim certainty; leaves room for the reviewer to disagree."""
 
+RULE_MIN_REVIEWS = 3
+"""Reviews a merchant pattern needs before it can form a rule."""
+
+
+def refresh_rule_for_pattern(session: Session, pattern: str, min_occurrences: int = RULE_MIN_REVIEWS) -> bool:
+    """Recompute the Merchant Rule for a single merchant pattern and commit.
+
+    Applies the same bar as a full rebuild (``min_occurrences`` reviews and a
+    ``RULE_MIN_SHARE`` majority category), so a rule appears as soon as the
+    reviews support it and disappears again once they diverge. Reads the
+    stored ``merchant_pattern`` column rather than re-cleaning names, which
+    keeps the work to one indexed lookup.
+
+    Args:
+        session: Open database session. Committed by this function.
+        pattern: Cleaned merchant name to recompute. Empty patterns are ignored.
+        min_occurrences: Minimum number of reviews required to form a rule.
+
+    Returns:
+        True if a rule exists for the pattern afterwards, False otherwise.
+    """
+    if not pattern:
+        return False
+
+    rows = (
+        session.query(TransactionORM.category_id, func.count(TransactionORM.id), func.max(TransactionORM.date))
+        .filter(
+            TransactionORM.merchant_pattern == pattern,
+            TransactionORM.category_id.isnot(None),
+            TransactionORM.is_reviewed.is_(True),
+        )
+        .group_by(TransactionORM.category_id)
+        .all()
+    )
+
+    counts: Counter[int] = Counter()
+    last_seen: date | None = None
+    for category_id, count, seen in rows:
+        counts[int(category_id)] += int(count)
+        seen_date = seen if isinstance(seen, date) else date.fromisoformat(str(seen)[:10])
+        last_seen = seen_date if last_seen is None else max(last_seen, seen_date)
+
+    existing = session.query(MerchantMappingORM).filter(MerchantMappingORM.merchant_pattern == pattern).first()
+
+    total = sum(counts.values())
+    category_id, top = counts.most_common(1)[0] if counts else (None, 0)
+    qualifies = total >= min_occurrences and top / total >= RULE_MIN_SHARE if total else False
+
+    if not qualifies:
+        if existing is not None:
+            session.delete(existing)
+            session.commit()
+        return False
+
+    mapping = existing or MerchantMappingORM(merchant_pattern=pattern)
+    if existing is None:
+        session.add(mapping)
+    mapping.category_id = category_id
+    mapping.confidence = min(RULE_MAX_CONFIDENCE, top / total)
+    mapping.occurrence_count = total
+    mapping.last_seen = last_seen
+    session.commit()
+    return True
+
 
 class MerchantMapper:
     """High-confidence merchant to category mapping."""
@@ -43,6 +107,28 @@ class MerchantMapper:
             mapping.merchant_pattern: {"category_id": mapping.category_id, "confidence": mapping.confidence}
             for mapping in mappings
         }
+
+    def reload(self) -> None:
+        """Re-read the rule cache from the database.
+
+        The categorizer is a long-lived singleton, so rules written by a
+        review or a propagation are invisible to it until it reloads.
+        """
+        self._load_mappings()
+
+    def refresh_pattern(self, pattern: str, min_occurrences: int = RULE_MIN_REVIEWS) -> bool:
+        """Recompute the Merchant Rule for one pattern and refresh the cache.
+
+        Args:
+            pattern: Cleaned merchant name to recompute.
+            min_occurrences: Minimum number of reviews required to form a rule.
+
+        Returns:
+            True if a rule exists for the pattern afterwards, False otherwise.
+        """
+        exists = refresh_rule_for_pattern(self.session, pattern, min_occurrences)
+        self._load_mappings()
+        return exists
 
     def get_category(self, merchant_name: str) -> MerchantMapping | None:
         """Get category mapping for merchant."""

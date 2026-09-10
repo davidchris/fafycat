@@ -10,6 +10,7 @@ _ACTOR_LABELS = {
     "auto_accept": "Auto-accepted",
     "bulk_approve": "Bulk-approved",
     "import_label": "Category came with the import",
+    "propagation": "Applied from a sibling transaction",
 }
 
 _SOURCE_LABELS = {

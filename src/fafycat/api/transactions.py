@@ -11,7 +11,12 @@ from fafycat.api.dependencies import get_db_session
 from fafycat.api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
 from fafycat.api.services import CategoryService, TransactionService
 from fafycat.core.models import ReviewPriority
-from fafycat.web.components.transaction_table import render_row, render_table
+from fafycat.web.components.transaction_table import (
+    render_propagation_result,
+    render_row,
+    render_row_with_prompt,
+    render_table,
+)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -84,7 +89,44 @@ async def categorize_transaction_htmx(
         )
 
     categories = CategoryService.get_categories(db)
-    return HTMLResponse(content=render_row(result, categories), status_code=200)
+    pattern, sibling_count = TransactionService.count_unreviewed_siblings(db, transaction_id)
+    if sibling_count > 0:
+        html = render_row_with_prompt(
+            result,
+            categories,
+            pattern=pattern,
+            sibling_count=sibling_count,
+            # The stored name, not the submitted one: it is what propagate looks up.
+            category_name=result.actual_category or actual_category,
+        )
+    else:
+        html = render_row(result, categories)
+    return HTMLResponse(content=html, status_code=200)
+
+
+@router.post("/propagate", response_class=HTMLResponse)
+async def propagate_category(
+    source_id: str = Form(...),
+    actual_category: str = Form(...),
+    db: Session = Depends(get_db_session),
+) -> HTMLResponse:
+    """Apply a just-saved category to every unreviewed transaction with the same merchant pattern.
+
+    Replaces the inline prompt with a confirmation and fires
+    ``transactions-changed`` so the table reloads the rows that changed
+    underneath the user.
+    """
+    result = TransactionService.propagate_category(session=db, source_id=source_id, category_name=actual_category)
+    return HTMLResponse(
+        content=render_propagation_result(source_id, result["applied"]),
+        headers={"HX-Trigger": "transactions-changed"},
+    )
+
+
+@router.get("/propagate/dismiss", response_class=HTMLResponse)
+async def dismiss_propagation_prompt() -> HTMLResponse:
+    """Remove the propagation prompt row. Lets the prompt be dismissed without inline JS."""
+    return HTMLResponse(content="")
 
 
 @router.get("/table", response_class=HTMLResponse)

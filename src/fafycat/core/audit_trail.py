@@ -6,7 +6,8 @@ Two event streams, both keyed by transaction:
   Merchant Rule, LightGBM, and Naive Bayes each proposed, the ensemble
   weights, and the decision against the Auto-approve Threshold.
 * Review Events: one per category assignment, naming the actor (the
-  reviewer, an auto-accept, a bulk approve, a labelled import).
+  reviewer, an auto-accept, a bulk approve, a labelled import, or a
+  correction propagated from a sibling transaction).
 
 Writers add rows to the session and leave committing to the caller, so an
 event is persisted in the same transaction as the change it describes.
@@ -31,6 +32,7 @@ class ReviewActor(StrEnum):
     AUTO_ACCEPT = "auto_accept"
     BULK_APPROVE = "bulk_approve"
     IMPORT_LABEL = "import_label"
+    PROPAGATION = "propagation"
 
 
 def record_prediction_event(

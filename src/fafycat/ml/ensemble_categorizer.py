@@ -278,6 +278,10 @@ class EnsembleCategorizer:
         if not transactions:
             return []
 
+        # Reviews and propagations write rules between imports; this
+        # long-lived singleton would otherwise keep a stale rule cache.
+        self.lgbm_component.merchant_mapper.reload()
+
         nb_classes = self.nb_component.classes_
         assert nb_classes is not None, "NB component must be trained before prediction"
         lgbm_probas = self._align_probas(
