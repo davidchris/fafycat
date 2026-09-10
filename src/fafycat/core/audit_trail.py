@@ -24,6 +24,9 @@ from sqlalchemy.orm import Session
 from .database import CategoryORM, PredictionEventORM, ReviewEventORM, TransactionORM
 from .models import ReviewPriority, TransactionPrediction
 
+KEPT_REVIEW = "kept_review"
+"""Prediction Event decision for a transaction that kept its human-set category."""
+
 
 class ReviewActor(StrEnum):
     """Who set a category on a transaction."""
@@ -43,16 +46,20 @@ def record_prediction_event(
     trigger: str,
     model_id: str,
     threshold: float,
-    decision: ReviewPriority,
+    decision: ReviewPriority | str,
 ) -> PredictionEventORM:
-    """Add a Prediction Event for one transaction. Does not commit."""
+    """Add a Prediction Event for one transaction. Does not commit.
+
+    ``decision`` is a Review Priority value, or ``KEPT_REVIEW`` when the
+    transaction already had a human category and kept it.
+    """
     detail = prediction.detail
     event = PredictionEventORM(
         transaction_id=txn.id,
         trigger=trigger,
         model_id=model_id,
         threshold=threshold,
-        decision=decision.value,
+        decision=decision.value if isinstance(decision, ReviewPriority) else decision,
         source=detail.source if detail else "unknown",
         final_category_id=prediction.predicted_category_id,
         final_confidence=prediction.confidence_score,

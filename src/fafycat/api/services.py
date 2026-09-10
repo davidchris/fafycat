@@ -14,6 +14,7 @@ from fafycat.core.database import BudgetPlanORM, CategoryORM, TransactionORM
 from fafycat.core.database import get_categories as db_get_categories
 from fafycat.core.models import CategoryType, ReviewPriority
 from fafycat.ml.merchant_mapper import refresh_rule_for_pattern
+from fafycat.ml.prediction_pipeline import get_auto_approve_threshold
 
 
 def _pattern_of(transaction: TransactionORM | None) -> str:
@@ -383,16 +384,24 @@ class TransactionService:
     @staticmethod
     def bulk_approve(
         session: Session,
-        review_priority: ReviewPriority = ReviewPriority.QUALITY_CHECK,
+        review_priority: ReviewPriority | None = None,
         min_confidence: float | None = None,
     ) -> dict:
-        """Bulk approve transactions by trusting their ML predictions."""
+        """Bulk approve unreviewed transactions by trusting their ML predictions.
+
+        Filters by ``review_priority`` and/or ``min_confidence``. With neither
+        given, the Auto-approve Threshold is used as the confidence floor so a
+        bare call never approves low-confidence guesses.
+        """
+        if review_priority is None and min_confidence is None:
+            min_confidence = get_auto_approve_threshold(session)
+
         query = session.query(TransactionORM).filter(
-            TransactionORM.review_priority == review_priority,
             TransactionORM.is_reviewed == False,  # noqa: E712
             TransactionORM.predicted_category_id.is_not(None),
         )
-
+        if review_priority is not None:
+            query = query.filter(TransactionORM.review_priority == review_priority)
         if min_confidence is not None:
             query = query.filter(TransactionORM.confidence_score >= min_confidence)
 
@@ -1443,7 +1452,12 @@ class AnalyticsService:
                 else None
             )
             months_with_data = AnalyticsService._get_months_with_data(
-                session, category_id, year, start_date=query_start_date, end_date=query_end_date
+                session,
+                category_id,
+                year,
+                start_date=query_start_date,
+                end_date=query_end_date,
+                include_unreviewed=include_unreviewed,
             )
 
             category_data[category_id]["yearly_data"][str(year)] = {
@@ -1480,14 +1494,50 @@ class AnalyticsService:
                 "comparison_end_date": latest_transaction_date.isoformat() if latest_transaction_date else None,
                 "aligned_to_year": current_year if latest_transaction_date else None,
             },
-            "unreviewed": AnalyticsService._get_unreviewed_summary(
-                session, date(min(years), 1, 1), date(max(years), 12, 31), include_unreviewed
+            "unreviewed": AnalyticsService._get_unreviewed_summary_for_years(
+                session, years, latest_transaction_date, include_unreviewed
             ),
         }
 
     @staticmethod
+    def _get_unreviewed_summary_for_years(
+        session: Session,
+        years: list[int],
+        cutoff: date | None,
+        include_unreviewed: bool,
+    ) -> dict[str, Any]:
+        """Unreviewed summary over the same per-year windows the comparison used.
+
+        When the comparison is aligned to ``cutoff`` (the current year's latest
+        transaction day), every year is counted from 1 January to that day;
+        otherwise whole years are counted.
+        """
+        total_count, total_amount = 0, 0.0
+        end_of_window: date | None = None
+        for year in sorted(years):
+            end = date(year, cutoff.month, cutoff.day) if cutoff else date(year, 12, 31)
+            part = AnalyticsService._get_unreviewed_summary(session, date(year, 1, 1), end, include_unreviewed)
+            total_count += part["count"]
+            total_amount += part["amount"]
+            end_of_window = end
+        return {
+            "count": total_count,
+            "amount": round(total_amount, 2),
+            "included": include_unreviewed,
+            "date_range": {
+                "start_date": date(min(years), 1, 1).isoformat(),
+                "end_date": end_of_window.isoformat() if end_of_window else None,
+            },
+        }
+
+    @staticmethod
     def _get_months_with_data(
-        session: Session, category_id: int, year: int, start_date: date | None = None, end_date: date | None = None
+        session: Session,
+        category_id: int,
+        year: int,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        include_unreviewed: bool = True,
     ) -> int:
         """Get the number of months with transaction data for a category in a specific year.
 
@@ -1497,15 +1547,23 @@ class AnalyticsService:
             year: The year to filter by
             start_date: Optional start date to limit the count (used for fair comparisons)
             end_date: Optional end date to limit the count (used for fair comparisons)
+            include_unreviewed: When False, months with only unreviewed activity do not count,
+                matching the totals they divide.
 
         Returns:
             Number of distinct months with transaction data in the specified year and date range
         """
         query = (
             session.query(func.count(func.distinct(func.strftime("%m", TransactionORM.date))))
-            .filter(or_(TransactionORM.category_id == category_id, TransactionORM.predicted_category_id == category_id))
+            .filter(
+                or_(
+                    TransactionORM.category_id == category_id,
+                    and_(TransactionORM.category_id.is_(None), TransactionORM.predicted_category_id == category_id),
+                )
+            )
             .filter(func.strftime("%Y", TransactionORM.date) == str(year))
         )
+        query = AnalyticsService._apply_review_filter(query, include_unreviewed)
 
         # Apply date range filters if provided (to match parent query filtering)
         if start_date:

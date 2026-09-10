@@ -41,9 +41,13 @@ class BulkCategorizeRequest(BaseModel):
 
 
 class BulkApproveRequest(BaseModel):
-    """Request model for bulk approval of auto-accepted transactions."""
+    """Request model for bulk-approving unreviewed predictions.
 
-    review_priority: ReviewPriority = ReviewPriority.QUALITY_CHECK
+    With neither field set, every unreviewed prediction at or above the
+    Auto-approve Threshold is approved.
+    """
+
+    review_priority: ReviewPriority | None = None
     min_confidence: float | None = Field(None, ge=0, le=1)
 
 

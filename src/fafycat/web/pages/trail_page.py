@@ -44,7 +44,9 @@ def _ranked_table(title: str, rows: list[Ranked], weight: float | None = None, e
 
 
 def _prediction_card(ev: PredictionEventView) -> Div:
-    decision = "auto-accepted" if ev.decision == "auto_accepted" else "sent to review"
+    decision = {"auto_accepted": "auto-accepted", "kept_review": "your category kept"}.get(
+        ev.decision, "sent to review"
+    )
     if ev.rule_pattern is None:
         rule = P("No merchant rule matched, so the two models decided alone.", cls="text-secondary text-sm")
     else:

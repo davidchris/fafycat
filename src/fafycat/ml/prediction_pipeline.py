@@ -6,7 +6,9 @@ the outcome. Entry points commit before returning.
 
 The rule is deliberately simple and fully visible: a Prediction at or above
 the Auto-approve Threshold is auto-accepted, everything else needs review.
-No sampling, no cap, no hidden "standard" tier.
+No sampling, no cap, no hidden "standard" tier. A transaction that already
+carries a human category (a labelled import, an earlier review) keeps it:
+the Prediction is recorded for the Audit Trail, nothing else changes.
 """
 
 from collections import Counter
@@ -16,7 +18,7 @@ from typing import Protocol, cast
 
 from sqlalchemy.orm import Session
 
-from ..core.audit_trail import ReviewActor, record_prediction_event, record_review_event
+from ..core.audit_trail import KEPT_REVIEW, ReviewActor, record_prediction_event, record_review_event
 from ..core.config import AppConfig
 from ..core.database import AppSettingsORM, TransactionORM
 from ..core.models import ReviewPriority, TransactionInput, TransactionPrediction
@@ -37,11 +39,13 @@ class CategorizationSummary:
 
     auto_accepted: int = 0
     needs_review: int = 0
+    already_reviewed: int = 0
+    """Transactions that kept the category a human had already set."""
 
     @property
     def total(self) -> int:
         """Number of transactions the run predicted."""
-        return self.auto_accepted + self.needs_review
+        return self.auto_accepted + self.needs_review + self.already_reviewed
 
 
 def get_auto_approve_threshold(db: Session) -> float:
@@ -153,11 +157,12 @@ def _apply_predictions(
     if threshold is None:
         threshold = get_auto_approve_threshold(db)
 
-    counts: Counter[ReviewPriority] = Counter()
+    counts: Counter[str] = Counter()
     for txn, prediction in zip(txns, predictions, strict=True):
         previous_category_id = txn.category_id
         priority = _bucket_transaction(txn, prediction, threshold)
-        counts[priority] += 1
+        decision = priority.value if priority is not None else KEPT_REVIEW
+        counts[decision] += 1
         record_prediction_event(
             db,
             txn,
@@ -165,7 +170,7 @@ def _apply_predictions(
             trigger=trigger,
             model_id=categorizer.model_id,
             threshold=threshold,
-            decision=priority,
+            decision=decision,
         )
         if priority is ReviewPriority.AUTO_ACCEPTED:
             record_review_event(
@@ -178,15 +183,26 @@ def _apply_predictions(
 
     db.commit()
     return CategorizationSummary(
-        auto_accepted=counts[ReviewPriority.AUTO_ACCEPTED],
-        needs_review=counts[ReviewPriority.STANDARD],
+        auto_accepted=counts[ReviewPriority.AUTO_ACCEPTED.value],
+        needs_review=counts[ReviewPriority.STANDARD.value],
+        already_reviewed=counts[KEPT_REVIEW],
     )
 
 
-def _bucket_transaction(txn: TransactionORM, prediction: TransactionPrediction, threshold: float) -> ReviewPriority:
-    """Write one transaction's Prediction and Review Priority; return the bucket."""
+def _bucket_transaction(
+    txn: TransactionORM, prediction: TransactionPrediction, threshold: float
+) -> ReviewPriority | None:
+    """Write one transaction's Prediction and Review Priority; return the bucket.
+
+    Returns None when the transaction already carries a human category: the
+    Prediction is stored for comparison, but category, reviewed flag, and
+    Review Priority stay as the human left them.
+    """
     txn.predicted_category_id = prediction.predicted_category_id
     txn.confidence_score = prediction.confidence_score
+
+    if bool(txn.is_reviewed) and txn.category_id is not None:
+        return None
 
     priority = ReviewPriority.AUTO_ACCEPTED if prediction.confidence_score >= threshold else ReviewPriority.STANDARD
     txn.review_priority = priority

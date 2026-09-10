@@ -3,7 +3,7 @@
 import json
 from datetime import UTC, date, datetime
 
-from fafycat.core.audit_trail import ReviewActor, get_trail, record_review_event
+from fafycat.core.audit_trail import KEPT_REVIEW, ReviewActor, get_trail, record_review_event
 from fafycat.core.database import (
     CategoryORM,
     MerchantMappingORM,
@@ -117,6 +117,20 @@ class TestPipelineWritesEvents:
         assert [(r.transaction_id, r.actor, r.to_category_id) for r in reviews] == [
             ("a" * 16, ReviewActor.AUTO_ACCEPT.value, groceries.id)
         ]
+
+
+class TestReviewedTransactionsKeepTheirCategory:
+    def test_prediction_event_says_kept_review_and_no_auto_accept_event(self, db_session):
+        groceries, eating = _categories(db_session)
+        _seed(db_session, "REWE", "a" * 16, category_id=eating.id, is_reviewed=True)
+        db_session.commit()
+
+        predict_unpredicted(db_session, DetailedFakeCategorizer({"REWE": 0.99}, groceries.id), threshold=0.9)
+
+        event = db_session.query(PredictionEventORM).one()
+        assert event.decision == KEPT_REVIEW
+        assert event.final_category_id == groceries.id
+        assert db_session.query(ReviewEventORM).count() == 0
 
 
 class TestHumanActionsWriteEvents:

@@ -386,3 +386,57 @@ class TestNoticeRendering:
         notice = _render_unreviewed_notice({"count": 4, "amount": 120.5, "included": False})
         assert "text-secondary" in notice
         assert "excluded from these numbers" in notice
+
+
+def _txn(session: Session, txn_id: str, day: date, amount: float, *, reviewed: bool, category_id: int = 1) -> None:
+    session.add(
+        TransactionORM(
+            id=txn_id,
+            date=day,
+            value_date=day,
+            name="m",
+            purpose="",
+            amount=amount,
+            currency="EUR",
+            category_id=category_id if reviewed else None,
+            predicted_category_id=category_id,
+            confidence_score=0.4,
+            is_reviewed=reviewed,
+            imported_at=datetime.now(),
+            import_batch="batch",
+        )
+    )
+
+
+class TestYearOverYearReviewFilterConsistency:
+    """The reviewed-only view must divide by, and warn about, the same rows it totals."""
+
+    def test_months_with_only_unreviewed_activity_do_not_dilute_the_reviewed_average(self, db_session):
+        db_session.add(CategoryORM(id=1, name="groceries", type="spending", budget=0.0, is_active=True))
+        _txn(db_session, "r1", date(2020, 1, 5), -100.0, reviewed=True)
+        _txn(db_session, "r2", date(2020, 2, 5), -100.0, reviewed=True)
+        _txn(db_session, "u3", date(2020, 3, 5), -40.0, reviewed=False)
+        db_session.commit()
+
+        reviewed_only = AnalyticsService.get_year_over_year_comparison(
+            db_session, years=[2020], include_unreviewed=False
+        )
+
+        year_data = reviewed_only["categories"][0]["yearly_data"]["2020"]
+        assert year_data["months_with_data"] == 2
+        assert year_data["monthly_avg"] == pytest.approx(-100.0)
+
+    def test_unreviewed_summary_uses_the_aligned_comparison_window(self, db_session):
+        current_year = date.today().year
+        db_session.add(CategoryORM(id=1, name="groceries", type="spending", budget=0.0, is_active=True))
+        _txn(db_session, "now", date(current_year, 1, 15), -100.0, reviewed=True)
+        _txn(db_session, "inside", date(current_year - 1, 1, 10), -40.0, reviewed=False)
+        _txn(db_session, "outside", date(current_year - 1, 12, 20), -70.0, reviewed=False)
+        db_session.commit()
+
+        result = AnalyticsService.get_year_over_year_comparison(db_session, years=[current_year - 1, current_year])
+
+        assert result["summary"]["comparison_end_date"] == date(current_year, 1, 15).isoformat()
+        assert result["unreviewed"]["count"] == 1
+        assert result["unreviewed"]["amount"] == pytest.approx(40.0)
+        assert result["unreviewed"]["date_range"]["end_date"] == date(current_year, 1, 15).isoformat()

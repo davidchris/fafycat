@@ -26,6 +26,7 @@ def _summary_to_dict(summary: CategorizationSummary) -> dict:
         "predictions_made": summary.total,
         "auto_accepted": summary.auto_accepted,
         "needs_review": summary.needs_review,
+        "already_reviewed": summary.already_reviewed,
     }
 
 

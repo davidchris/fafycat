@@ -290,3 +290,21 @@ def test_predict_new_with_no_matching_ids_returns_empty_summary(session: Session
 
     assert summary.total == 0
     assert summary == CategorizationSummary()
+
+
+def test_reviewed_transaction_keeps_its_category_and_gets_a_prediction(session: Session) -> None:
+    """A labelled import is predicted for the Audit Trail but never re-bucketed."""
+    session.add(CategoryORM(id=2, name="rent", type="spending", budget=0.0, is_active=True))
+    session.add(make_txn("labelled", category_id=2, is_reviewed=True))
+    session.add(make_txn("fresh"))
+    session.commit()
+
+    summary, _ = predict_unpredicted(session, FakeCategorizer({"labelled": 0.99, "fresh": 0.99}), threshold=0.5)
+
+    labelled = session.query(TransactionORM).filter(TransactionORM.name == "labelled").one()
+    assert labelled.category_id == 2
+    assert labelled.is_reviewed is True
+    assert labelled.review_priority != "auto_accepted"
+    assert labelled.predicted_category_id == 1
+    assert labelled.confidence_score == 0.99
+    assert (summary.auto_accepted, summary.already_reviewed, summary.total) == (1, 1, 2)

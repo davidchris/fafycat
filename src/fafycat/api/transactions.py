@@ -203,9 +203,9 @@ async def bulk_approve_transactions(
 ) -> dict:
     """Bulk approve unreviewed transactions by trusting ML predictions.
 
-    Sets is_reviewed=True and category_id=predicted_category_id for transactions
-    matching the given review_priority (default: quality_check) that have not
-    yet been reviewed.
+    Sets is_reviewed=True and category_id=predicted_category_id for unreviewed
+    transactions matching ``review_priority`` and/or ``min_confidence``. With
+    neither given, the Auto-approve Threshold is the confidence floor.
     """
     return TransactionService.bulk_approve(
         session=db, review_priority=request.review_priority, min_confidence=request.min_confidence
