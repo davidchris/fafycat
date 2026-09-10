@@ -1,13 +1,30 @@
-"""Rule-based merchant mapping system."""
+"""Rule-based merchant mapping system.
 
+A Merchant Rule maps a cleaned merchant name to a category. Rules are derived
+data: rebuilt from reviewed transactions on every training run, never edited
+by hand. A rule only decides a prediction when it matches exactly and its
+confidence reaches ``RULE_OVERRIDE_CONFIDENCE``.
+"""
+
+from collections import Counter, defaultdict
 from datetime import date, datetime
 from typing import cast
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..core.database import CategoryORM, MerchantMappingORM, TransactionORM
 from ..core.models import MerchantMapping
 from .feature_extractor import MerchantCleaner
+
+RULE_OVERRIDE_CONFIDENCE = 0.95
+"""Minimum rule confidence for a Merchant Rule to decide a prediction."""
+
+RULE_MIN_SHARE = 0.8
+"""Minimum share of one category among a merchant's reviews to form a rule."""
+
+RULE_MAX_CONFIDENCE = 0.98
+"""Rules never claim certainty; leaves room for the reviewer to disagree."""
 
 
 class MerchantMapper:
@@ -72,72 +89,66 @@ class MerchantMapper:
         overlap = len(merchant_words & pattern_words)
         return overlap >= min(2, len(pattern_words))
 
-    def add_mapping(self, merchant_pattern: str, category_id: int, confidence: float = 1.0) -> None:
-        """Add new merchant mapping."""
-        clean_pattern = self.merchant_cleaner.clean(merchant_pattern)
+    def update_from_transactions(self, min_occurrences: int = 3) -> None:
+        """Rebuild all Merchant Rules from reviewed transactions.
 
-        # Check if mapping already exists
-        existing = (
-            self.session.query(MerchantMappingORM).filter(MerchantMappingORM.merchant_pattern == clean_pattern).first()
-        )
+        Groups reviews by cleaned merchant pattern. A pattern becomes a rule
+        when it has at least ``min_occurrences`` reviews and one category
+        holds at least ``RULE_MIN_SHARE`` of them. Rules that no longer meet
+        the bar are deleted, so a fixed cleaner or changed reviews never
+        leave stale rules behind.
+        """
+        desired = self._derive_rules(min_occurrences)
 
-        if existing:
-            # Update existing mapping
-            existing.category_id = category_id
-            existing.confidence = confidence
-            existing.occurrence_count += 1
-            existing.last_seen = date.today()
-        else:
-            # Create new mapping
-            mapping = MerchantMappingORM(
-                merchant_pattern=clean_pattern, category_id=category_id, confidence=confidence, last_seen=date.today()
-            )
-            self.session.add(mapping)
+        existing = {str(m.merchant_pattern): m for m in self.session.query(MerchantMappingORM).all()}
+        for pattern, mapping in existing.items():
+            if pattern not in desired:
+                self.session.delete(mapping)
+        for pattern, (category_id, confidence, total, seen) in desired.items():
+            mapping = existing.get(pattern)
+            if mapping is None:
+                mapping = MerchantMappingORM(merchant_pattern=pattern)
+                self.session.add(mapping)
+            mapping.category_id = category_id
+            mapping.confidence = confidence
+            mapping.occurrence_count = total
+            mapping.last_seen = seen
 
         self.session.commit()
+        self._load_mappings()
 
-        # Update cache
-        self._cache[clean_pattern] = {"category_id": category_id, "confidence": confidence}
-
-    def update_from_transactions(self, min_occurrences: int = 3) -> None:
-        """Update merchant mappings from confirmed transactions."""
-        from sqlalchemy import text
-
-        # Find merchants with consistent categorization
-        query = text("""
-        SELECT
-            t.name,
-            t.category_id,
-            COUNT(*) as occurrence_count,
-            MAX(t.date) as last_seen
-        FROM transactions t
-        WHERE t.category_id IS NOT NULL
-          AND t.is_reviewed = true
-        GROUP BY t.name, t.category_id
-        HAVING COUNT(*) >= :min_occurrences
-        """)
-
-        result = self.session.execute(query, {"min_occurrences": min_occurrences})
-
-        for row in result:
-            merchant_name, category_id, count, last_seen = row
-            clean_merchant = self.merchant_cleaner.clean(merchant_name)
-
-            if not clean_merchant:
-                continue
-
-            # Calculate confidence based on consistency
-            total_for_merchant = (
-                self.session.query(TransactionORM)
-                .filter(TransactionORM.name == merchant_name, TransactionORM.category_id.isnot(None))
-                .count()
+    def _derive_rules(self, min_occurrences: int) -> dict[str, tuple[int, float, int, date]]:
+        """Compute the rule set: pattern -> (category_id, confidence, reviews, last_seen)."""
+        rows = (
+            self.session.query(
+                TransactionORM.name,
+                TransactionORM.category_id,
+                func.count(TransactionORM.id),
+                func.max(TransactionORM.date),
             )
+            .filter(TransactionORM.category_id.isnot(None), TransactionORM.is_reviewed.is_(True))
+            .group_by(TransactionORM.name, TransactionORM.category_id)
+            .all()
+        )
 
-            confidence = min(0.98, count / total_for_merchant)
+        per_pattern: dict[str, Counter[int]] = defaultdict(Counter)
+        last_seen: dict[str, date] = {}
+        for raw_name, category_id, count, seen in rows:
+            pattern = self.merchant_cleaner.clean(str(raw_name))
+            if not pattern:
+                continue
+            per_pattern[pattern][int(category_id)] += int(count)
+            seen_date = seen if isinstance(seen, date) else date.fromisoformat(str(seen)[:10])
+            last_seen[pattern] = max(seen_date, last_seen.get(pattern, seen_date))
 
-            # Only add high-confidence mappings
-            if confidence >= 0.8:
-                self.add_mapping(clean_merchant, category_id, confidence)
+        desired: dict[str, tuple[int, float, int, date]] = {}
+        for pattern, counts in per_pattern.items():
+            total = sum(counts.values())
+            category_id, top = counts.most_common(1)[0]
+            share = top / total
+            if total >= min_occurrences and share >= RULE_MIN_SHARE:
+                desired[pattern] = (category_id, min(RULE_MAX_CONFIDENCE, share), total, last_seen[pattern])
+        return desired
 
     def get_mapping_suggestions(self, merchant_name: str) -> list[dict]:
         """Get category suggestions for a merchant based on similar merchants."""

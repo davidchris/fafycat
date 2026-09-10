@@ -15,10 +15,6 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeSidebar();
     initializeHTMX();
     initializeFormHandlers();
-
-    if (window.location.pathname === '/review') {
-        initializeReviewPage();
-    }
 });
 
 // Sidebar toggle
@@ -117,19 +113,6 @@ function initializeHTMX() {
     document.addEventListener('htmx:sendError', function() {
         showNotification('Network error — check your connection', 'error');
     });
-}
-
-// Review page
-function initializeReviewPage() {
-    const thresholdSlider = document.querySelector('input[name="confidence_threshold"]');
-    const thresholdDisplay = document.getElementById('threshold-display');
-
-    if (thresholdSlider && thresholdDisplay) {
-        thresholdSlider.addEventListener('input', function() {
-            const value = Math.round(parseFloat(this.value) * 100);
-            thresholdDisplay.textContent = `Show transactions with confidence below ${value}%`;
-        });
-    }
 }
 
 // Toast notification system

@@ -1,14 +1,7 @@
 """Unit tests for the Prediction Pipeline module.
 
 Drives the entry-point verbs with a fake Categorizer (scripted confidence
-scores) on an in-memory database. The real Strategic Selection implementation
-is used, not mocked.
-
-Determinism note: ActiveLearningSelector's uncertainty strategy random-samples
-from the medium (0.7-0.9) and high (>0.9) confidence pools. All scripted
-scores stay below 0.7 so Strategic Selection deterministically picks the
-``int(0.7 * max_items)`` lowest-confidence transactions. Threshold overrides
-steer which Review Priority buckets those selections land in.
+scores) on an in-memory database.
 """
 
 from datetime import date, datetime
@@ -30,6 +23,8 @@ from fafycat.ml.prediction_pipeline import (
 
 class FakeCategorizer:
     """Categorizer test double with scripted confidence scores keyed by transaction name."""
+
+    model_id = "fake-model"
 
     def __init__(self, scores_by_name: dict[str, float], predicted_category_id: int = 1):
         self.scores_by_name = scores_by_name
@@ -100,27 +95,25 @@ def test_predict_unpredicted_auto_accepts_confident_prediction(session: Session)
     assert txn.is_reviewed is True
 
 
-# With two transactions max_items=2 and n_uncertain=int(1.4)=1: exactly the
-# lowest-confidence transaction is strategically selected.
 BUCKETING_MATRIX = [
     # (scores, threshold, expected buckets by name)
     pytest.param(
         {"low": 0.30, "confident": 0.60},
         0.50,
-        {"low": "high", "confident": "auto_accepted"},
-        id="selected-below-threshold-is-high, unselected-at-or-above-auto-accepts",
+        {"low": "standard", "confident": "auto_accepted"},
+        id="below-threshold-needs-review, at-or-above-auto-accepts",
     ),
     pytest.param(
-        {"low": 0.30, "mid": 0.40},
+        {"low": 0.30, "mid": 0.40, "lowest": 0.05},
         0.50,
-        {"low": "high", "mid": "standard"},
-        id="unselected-below-threshold-is-standard",
+        {"low": "standard", "mid": "standard", "lowest": "standard"},
+        id="every-below-threshold-transaction-needs-review-no-cap",
     ),
     pytest.param(
         {"mid": 0.40, "confident": 0.60},
         0.35,
-        {"mid": "quality_check", "confident": "auto_accepted"},
-        id="selected-at-or-above-threshold-is-quality-check",
+        {"mid": "auto_accepted", "confident": "auto_accepted"},
+        id="all-at-or-above-threshold-auto-accept",
     ),
 ]
 
@@ -129,7 +122,7 @@ BUCKETING_MATRIX = [
 def test_bucketing_matrix(
     session: Session, scores: dict[str, float], threshold: float, expected: dict[str, str]
 ) -> None:
-    """All four Review Priority outcomes fall out of confidence x Strategic Selection."""
+    """Review Priority is a pure function of confidence vs. the Auto-approve Threshold."""
     for name in scores:
         session.add(make_txn(name))
     session.commit()
@@ -142,9 +135,9 @@ def test_bucketing_matrix(
         assert txn.review_priority == bucket, f"{name}: expected {bucket}, got {txn.review_priority}"
         assert txn.is_reviewed is (bucket == "auto_accepted")
 
-    expected_counts = {bucket: list(expected.values()).count(bucket) for bucket in expected.values()}
-    for bucket, count in expected_counts.items():
-        assert getattr(summary, bucket) == count
+    buckets = list(expected.values())
+    assert summary.auto_accepted == buckets.count("auto_accepted")
+    assert summary.needs_review == buckets.count("standard")
     assert summary.total == len(scores)
 
 
@@ -227,7 +220,7 @@ def test_threshold_resolves_from_db_setting_when_not_overridden(session: Session
     above = session.query(TransactionORM).filter(TransactionORM.name == "just-above").one()
     assert above.review_priority == "auto_accepted"
     below = session.query(TransactionORM).filter(TransactionORM.name == "just-below").one()
-    assert below.review_priority == "high"  # selected as the lowest-confidence item
+    assert below.review_priority == "standard"
 
 
 def test_repredict_selects_only_unreviewed_with_existing_prediction(session: Session) -> None:

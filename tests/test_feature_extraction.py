@@ -18,7 +18,10 @@ class TestMerchantCleaner:
         test_cases = [
             ("EDEKA Schmitt, Berlin", "EDEKA SCHMITT,"),
             ("REWE//Berlin/DE 2024.01.01", "REWE"),
-            ("Amazon *Marketplace", "AMAZON"),
+            ("Amazon *Marketplace", "AMAZON MARKETPLACE"),
+            # Aggregators: the part after "*" is the real merchant and must survive.
+            ("VISA PayPal *Spotify", "VISA PAYPAL SPOTIFY"),
+            ("VISA SumUp *Espresso Perfetto", "VISA SUMUP ESPRESSO PERFETTO"),
             ("McDonald's München", "MCDONALD'S"),
             ("Shell Tankstelle//Hamburg", "SHELL TANKSTELLE"),
         ]

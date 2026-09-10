@@ -5,7 +5,7 @@ from fasthtml.common import Button, Div, Nav, P, Span
 # Every filter the /api/transactions/table endpoint accepts. Pagination must
 # carry the full set, otherwise changing pages silently resets filters (#48).
 FILTER_HX_INCLUDE = (
-    "[name='status']:checked, [name='confidence_lt'], [name='search'], "
+    "[name='status']:checked, [name='search'], "
     "[name='sort_by'], [name='sort_order'], [name='category_filter'], "
     "[name='start_date'], [name='end_date']"
 )

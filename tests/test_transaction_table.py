@@ -144,7 +144,6 @@ class TestPaginationKeepsFilters:
 
     FILTER_NAMES = (
         "status",
-        "confidence_lt",
         "search",
         "sort_by",
         "sort_order",

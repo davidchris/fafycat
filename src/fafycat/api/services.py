@@ -5,10 +5,11 @@ import statistics
 from datetime import date, datetime
 from typing import Any, cast
 
-from sqlalchemy import and_, func, or_, update
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from fafycat.api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
+from fafycat.core.audit_trail import ReviewActor, record_review_event
 from fafycat.core.database import BudgetPlanORM, CategoryORM, TransactionORM
 from fafycat.core.database import get_categories as db_get_categories
 from fafycat.core.models import CategoryType, ReviewPriority
@@ -17,6 +18,10 @@ from fafycat.core.models import CategoryType, ReviewPriority
 def _to_int(value: Any) -> int:
     """Cast an ORM column value to int."""
     return int(value)
+
+
+def _to_int_or_none(value: Any) -> int | None:
+    return None if value is None else int(value)
 
 
 def _to_str(value: Any) -> str:
@@ -152,13 +157,7 @@ class TransactionService:
             )
 
         if review_priority is not None:
-            if review_priority == "high_priority":
-                # Show both high priority and quality check transactions
-                query = query.filter(
-                    TransactionORM.review_priority.in_([ReviewPriority.HIGH, ReviewPriority.QUALITY_CHECK])
-                )
-            else:
-                query = query.filter(TransactionORM.review_priority == review_priority)
+            query = query.filter(TransactionORM.review_priority == review_priority)
 
         if category:
             if category == "uncategorized":
@@ -270,6 +269,13 @@ class TransactionService:
             return None
 
         # Update transaction
+        record_review_event(
+            session,
+            transaction,
+            actor=ReviewActor.USER_REVIEW,
+            from_category_id=_to_int_or_none(transaction.category_id),
+            to_category_id=_to_int(category.id),
+        )
         transaction.category_id = category.id
         transaction.is_reviewed = update.is_reviewed
         session.commit()
@@ -301,7 +307,7 @@ class TransactionService:
         min_confidence: float | None = None,
     ) -> dict:
         """Bulk approve transactions by trusting their ML predictions."""
-        query = session.query(TransactionORM.id).filter(
+        query = session.query(TransactionORM).filter(
             TransactionORM.review_priority == review_priority,
             TransactionORM.is_reviewed == False,  # noqa: E712
             TransactionORM.predicted_category_id.is_not(None),
@@ -310,14 +316,18 @@ class TransactionService:
         if min_confidence is not None:
             query = query.filter(TransactionORM.confidence_score >= min_confidence)
 
-        approved_ids = [_to_str(row[0]) for row in query.all()]
-
-        if approved_ids:
-            session.execute(
-                update(TransactionORM)
-                .where(TransactionORM.id.in_(approved_ids))
-                .values(category_id=TransactionORM.predicted_category_id, is_reviewed=True)
+        approved_ids: list[str] = []
+        for txn in query.all():
+            record_review_event(
+                session,
+                txn,
+                actor=ReviewActor.BULK_APPROVE,
+                from_category_id=_to_int_or_none(txn.category_id),
+                to_category_id=_to_int(txn.predicted_category_id),
             )
+            txn.category_id = txn.predicted_category_id
+            txn.is_reviewed = True
+            approved_ids.append(_to_str(txn.id))
 
         session.commit()
         return {"approved": len(approved_ids), "transaction_ids": approved_ids}

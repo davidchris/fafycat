@@ -12,9 +12,11 @@ from sqlalchemy.orm import Session
 
 from ..core.config import MLConfig
 from ..core.database import CategoryORM, ModelMetadataORM, TransactionORM
-from ..core.models import TransactionInput, TransactionPrediction
+from ..core.models import PredictionDetail, TransactionInput, TransactionPrediction
 from .categorizer import TransactionCategorizer
 from .cross_validation import StratifiedKFoldValidator
+from .merchant_mapper import RULE_OVERRIDE_CONFIDENCE
+from .model_identity import model_fingerprint, probs_by_category
 from .naive_bayes_classifier import NaiveBayesTextClassifier
 
 
@@ -41,6 +43,7 @@ class EnsembleCategorizer:
         self.is_trained = False
         self.cv_results: dict[str, Any] | None = None
         self.model_version = "1.0-ensemble"
+        self.model_id = "untrained"
 
     def prepare_training_data(self) -> tuple[list[TransactionInput], np.ndarray]:
         """Prepare training data from database transactions."""
@@ -266,69 +269,59 @@ class EnsembleCategorizer:
     def predict_with_confidence(self, transactions: list[TransactionInput]) -> list[TransactionPrediction]:
         """Ensemble prediction combining LightGBM + Naive Bayes.
 
-        Uses batch inference for all transactions not resolved by merchant
-        mapping, avoiding per-transaction model calls.
+        Both components score every transaction in one batch. A Merchant Rule
+        that matches at or above ``RULE_OVERRIDE_CONFIDENCE`` decides instead,
+        but every component's probabilities are captured for the Audit Trail.
         """
         if not self.is_trained:
             raise ValueError("Ensemble must be trained before prediction")
+        if not transactions:
+            return []
 
-        predictions: list[TransactionPrediction | None] = [None] * len(transactions)
-        ml_indices: list[int] = []
-        ml_transactions: list[TransactionInput] = []
+        nb_classes = self.nb_component.classes_
+        assert nb_classes is not None, "NB component must be trained before prediction"
+        lgbm_probas = self._align_probas(
+            self.lgbm_component.predict_proba(transactions), self.lgbm_component.classes_, nb_classes
+        )
+        nb_probas = self.nb_component.predict_proba(transactions)
+        lgbm_weight, nb_weight = self.ensemble_weights["lgbm"], self.ensemble_weights["nb"]
+        combined = lgbm_weight * lgbm_probas + nb_weight * nb_probas
+        class_ids = [int(c) for c in nb_classes]
 
-        # Phase 1: Merchant mapper (fast, rule-based)
+        predictions: list[TransactionPrediction] = []
         for i, txn in enumerate(transactions):
-            merchant_match = self.lgbm_component.merchant_mapper.get_category(txn.name)
-            if merchant_match and merchant_match.confidence >= 0.95:
-                predictions[i] = TransactionPrediction(
-                    transaction_id=txn.generate_id(),
-                    predicted_category_id=merchant_match.category_id,
-                    confidence_score=merchant_match.confidence,
-                    feature_contributions={"merchant_rule": 1.0},
-                )
+            rule = self.lgbm_component.merchant_mapper.get_category(txn.name)
+            detail = PredictionDetail(
+                source="ensemble",
+                rule_pattern=rule.merchant_pattern if rule else None,
+                rule_category_id=rule.category_id if rule else None,
+                rule_confidence=rule.confidence if rule else None,
+                lgbm_probs=probs_by_category(class_ids, lgbm_probas[i]),
+                nb_probs=probs_by_category(class_ids, nb_probas[i]),
+                ensemble_probs=probs_by_category(class_ids, combined[i]),
+                lgbm_weight=lgbm_weight,
+                nb_weight=nb_weight,
+            )
+            if rule and rule.confidence >= RULE_OVERRIDE_CONFIDENCE:
+                detail.source = "merchant_rule"
+                category_id, confidence = rule.category_id, rule.confidence
+                contributions = {"merchant_rule": 1.0}
             else:
-                ml_indices.append(i)
-                ml_transactions.append(txn)
+                pred_idx = int(np.argmax(combined[i]))
+                category_id, confidence = class_ids[pred_idx], float(combined[i][pred_idx])
+                contributions = self._combine_feature_contributions(lgbm_probas[i], nb_probas[i])
 
-        # Phase 2: Batch ML prediction for remaining
-        if ml_transactions:
-            # Batch predict both components
-            lgbm_probas_all = self.lgbm_component.predict_proba(ml_transactions)
-            nb_probas_all = self.nb_component.predict_proba(ml_transactions)
-
-            # Align LightGBM probabilities to NB class order (batch)
-            nb_classes = self.nb_component.classes_
-            assert nb_classes is not None, "NB component must be trained before prediction"
-            lgbm_probas_aligned = self._align_probas(lgbm_probas_all, self.lgbm_component.classes_, nb_classes)
-
-            # Combine predictions using learned weights
-            combined_probas_all = (
-                self.ensemble_weights["lgbm"] * lgbm_probas_aligned + self.ensemble_weights["nb"] * nb_probas_all
+            predictions.append(
+                TransactionPrediction(
+                    transaction_id=txn.generate_id(),
+                    predicted_category_id=category_id,
+                    confidence_score=confidence,
+                    feature_contributions=contributions,
+                    detail=detail,
+                )
             )
 
-            for j, idx in enumerate(ml_indices):
-                combined_probas = combined_probas_all[j]
-                pred_idx = np.argmax(combined_probas)
-                confidence = float(combined_probas[pred_idx])
-
-                # Map back to category ID
-                if hasattr(self.nb_component, "classes_") and self.nb_component.classes_ is not None:
-                    predicted_category_id = int(self.nb_component.classes_[pred_idx])
-                elif self.lgbm_component.classes_ is not None:
-                    predicted_category_id = int(self.lgbm_component.classes_[np.argmax(lgbm_probas_all[j])])
-                else:
-                    raise ValueError("No classes_ available — was the model trained?")
-
-                feature_contributions = self._combine_feature_contributions(lgbm_probas_aligned[j], nb_probas_all[j])
-
-                predictions[idx] = TransactionPrediction(
-                    transaction_id=ml_transactions[j].generate_id(),
-                    predicted_category_id=predicted_category_id,
-                    confidence_score=confidence,
-                    feature_contributions=feature_contributions,
-                )
-
-        return [p for p in predictions if p is not None]
+        return predictions
 
     def _combine_feature_contributions(self, lgbm_probas: np.ndarray, nb_probas: np.ndarray) -> dict[str, float]:
         """Combine feature contributions from both models using global importances."""
@@ -415,6 +408,7 @@ class EnsembleCategorizer:
 
         with open(model_path, "wb") as f:
             pickle.dump(ensemble_data, f)
+        self.model_id = model_fingerprint(model_path)
 
     def load_model(self, model_path: Path) -> None:
         """Load trained ensemble model from disk."""
@@ -470,6 +464,7 @@ class EnsembleCategorizer:
         self.ensemble_weights = ensemble_data["ensemble_weights"]
         self.cv_results = ensemble_data["cv_results"]
         self.model_version = ensemble_data["model_version"]
+        self.model_id = model_fingerprint(model_path)
 
         self.is_trained = True
         self.classes_ = self.lgbm_component.classes_

@@ -212,7 +212,7 @@ class TestEnrichedUploadResponse:
     """Tests that upload response includes categorization summary fields."""
 
     def test_upload_response_has_categorization_fields(self, test_client, db_session):
-        """Upload CSV response contains auto_accepted, needs_review, quality_check fields."""
+        """Upload CSV response contains auto_accepted and needs_review fields."""
         import tempfile
         from pathlib import Path
 
@@ -230,7 +230,6 @@ class TestEnrichedUploadResponse:
             # These fields must be present (even if 0)
             assert "auto_accepted" in data
             assert "needs_review" in data
-            assert "quality_check" in data
             assert "predictions_made" in data
         finally:
             csv_path.unlink()

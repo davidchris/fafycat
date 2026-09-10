@@ -26,7 +26,6 @@ def _summary_to_dict(summary: CategorizationSummary) -> dict:
         "predictions_made": summary.total,
         "auto_accepted": summary.auto_accepted,
         "needs_review": summary.needs_review,
-        "quality_check": summary.quality_check,
     }
 
 
@@ -241,6 +240,8 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
             new_count=new_count,
             duplicate_count=duplicate_count,
             predictions_made=cat_summary["predictions_made"],
+            auto_accepted=cat_summary["auto_accepted"],
+            needs_review=cat_summary["needs_review"],
         )
 
     except Exception as e:
@@ -251,7 +252,13 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
 
 
 def _render_upload_success(
-    filename: str, rows_processed: int, new_count: int, duplicate_count: int, predictions_made: int
+    filename: str,
+    rows_processed: int,
+    new_count: int,
+    duplicate_count: int,
+    predictions_made: int,
+    auto_accepted: int = 0,
+    needs_review: int = 0,
 ) -> str:
     """Render success message HTML for HTMX response."""
     alert_class = "alert-success" if new_count > 0 else "alert-info"
@@ -266,8 +273,8 @@ def _render_upload_success(
     if predictions_made > 0:
         prediction_info = f"""
             <div class="alert alert-ml">
-                <p>🤖 ML Predictions & Smart Review</p>
-                <p>{predictions_made} transactions got automatic predictions. High-confidence predictions were auto-accepted, while uncertain ones are prioritized for review.</p>
+                <p>🤖 ML Predictions</p>
+                <p>{predictions_made} transactions got predictions: {auto_accepted} auto-accepted, {needs_review} need your review.</p>
             </div>
         """
     elif new_count > 0:

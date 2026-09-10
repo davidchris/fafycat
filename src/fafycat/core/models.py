@@ -17,7 +17,12 @@ class CategoryType(StrEnum):
 
 
 class ReviewPriority(StrEnum):
-    """Review priority levels for transactions after ML prediction."""
+    """Review Priority a transaction gets after prediction.
+
+    The Prediction Pipeline writes only ``STANDARD`` (needs review) and
+    ``AUTO_ACCEPTED``. ``HIGH`` and ``QUALITY_CHECK`` are legacy values from
+    the retired Strategic Selection step; older rows may still carry them.
+    """
 
     STANDARD = "standard"
     HIGH = "high"
@@ -91,6 +96,26 @@ class Transaction(BaseModel):
     import_batch: str
 
 
+class PredictionDetail(BaseModel):
+    """Everything each component of the Categorizer said about one transaction.
+
+    Captured so the Audit Trail can show what the Merchant Rule, LightGBM, and
+    Naive Bayes each proposed, how they were weighted, and which one decided.
+    Probability maps are keyed by category id.
+    """
+
+    source: str
+    """Which component decided: ``merchant_rule``, ``ensemble``, or ``lgbm``."""
+    rule_pattern: str | None = None
+    rule_category_id: int | None = None
+    rule_confidence: float | None = None
+    lgbm_probs: dict[int, float] = Field(default_factory=dict)
+    nb_probs: dict[int, float] = Field(default_factory=dict)
+    ensemble_probs: dict[int, float] = Field(default_factory=dict)
+    lgbm_weight: float | None = None
+    nb_weight: float | None = None
+
+
 class TransactionPrediction(BaseModel):
     """ML prediction result for a transaction."""
 
@@ -98,6 +123,7 @@ class TransactionPrediction(BaseModel):
     predicted_category_id: int
     confidence_score: float = Field(ge=0.0, le=1.0)
     feature_contributions: dict[str, float]
+    detail: PredictionDetail | None = None
 
 
 class MerchantMapping(BaseModel):

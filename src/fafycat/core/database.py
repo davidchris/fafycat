@@ -155,6 +155,58 @@ class ModelMetadataORM(Base):
     is_active = Column(Boolean, default=False)
 
 
+class PredictionEventORM(Base):
+    """One Prediction Event: what every model component said in one pipeline run.
+
+    Append-only. Probability columns hold JSON objects keyed by category id.
+    """
+
+    __tablename__ = "prediction_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    transaction_id = Column(String(16), ForeignKey("transactions.id"), nullable=False)
+    created_at = Column(DateTime, default=_utc_now, nullable=False)
+    trigger = Column(String(32), nullable=False)  # import, batch_unpredicted, repredict
+    model_id = Column(String(32), nullable=False)  # fingerprint of the model file
+    threshold = Column(Float, nullable=False)
+    decision = Column(String(20), nullable=False)  # ReviewPriority value
+    source = Column(String(20), nullable=False)  # merchant_rule, ensemble, lgbm
+    final_category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    final_confidence = Column(Float, nullable=False)
+    rule_pattern = Column(Text)
+    rule_category_id = Column(Integer, ForeignKey("categories.id"))
+    rule_confidence = Column(Float)
+    lgbm_weight = Column(Float)
+    nb_weight = Column(Float)
+    lgbm_probs = Column(Text)  # JSON {category_id: prob}
+    nb_probs = Column(Text)  # JSON
+    ensemble_probs = Column(Text)  # JSON
+    feature_contributions = Column(Text)  # JSON
+
+    __table_args__ = (Index("idx_prediction_events_transaction", "transaction_id", "created_at"),)
+
+
+class ReviewEventORM(Base):
+    """One Review Event: a category being set on a transaction, by whom.
+
+    Append-only. Together with Prediction Events this is the Audit Trail.
+    """
+
+    __tablename__ = "review_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    transaction_id = Column(String(16), ForeignKey("transactions.id"), nullable=False)
+    created_at = Column(DateTime, default=_utc_now, nullable=False)
+    actor = Column(String(32), nullable=False)  # ReviewActor value
+    from_category_id = Column(Integer, ForeignKey("categories.id"))
+    to_category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
+    predicted_category_id = Column(Integer, ForeignKey("categories.id"))
+    confidence_score = Column(Float)
+    note = Column(Text)
+
+    __table_args__ = (Index("idx_review_events_transaction", "transaction_id", "created_at"),)
+
+
 class DatabaseManager:
     """Database connection and session management."""
 

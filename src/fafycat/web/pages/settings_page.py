@@ -389,15 +389,12 @@ def render_empty_categories_state(ml_status):
             .then(data => {{
                 if (data.status === 'success') {{
                     const autoAccepted = data.auto_accepted || 0;
-                    const highPriority = data.high_priority_review || 0;
-                    const standardReview = data.standard_review || 0;
+                    const needsReview = data.needs_review || 0;
 
                     let message = `Re-predicted ${{data.predictions_made}} transactions!\\n\\n`;
-                    message += `Smart Review Assignment:\\n`;
-                    message += `- ${{autoAccepted}} auto-accepted (high confidence)\\n`;
-                    message += `- ${{highPriority}} high priority for review\\n`;
-                    message += `- ${{standardReview}} standard review needed\\n\\n`;
-                    message += `Check the Review page to see transactions prioritized for your attention!`;
+                    message += `- ${{autoAccepted}} auto-accepted (at or above the auto-approve threshold)\\n`;
+                    message += `- ${{needsReview}} need your review\\n\\n`;
+                    message += `Open the Review page to work through them, lowest confidence first.`;
 
                     alert(message);
                     location.reload();
@@ -426,15 +423,12 @@ def render_empty_categories_state(ml_status):
             .then(data => {{
                 if (data.status === 'success') {{
                     const autoAccepted = data.auto_accepted || 0;
-                    const highPriority = data.high_priority_review || 0;
-                    const standardReview = data.standard_review || 0;
+                    const needsReview = data.needs_review || 0;
 
                     let message = `Predicted ${{data.predictions_made}} transactions!\\n\\n`;
-                    message += `Smart Review Assignment:\\n`;
-                    message += `- ${{autoAccepted}} auto-accepted (high confidence)\\n`;
-                    message += `- ${{highPriority}} high priority for review\\n`;
-                    message += `- ${{standardReview}} standard review needed\\n\\n`;
-                    message += `Check the Review page to see transactions prioritized for your attention!`;
+                    message += `- ${{autoAccepted}} auto-accepted (at or above the auto-approve threshold)\\n`;
+                    message += `- ${{needsReview}} need your review\\n\\n`;
+                    message += `Open the Review page to work through them, lowest confidence first.`;
 
                     alert(message);
                     location.reload();
@@ -852,15 +846,12 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             .then(data => {
                 if (data.status === 'success') {
                     const autoAccepted = data.auto_accepted || 0;
-                    const highPriority = data.high_priority_review || 0;
-                    const standardReview = data.standard_review || 0;
+                    const needsReview = data.needs_review || 0;
 
                     let message = `Re-predicted ${data.predictions_made} transactions!\\n\\n`;
-                    message += `Smart Review Assignment:\\n`;
-                    message += `- ${autoAccepted} auto-accepted (high confidence)\\n`;
-                    message += `- ${highPriority} high priority for review\\n`;
-                    message += `- ${standardReview} standard review needed\\n\\n`;
-                    message += `Check the Review page to see transactions prioritized for your attention!`;
+                    message += `- ${autoAccepted} auto-accepted (at or above the auto-approve threshold)\\n`;
+                    message += `- ${needsReview} need your review\\n\\n`;
+                    message += `Open the Review page to work through them, lowest confidence first.`;
 
                     alert(message);
                     location.reload();
@@ -889,15 +880,12 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             .then(data => {
                 if (data.status === 'success') {
                     const autoAccepted = data.auto_accepted || 0;
-                    const highPriority = data.high_priority_review || 0;
-                    const standardReview = data.standard_review || 0;
+                    const needsReview = data.needs_review || 0;
 
                     let message = `Predicted ${data.predictions_made} transactions!\\n\\n`;
-                    message += `Smart Review Assignment:\\n`;
-                    message += `- ${autoAccepted} auto-accepted (high confidence)\\n`;
-                    message += `- ${highPriority} high priority for review\\n`;
-                    message += `- ${standardReview} standard review needed\\n\\n`;
-                    message += `Check the Review page to see transactions prioritized for your attention!`;
+                    message += `- ${autoAccepted} auto-accepted (at or above the auto-approve threshold)\\n`;
+                    message += `- ${needsReview} need your review\\n\\n`;
+                    message += `Open the Review page to work through them, lowest confidence first.`;
 
                     alert(message);
                     location.reload();
@@ -1541,7 +1529,7 @@ def render_ml_training_section(ml_status):
                         <p class="font-medium">Model is loaded and working!</p>
                         <p class="mt-1">Trained on {classes_count} categories &bull; {
             unpredicted_count
-        } without predictions &bull; {repredictable_count} pending review</p>
+        } without predictions &bull; {repredictable_count} pending review &bull; <a href="/rules">Merchant rules</a></p>
                     </div>
                     <div class="mt-4 flex gap-3">
                         <button

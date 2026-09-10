@@ -4,11 +4,12 @@ import csv
 import uuid
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from ..core.audit_trail import ReviewActor, record_review_event
 from ..core.database import CategoryORM, TransactionORM
 from ..core.models import TransactionInput
 from .dedup import find_fuzzy_duplicate, keep_preferred_fields, sort_direct_rows_first
@@ -245,6 +246,14 @@ class CSVProcessor:
 
                 if category:
                     db_txn.category_id = category.id
+                    self.session.add(db_txn)
+                    record_review_event(
+                        self.session,
+                        db_txn,
+                        actor=ReviewActor.IMPORT_LABEL,
+                        from_category_id=None,
+                        to_category_id=int(cast(int, category.id)),
+                    )
 
             self.session.add(db_txn)
             # Session runs with autoflush=False: flush so later rows in this

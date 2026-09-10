@@ -1,6 +1,23 @@
 """Transaction table renderer shared by the review page and HTMX endpoints."""
 
-from fasthtml.common import Button, Div, Form, NotStr, Option, P, Select, Span, Table, Tbody, Td, Th, Thead, Tr, to_xml
+from fasthtml.common import (
+    A,
+    Button,
+    Div,
+    Form,
+    NotStr,
+    Option,
+    P,
+    Select,
+    Span,
+    Table,
+    Tbody,
+    Td,
+    Th,
+    Thead,
+    Tr,
+    to_xml,
+)
 
 from fafycat.web.components.pagination import create_full_pagination
 
@@ -38,7 +55,8 @@ def _row(tx, categories) -> Tr:
     return Tr(
         Td(str(tx.date)),
         Td(
-            str(tx.description),
+            Div(str(tx.description)),
+            A("trail", href=f"/transactions/{tx.id}/trail", cls="text-secondary text-sm", title="Why this category?"),
             style="max-width: 24rem; overflow-wrap: anywhere; word-break: break-word;",
         ),
         Td(f"€{tx.amount:,.2f}", cls="amount-cell"),

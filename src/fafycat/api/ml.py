@@ -470,8 +470,7 @@ def _batch_prediction_response(
         "message": done_message,
         "predictions_made": summary.total,
         "auto_accepted": summary.auto_accepted,
-        "high_priority_review": summary.high_priority_review,
-        "standard_review": summary.standard,
+        "needs_review": summary.needs_review,
         remaining_key: remaining,
     }
 

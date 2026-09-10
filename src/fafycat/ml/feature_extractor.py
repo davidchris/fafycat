@@ -21,7 +21,6 @@ class MerchantCleaner:
             r"Folgenr\.\d+.*",  # Transaction numbers
             r"\bNR\.\d+.*",  # Reference numbers
             r"\d{2}:\d{2}:\d{2}.*",  # Times
-            r"\*+.*",  # Everything after asterisks
         ]
 
     def clean(self, merchant_name: str) -> str:
@@ -31,6 +30,9 @@ class MerchantCleaner:
 
         cleaned = merchant_name.strip()
         cleaned = self.sepa_parser.strip_noise(cleaned)
+        # Card aggregators write "PayPal *Spotify", "SumUp *Cafe X": the part
+        # after the asterisk is the real merchant, so keep it as its own word.
+        cleaned = cleaned.replace("*", " ")
 
         # Remove patterns
         for pattern in self.patterns:

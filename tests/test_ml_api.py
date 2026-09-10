@@ -90,6 +90,7 @@ def test_db(shared_engine):
 def mock_categorizer():
     """Create a mock categorizer for testing."""
     categorizer = MagicMock()
+    categorizer.model_id = "mock-model"
     categorizer.is_trained = True
     categorizer.model_version = "test_1.0"
     categorizer.classes_ = [1, 2, 3]
