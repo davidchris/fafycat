@@ -1368,7 +1368,7 @@ class AnalyticsService:
                     "count": 0,
                     "amount": 0.0,
                     "included": include_unreviewed,
-                    "date_range": {"start_date": None, "end_date": None},
+                    "date_range": {"windows": []},
                 },
             }
 

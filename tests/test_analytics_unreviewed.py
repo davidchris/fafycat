@@ -443,3 +443,8 @@ class TestYearOverYearReviewFilterConsistency:
             {"start_date": f"{current_year - 1}-01-01", "end_date": f"{current_year - 1}-01-15"},
             {"start_date": f"{current_year}-01-01", "end_date": f"{current_year}-01-15"},
         ]
+
+    def test_empty_database_keeps_the_windows_shape(self, db_session):
+        result = AnalyticsService.get_year_over_year_comparison(db_session, years=[])
+
+        assert result["unreviewed"] == {"count": 0, "amount": 0.0, "included": True, "date_range": {"windows": []}}
