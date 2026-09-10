@@ -829,6 +829,7 @@ input[type="range"]::-moz-range-thumb {
 .workflow-card-content { flex: 1; min-width: 0; }
 .workflow-card-title { font-family: var(--font-heading); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.9375rem; color: var(--text-primary); }
 .workflow-card-desc { font-family: var(--font-body); color: var(--text-secondary); font-size: 0.8125rem; margin-top: 0.125rem; }
+.workflow-card-note { font-family: var(--font-body); color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.25rem; font-style: italic; }
 
 /* Footer nav */
 .footer-nav { text-align: center; padding-top: 2.5rem; padding-bottom: 2rem; }

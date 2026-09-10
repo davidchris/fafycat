@@ -14,6 +14,10 @@ def render_analytics_page(request: Request, session: Session) -> HTMLResponse:
         <div class="flex justify-between items-center mb-8">
             <h1 class="text-3xl font-bold">Financial Analytics</h1>
             <div class="flex items-center space-x-4">
+                <label for="exclude-unreviewed-toggle" class="form-label flex items-center gap-2">
+                    <input type="checkbox" id="exclude-unreviewed-toggle" class="rounded">
+                    Exclude unreviewed
+                </label>
                 <label for="global-year-selector" class="form-label">
                     Year:
                 </label>
@@ -22,6 +26,9 @@ def render_analytics_page(request: Request, session: Session) -> HTMLResponse:
                 </select>
             </div>
         </div>
+
+        <!-- Unreviewed transactions warning (filled by the controller script) -->
+        <div id="unreviewed-alert-container" class="mb-8"></div>
 
         <!-- Budget Variance Section -->
         <div class="mb-8">

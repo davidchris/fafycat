@@ -32,14 +32,14 @@ fafycat budget show 2025
 ```
 
 ### `fafycat analytics monthly`
-Monthly income/spending/saving totals. Response: `year`, `monthly_data` (12 entries), `yearly_totals`.
+Monthly income/spending/saving totals. Response: `year`, `monthly_data` (12 entries), `yearly_totals`, `unreviewed`.
 ```
 fafycat analytics monthly --year 2025
 fafycat analytics monthly --ytd
 ```
 
 ### `fafycat analytics breakdown`
-Per-category spending totals for a date range. Response: `categories`, `summary`, `date_range`.
+Per-category spending totals for a date range. Response: `categories`, `summary`, `date_range`, `unreviewed`.
 `--type` accepts exactly: `income`, `saving`, `spending` (invalid values exit 2).
 ```
 fafycat analytics breakdown --year 2025
@@ -47,20 +47,20 @@ fafycat analytics breakdown --ytd --type spending
 ```
 
 ### `fafycat analytics variance`
-Budget-vs-actual variance per category. Response: `variances`, `summary`, `date_range`.
+Budget-vs-actual variance per category. Response: `variances`, `summary`, `date_range`, `unreviewed`.
 ```
 fafycat analytics variance --year 2025
 fafycat analytics variance --ytd
 ```
 
 ### `fafycat analytics savings`
-Monthly and cumulative savings. Response: `year`, `monthly_savings`, `statistics`.
+Monthly and cumulative savings. Response: `year`, `monthly_savings`, `statistics`, `unreviewed`.
 ```
 fafycat analytics savings --year 2025
 ```
 
 ### `fafycat analytics yoy`
-Year-over-year comparison by category. Response: `categories`, `summary` (includes `years`).
+Year-over-year comparison by category. Response: `categories`, `summary` (includes `years`), `unreviewed`.
 ```
 fafycat analytics yoy
 fafycat analytics yoy --type spending --years 2023,2024,2025
@@ -68,10 +68,28 @@ fafycat analytics yoy --type spending --years 2023,2024,2025
 
 ### `fafycat analytics top`
 Largest spending transactions for a month. `--year` defaults to current year; `--month` defaults to current month.
-Response: `year`, `month`, `month_name`, `top_transactions`, `total_spending`, `transactions_count`.
+Response: `year`, `month`, `month_name`, `top_transactions`, `total_spending`, `transactions_count`, `unreviewed`.
 ```
 fafycat analytics top --year 2025 --month 3
 fafycat analytics top --limit 10
+```
+
+## Unreviewed transactions
+
+By default every analytics command counts unreviewed transactions under their **predicted** category,
+so low-confidence guesses can distort the numbers. Two things make that visible:
+
+- Every analytics response carries `unreviewed`: `{count, amount, included, date_range}`. `amount` is the
+  total absolute value at stake; `included` says whether those rows were counted.
+- Per-category (or per-month) entries carry `unreviewed_amount` (same sign convention as the neighbouring
+  amount) and `unreviewed_count`.
+
+Add `--exclude-unreviewed` to any `fafycat analytics *` command to count reviewed transactions only.
+The `unreviewed` summary still describes the range, with `included: false`.
+
+```
+fafycat analytics breakdown --year 2025 --exclude-unreviewed
+fafycat analytics variance --ytd --exclude-unreviewed
 ```
 
 ## Date flags (mutually exclusive with each other and with `--start`/`--end`)

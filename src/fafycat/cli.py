@@ -334,6 +334,19 @@ def cmd_budget_show(args: argparse.Namespace) -> None:
     emit_success(result)
 
 
+def _add_exclude_unreviewed_argument(parser: argparse.ArgumentParser) -> None:
+    """Add the --exclude-unreviewed flag to an analytics subparser.
+
+    Args:
+        parser: Subparser that should accept the flag.
+    """
+    parser.add_argument(
+        "--exclude-unreviewed",
+        action="store_true",
+        help="Count only reviewed transactions (default: unreviewed count under their prediction)",
+    )
+
+
 def cmd_analytics_monthly(args: argparse.Namespace) -> None:
     """Return monthly income/spending/saving totals as JSON."""
     _apply_data_dir_override(args.data_dir)
@@ -371,7 +384,13 @@ def cmd_analytics_monthly(args: argparse.Namespace) -> None:
     db_manager.create_tables()
 
     with db_manager.get_session() as session:
-        result = AnalyticsService.get_monthly_summary(session, year=year, start_date=start_date, end_date=end_date)
+        result = AnalyticsService.get_monthly_summary(
+            session,
+            year=year,
+            start_date=start_date,
+            end_date=end_date,
+            include_unreviewed=not args.exclude_unreviewed,
+        )
 
     emit_success(result)
 
@@ -416,6 +435,7 @@ def cmd_analytics_breakdown(args: argparse.Namespace) -> None:
             start_date=start_date,
             end_date=end_date,
             category_type=args.type or None,
+            include_unreviewed=not args.exclude_unreviewed,
         )
 
     emit_success(result)
@@ -460,6 +480,7 @@ def cmd_analytics_variance(args: argparse.Namespace) -> None:
             session,
             start_date=start_date,
             end_date=end_date,
+            include_unreviewed=not args.exclude_unreviewed,
         )
 
     emit_success(result)
@@ -506,6 +527,7 @@ def cmd_analytics_savings(args: argparse.Namespace) -> None:
             year=year,
             start_date=start_date,
             end_date=end_date,
+            include_unreviewed=not args.exclude_unreviewed,
         )
 
     emit_success(result)
@@ -532,6 +554,7 @@ def cmd_analytics_yoy(args: argparse.Namespace) -> None:
             session,
             category_type=args.type or None,
             years=years,
+            include_unreviewed=not args.exclude_unreviewed,
         )
 
     emit_success(result)
@@ -557,6 +580,7 @@ def cmd_analytics_top(args: argparse.Namespace) -> None:
             year=args.year,
             month=args.month,
             limit=args.limit,
+            include_unreviewed=not args.exclude_unreviewed,
         )
 
     emit_success(result)
@@ -741,6 +765,7 @@ def main() -> None:
         ),
     )
     _add_data_dir_argument(analytics_monthly_parser, suppress_default=True)
+    _add_exclude_unreviewed_argument(analytics_monthly_parser)
     analytics_monthly_parser.add_argument(
         "--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)"
     )
@@ -774,6 +799,7 @@ def main() -> None:
         ),
     )
     _add_data_dir_argument(analytics_breakdown_parser, suppress_default=True)
+    _add_exclude_unreviewed_argument(analytics_breakdown_parser)
     analytics_breakdown_parser.add_argument(
         "--type",
         default=None,
@@ -815,6 +841,7 @@ def main() -> None:
         ),
     )
     _add_data_dir_argument(analytics_variance_parser, suppress_default=True)
+    _add_exclude_unreviewed_argument(analytics_variance_parser)
     analytics_variance_parser.add_argument(
         "--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)"
     )
@@ -848,6 +875,7 @@ def main() -> None:
         ),
     )
     _add_data_dir_argument(analytics_savings_parser, suppress_default=True)
+    _add_exclude_unreviewed_argument(analytics_savings_parser)
     analytics_savings_parser.add_argument(
         "--start", type=date.fromisoformat, default=None, help="Start date (YYYY-MM-DD)"
     )
@@ -881,6 +909,7 @@ def main() -> None:
         ),
     )
     _add_data_dir_argument(analytics_yoy_parser, suppress_default=True)
+    _add_exclude_unreviewed_argument(analytics_yoy_parser)
     analytics_yoy_parser.add_argument("--type", default=None, help="Filter by category type (e.g. spending, income)")
     analytics_yoy_parser.add_argument(
         "--years",
@@ -899,6 +928,7 @@ def main() -> None:
         ),
     )
     _add_data_dir_argument(analytics_top_parser, suppress_default=True)
+    _add_exclude_unreviewed_argument(analytics_top_parser)
     analytics_top_parser.add_argument("--year", type=int, default=None, help="Year (default: current year)")
     analytics_top_parser.add_argument(
         "--month", type=_month_int, default=None, help="Month 1-12 (default: current month)"
