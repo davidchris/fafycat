@@ -92,7 +92,7 @@ def _propagation_prompt(tx, pattern: str, sibling_count: int, category_name: str
     return Tr(
         Td(
             Span(
-                f"{sibling_count} more unreviewed from {pattern}. ",
+                f"{sibling_count} more unreviewed from {pattern}, predicted the same way. ",
                 cls="text-secondary",
             ),
             Form(

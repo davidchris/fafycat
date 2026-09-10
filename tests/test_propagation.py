@@ -22,7 +22,7 @@ def _categories(db_session) -> tuple[CategoryORM, CategoryORM]:
 
 def _seed(db_session, name: str, txn_id: str, **overrides) -> TransactionORM:
     """Insert one transaction. ``merchant_pattern`` is left unset unless given."""
-    txn = TransactionORM(
+    fields = dict(
         id=txn_id.ljust(16, "0"),
         date=date(2026, 8, 4),
         name=name,
@@ -31,8 +31,8 @@ def _seed(db_session, name: str, txn_id: str, **overrides) -> TransactionORM:
         currency="EUR",
         import_batch="b",
         imported_at=datetime.now(UTC),
-        **overrides,
     )
+    txn = TransactionORM(**{**fields, **overrides})
     db_session.add(txn)
     db_session.flush()
     return txn
@@ -166,6 +166,79 @@ class TestPropagateEndpoint:
         assert rows["d".ljust(16, "0")].category_id == groceries.id
         assert rows["e".ljust(16, "0")].is_reviewed is False
         assert rows["e".ljust(16, "0")].category_id is None
+
+    def test_skips_siblings_the_model_predicted_differently(self, test_client, db_session):
+        """Transfers to one's own name: pocket money and a savings plan share the merchant, not the purpose."""
+        pocket_money, savings_plan = _categories(db_session)
+        pattern = _pattern_of("David Wilde")
+        source = _seed(
+            db_session,
+            "David Wilde",
+            "a",
+            merchant_pattern=pattern,
+            purpose="Taschengeld",
+            predicted_category_id=pocket_money.id,
+            is_reviewed=True,
+            category_id=pocket_money.id,
+        )
+        # Predicted like the source: confirmed along with it.
+        _seed(
+            db_session,
+            "David Wilde",
+            "b",
+            merchant_pattern=pattern,
+            purpose="Taschengeld",
+            predicted_category_id=pocket_money.id,
+        )
+        # No prediction at all: nothing says it differs.
+        _seed(db_session, "David Wilde", "c", merchant_pattern=pattern, purpose="Taschengeld")
+        # The model read the purpose and predicted something else: left for review.
+        _seed(
+            db_session,
+            "David Wilde",
+            "d",
+            merchant_pattern=pattern,
+            purpose="Sparplan ISIN",
+            predicted_category_id=savings_plan.id,
+        )
+        db_session.commit()
+
+        resp = test_client.put(
+            "/api/transactions/" + "a".ljust(16, "0") + "/categorize-htmx", data={"actual_category": "fuel"}
+        )
+        assert f"2 more unreviewed from {pattern}, predicted the same way" in resp.text
+
+        resp = test_client.post("/api/transactions/propagate", data={"source_id": source.id, "actual_category": "fuel"})
+
+        assert "Applied to 2 transactions" in resp.text
+        rows = {t.id: t for t in db_session.query(TransactionORM).all()}
+        assert rows["b".ljust(16, "0")].category_id == pocket_money.id
+        assert rows["c".ljust(16, "0")].category_id == pocket_money.id
+        assert rows["d".ljust(16, "0")].is_reviewed is False
+        assert rows["d".ljust(16, "0")].category_id is None
+
+    def test_a_correction_reaches_siblings_the_model_got_wrong_the_same_way(self, test_client, db_session):
+        fuel, groceries = _categories(db_session)
+        pattern = _pattern_of(SHELL)
+        source = _seed(
+            db_session,
+            SHELL,
+            "a",
+            merchant_pattern=pattern,
+            predicted_category_id=groceries.id,
+            is_reviewed=True,
+            category_id=fuel.id,
+        )
+        _seed(db_session, SHELL, "b", merchant_pattern=pattern, predicted_category_id=groceries.id)
+        _seed(db_session, SHELL, "c", merchant_pattern=pattern, predicted_category_id=fuel.id)
+        db_session.commit()
+
+        resp = test_client.post("/api/transactions/propagate", data={"source_id": source.id, "actual_category": "fuel"})
+
+        assert "Applied to 2 transactions" in resp.text
+        rows = {t.id: t for t in db_session.query(TransactionORM).all()}
+        assert rows["b".ljust(16, "0")].category_id == fuel.id
+        assert rows["c".ljust(16, "0")].category_id == fuel.id
 
     def test_writes_one_review_event_per_sibling_naming_the_source(self, test_client, db_session):
         fuel, _ = _categories(db_session)
