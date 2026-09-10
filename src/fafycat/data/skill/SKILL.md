@@ -79,7 +79,7 @@ fafycat analytics top --limit 10
 By default every analytics command counts unreviewed transactions under their **predicted** category,
 so low-confidence guesses can distort the numbers. Two things make that visible:
 
-- Every analytics response carries `unreviewed`: `{count, amount, included, date_range}`. `amount` is the
+- Every analytics response carries `unreviewed`: `{count, amount, included, date_range}`. For `yoy`, `date_range` is `{windows: [{start_date, end_date}, ...]}`, one aligned window per compared year. `amount` is the
   total absolute value at stake; `included` says whether those rows were counted.
 - Per-category (or per-month) entries carry `unreviewed_amount` (same sign convention as the neighbouring
   amount) and `unreviewed_count`.

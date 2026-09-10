@@ -243,6 +243,7 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
             predictions_made=cat_summary["predictions_made"],
             auto_accepted=cat_summary["auto_accepted"],
             needs_review=cat_summary["needs_review"],
+            already_reviewed=cat_summary["already_reviewed"],
         )
 
     except Exception as e:
@@ -250,6 +251,11 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
     finally:
         if temp_file_path is not None:
             temp_file_path.unlink(missing_ok=True)
+
+
+def _kept_clause(already_reviewed: int) -> str:
+    """Mention rows that kept the category the CSV supplied, if any."""
+    return f", {already_reviewed} kept the category from the file" if already_reviewed else ""
 
 
 def _render_upload_success(
@@ -260,6 +266,7 @@ def _render_upload_success(
     predictions_made: int,
     auto_accepted: int = 0,
     needs_review: int = 0,
+    already_reviewed: int = 0,
 ) -> str:
     """Render success message HTML for HTMX response."""
     alert_class = "alert-success" if new_count > 0 else "alert-info"
@@ -275,7 +282,7 @@ def _render_upload_success(
         prediction_info = f"""
             <div class="alert alert-ml">
                 <p>🤖 ML Predictions</p>
-                <p>{predictions_made} transactions got predictions: {auto_accepted} auto-accepted, {needs_review} need your review.</p>
+                <p>{predictions_made} transactions got predictions: {auto_accepted} auto-accepted, {needs_review} need your review{_kept_clause(already_reviewed)}.</p>
             </div>
         """
     elif new_count > 0:

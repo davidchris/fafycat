@@ -439,4 +439,7 @@ class TestYearOverYearReviewFilterConsistency:
         assert result["summary"]["comparison_end_date"] == date(current_year, 1, 15).isoformat()
         assert result["unreviewed"]["count"] == 1
         assert result["unreviewed"]["amount"] == pytest.approx(40.0)
-        assert result["unreviewed"]["date_range"]["end_date"] == date(current_year, 1, 15).isoformat()
+        assert result["unreviewed"]["date_range"]["windows"] == [
+            {"start_date": f"{current_year - 1}-01-01", "end_date": f"{current_year - 1}-01-15"},
+            {"start_date": f"{current_year}-01-01", "end_date": f"{current_year}-01-15"},
+        ]

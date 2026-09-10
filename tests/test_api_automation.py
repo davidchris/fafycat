@@ -226,6 +226,7 @@ class TestEnrichedUploadResponse:
             # These fields must be present (even if 0)
             assert "auto_accepted" in data
             assert "needs_review" in data
+            assert "already_reviewed" in data
             assert "predictions_made" in data
         finally:
             csv_path.unlink()

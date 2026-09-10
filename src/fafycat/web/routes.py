@@ -164,7 +164,7 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
             new_count, duplicate_count = processor.save_transactions(transactions)
 
             # Auto-predict categories for new transactions if model is available
-            from fafycat.api.upload import empty_categorization_summary, predict_transaction_categories
+            from fafycat.api.upload import _kept_clause, empty_categorization_summary, predict_transaction_categories
 
             if new_count > 0:
                 cat_summary = predict_transaction_categories(db_session, transactions, new_count)
@@ -190,7 +190,8 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
                     create_purple_alert(
                         "ML Predictions Made",
                         f"{predictions_made} transactions got predictions: "
-                        f"{cat_summary['auto_accepted']} auto-accepted, {cat_summary['needs_review']} need your review",
+                        f"{cat_summary['auto_accepted']} auto-accepted, {cat_summary['needs_review']} need your review"
+                        f"{_kept_clause(cat_summary['already_reviewed'])}",
                     )
                 )
             elif new_count > 0:

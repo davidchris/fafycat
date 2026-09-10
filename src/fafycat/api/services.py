@@ -1510,24 +1510,23 @@ class AnalyticsService:
 
         When the comparison is aligned to ``cutoff`` (the current year's latest
         transaction day), every year is counted from 1 January to that day;
-        otherwise whole years are counted.
+        otherwise whole years are counted. ``date_range`` lists exactly those
+        windows, one per year, since they are not one contiguous span.
         """
         total_count, total_amount = 0, 0.0
-        end_of_window: date | None = None
+        windows: list[dict[str, str]] = []
         for year in sorted(years):
+            start = date(year, 1, 1)
             end = date(year, cutoff.month, cutoff.day) if cutoff else date(year, 12, 31)
-            part = AnalyticsService._get_unreviewed_summary(session, date(year, 1, 1), end, include_unreviewed)
+            part = AnalyticsService._get_unreviewed_summary(session, start, end, include_unreviewed)
             total_count += part["count"]
             total_amount += part["amount"]
-            end_of_window = end
+            windows.append({"start_date": start.isoformat(), "end_date": end.isoformat()})
         return {
             "count": total_count,
             "amount": round(total_amount, 2),
             "included": include_unreviewed,
-            "date_range": {
-                "start_date": date(min(years), 1, 1).isoformat(),
-                "end_date": end_of_window.isoformat() if end_of_window else None,
-            },
+            "date_range": {"windows": windows},
         }
 
     @staticmethod
