@@ -271,7 +271,7 @@ class DatabaseManager:
         A category is a human decision (a labelled import, a review, an
         auto-accept that copied the prediction); the reviewed flag tells the
         queue, training, Merchant Rules and calibration to trust it. Two
-        historical bugs broke the pairing in the user's data:
+        historical bugs broke the pairing in existing databases:
 
         * Before 2025-06-06 the labelled CSV import wrote the category but not
           the flag, so human labels sat in the review queue and could be

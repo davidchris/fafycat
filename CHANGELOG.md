@@ -62,8 +62,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   reviewed. They are now.
 - **Propagation no longer overwrites transfers the model told apart.**
   Applying a category to siblings skips rows the model predicted
-  differently, such as pocket money and savings plan transfers to the same
-  payee.
+  differently, such as transfers to the same account that serve different
+  purposes.
 - **Calibration ignores rows without a category** instead of counting each
   one as an override.
 - **Older databases gain new columns on startup.** No manual migration
@@ -138,6 +138,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - The repository was prepared for wider public sharing with updated
   documentation.
 
-[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/davidchris/fafycat/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/davidchris/fafycat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/davidchris/fafycat/releases/tag/v0.1.0

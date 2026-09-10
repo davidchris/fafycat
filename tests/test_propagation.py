@@ -168,37 +168,37 @@ class TestPropagateEndpoint:
         assert rows["e".ljust(16, "0")].category_id is None
 
     def test_skips_siblings_the_model_predicted_differently(self, test_client, db_session):
-        """Transfers to one's own name: pocket money and a savings plan share the merchant, not the purpose."""
-        pocket_money, savings_plan = _categories(db_session)
-        pattern = _pattern_of("David Wilde")
+        """Transfers between own accounts: a standing order and a savings plan share the payee, not the purpose."""
+        standing_order, savings_plan = _categories(db_session)
+        pattern = _pattern_of("Own Account Transfer")
         source = _seed(
             db_session,
-            "David Wilde",
+            "Own Account Transfer",
             "a",
             merchant_pattern=pattern,
-            purpose="Taschengeld",
-            predicted_category_id=pocket_money.id,
+            purpose="Standing order",
+            predicted_category_id=standing_order.id,
             is_reviewed=True,
-            category_id=pocket_money.id,
+            category_id=standing_order.id,
         )
         # Predicted like the source: confirmed along with it.
         _seed(
             db_session,
-            "David Wilde",
+            "Own Account Transfer",
             "b",
             merchant_pattern=pattern,
-            purpose="Taschengeld",
-            predicted_category_id=pocket_money.id,
+            purpose="Standing order",
+            predicted_category_id=standing_order.id,
         )
         # No prediction at all: nothing says it differs.
-        _seed(db_session, "David Wilde", "c", merchant_pattern=pattern, purpose="Taschengeld")
+        _seed(db_session, "Own Account Transfer", "c", merchant_pattern=pattern, purpose="Standing order")
         # The model read the purpose and predicted something else: left for review.
         _seed(
             db_session,
-            "David Wilde",
+            "Own Account Transfer",
             "d",
             merchant_pattern=pattern,
-            purpose="Sparplan ISIN",
+            purpose="Savings plan",
             predicted_category_id=savings_plan.id,
         )
         db_session.commit()
@@ -212,8 +212,8 @@ class TestPropagateEndpoint:
 
         assert "Applied to 2 transactions" in resp.text
         rows = {t.id: t for t in db_session.query(TransactionORM).all()}
-        assert rows["b".ljust(16, "0")].category_id == pocket_money.id
-        assert rows["c".ljust(16, "0")].category_id == pocket_money.id
+        assert rows["b".ljust(16, "0")].category_id == standing_order.id
+        assert rows["c".ljust(16, "0")].category_id == standing_order.id
         assert rows["d".ljust(16, "0")].is_reviewed is False
         assert rows["d".ljust(16, "0")].category_id is None
 

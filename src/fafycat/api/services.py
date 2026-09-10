@@ -30,8 +30,8 @@ def _unreviewed_siblings(session: Session, source: TransactionORM, category_id: 
     wrong in the same way) or the category being applied (a confirmation
     reaches every row the model already agrees with). Siblings the model
     predicted differently are left for review: the merchant is shared, but
-    purpose or amount told the model something else, as with transfers to
-    one's own name that split into savings plans and pocket money.
+    purpose or amount told the model something else, as with transfers
+    between own accounts that serve different purposes.
     """
     predicted = source.predicted_category_id
     same_as_source = (
