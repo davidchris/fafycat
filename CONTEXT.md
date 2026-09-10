@@ -41,7 +41,7 @@ The confidence score at or above which a Prediction is eligible for auto-accept.
 _Avoid_: confidence threshold
 
 **Merchant Rule**:
-An exact-match mapping from a cleaned merchant name to a category, derived from reviewed transactions on every training run. A rule decides a Prediction only when its confidence reaches the override bar; otherwise the Categorizer decides and the rule is recorded alongside.
+An exact-match mapping from a Merchant Pattern to a category, derived from reviewed transactions on every training run and refreshed for one pattern after each review. In the ensemble a rule is a third weighted voter beside LightGBM and Naive Bayes; its weight is learned on validation and recorded in every Prediction Event.
 _Avoid_: merchant mapping (the table name), pattern
 
 **Audit Trail**:
