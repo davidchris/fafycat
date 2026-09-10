@@ -72,7 +72,7 @@ def refresh_rule_for_pattern(session: Session, pattern: str, min_occurrences: in
 
     total = sum(counts.values())
     category_id, top = counts.most_common(1)[0] if counts else (None, 0)
-    qualifies = total >= min_occurrences and top / total >= RULE_MIN_SHARE if total else False
+    qualifies = bool(counts) and total >= min_occurrences and top >= total * RULE_MIN_SHARE
 
     if not qualifies:
         if existing is not None:

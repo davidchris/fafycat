@@ -22,6 +22,9 @@ from fasthtml.common import (
 
 from fafycat.web.components.pagination import FILTER_HX_INCLUDE, create_full_pagination
 
+COLUMN_COUNT = 7
+"""Columns in the transaction table; inline prompt rows span all of them."""
+
 
 def _category_select(tx, categories) -> Select:
     """Category dropdown with the transaction's current category preselected."""
@@ -84,10 +87,6 @@ def _row(tx, categories) -> Tr:
     )
 
 
-COLUMN_COUNT = 7
-"""Columns in the transaction table; inline prompt rows span all of them."""
-
-
 def _propagation_prompt(tx, pattern: str, sibling_count: int, category_name: str) -> Tr:
     """Build the inline row offering to apply a just-saved category to its siblings."""
     return Tr(
@@ -145,7 +144,11 @@ def render_propagation_result(source_id: str, applied: int) -> str:
     """Render the one-line confirmation that replaces the propagation prompt."""
     return to_xml(
         Tr(
-            Td(f"Applied to {applied} transactions", cls="text-success", colspan=str(COLUMN_COUNT)),
+            Td(
+                f"Applied to {applied} transaction{'' if applied == 1 else 's'}",
+                cls="text-success",
+                colspan=str(COLUMN_COUNT),
+            ),
             id=f"propagate-{source_id}",
         )
     )

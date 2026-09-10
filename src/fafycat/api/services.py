@@ -16,6 +16,20 @@ from fafycat.core.models import CategoryType, ReviewPriority
 from fafycat.ml.merchant_mapper import refresh_rule_for_pattern
 
 
+def _pattern_of(transaction: TransactionORM | None) -> str:
+    """Merchant pattern of a transaction, or empty when it has none."""
+    return str(transaction.merchant_pattern) if transaction is not None and transaction.merchant_pattern else ""
+
+
+def _unreviewed_siblings(session: Session, pattern: str, source_id: str):
+    """Query for the unreviewed transactions sharing ``pattern``, excluding the source."""
+    return session.query(TransactionORM).filter(
+        TransactionORM.merchant_pattern == pattern,
+        TransactionORM.id != source_id,
+        TransactionORM.is_reviewed == False,  # noqa: E712
+    )
+
+
 def _to_int(value: Any) -> int:
     """Cast an ORM column value to int."""
     return int(value)
@@ -282,7 +296,7 @@ class TransactionService:
         session.commit()
 
         if update.is_reviewed:
-            refresh_rule_for_pattern(session, _to_str(transaction.merchant_pattern or ""))
+            refresh_rule_for_pattern(session, _pattern_of(transaction))
 
         # Return updated transaction
         return TransactionResponse(
@@ -318,20 +332,11 @@ class TransactionService:
             count zero when the transaction is unknown or has no pattern.
         """
         transaction = session.query(TransactionORM).filter(TransactionORM.id == transaction_id).first()
-        pattern = _to_str(transaction.merchant_pattern) if transaction and transaction.merchant_pattern else ""
+        pattern = _pattern_of(transaction)
         if not pattern:
             return "", 0
 
-        count = (
-            session.query(func.count(TransactionORM.id))
-            .filter(
-                TransactionORM.merchant_pattern == pattern,
-                TransactionORM.id != transaction_id,
-                TransactionORM.is_reviewed == False,  # noqa: E712
-            )
-            .scalar()
-        )
-        return pattern, int(count or 0)
+        return pattern, _unreviewed_siblings(session, pattern, transaction_id).count()
 
     @staticmethod
     def propagate_category(session: Session, source_id: str, category_name: str) -> dict:
@@ -352,20 +357,12 @@ class TransactionService:
             ``pattern``, and the ``category`` name.
         """
         source = session.query(TransactionORM).filter(TransactionORM.id == source_id).first()
-        pattern = _to_str(source.merchant_pattern) if source and source.merchant_pattern else ""
+        pattern = _pattern_of(source)
         category = session.query(CategoryORM).filter(CategoryORM.name == category_name).first()
         if not pattern or category is None:
             return {"applied": 0, "pattern": pattern, "category": category_name}
 
-        siblings = (
-            session.query(TransactionORM)
-            .filter(
-                TransactionORM.merchant_pattern == pattern,
-                TransactionORM.id != source_id,
-                TransactionORM.is_reviewed == False,  # noqa: E712
-            )
-            .all()
-        )
+        siblings = _unreviewed_siblings(session, pattern, source_id).all()
 
         for txn in siblings:
             record_review_event(
