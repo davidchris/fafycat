@@ -6,7 +6,7 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_manager
-from fafycat.api.ml_insights import get_training_recency
+from fafycat.api.ml_insights import TrainingRecency, get_training_recency
 from fafycat.api.services import CategoryService, TransactionService
 from fafycat.core.config import AppConfig
 from fafycat.core.database import TransactionORM
@@ -126,7 +126,7 @@ def _get_model_status_alert():
     return ""
 
 
-def _recency_sentence(recency) -> str:
+def _recency_sentence(recency: TrainingRecency) -> str:
     """Phrase the training-recency counter. Mirrors ``recencyText`` in review.js."""
     count = recency.reviews_since_training
     noun = "review" if count == 1 else "reviews"
