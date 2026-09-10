@@ -279,9 +279,16 @@ def render_empty_categories_state(ml_status):
             if (barEl) barEl.style.width = `${{data.progress}}%`;
         }}
 
+        function formatEnsembleWeights(weights) {{
+            if (!weights) return '';
+            const pct = (value) => `${{Math.round((value || 0) * 100)}}%`;
+            return `\\n- Voter weights: LightGBM ${{pct(weights.lgbm)}}, Naive Bayes ${{pct(weights.nb)}}, Merchant rules ${{pct(weights.rule)}}`;
+        }}
+
         function handleTrainingComplete(result) {{
             const accuracy = (result.accuracy * 100).toFixed(1);
             const samples = result.training_samples;
+            const weights = formatEnsembleWeights(result.ensemble_weights);
 
             // Update button to show prediction phase
             const trainButton = document.getElementById('trainButton');
@@ -299,17 +306,17 @@ def render_empty_categories_state(ml_status):
                 if (predictData.status === 'success') {{
                     const predicted = predictData.predictions_made;
                     const message = predicted > 0
-                        ? `Training and prediction completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}\\n\\nAuto-Prediction Results:\\n- ${{predicted}} transactions now have predictions\\n- Ready for review on the Review page!`
-                        : `Model training completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}\\n\\nAll transactions already have predictions!`;
+                        ? `Training and prediction completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}${{weights}}\\n\\nAuto-Prediction Results:\\n- ${{predicted}} transactions now have predictions\\n- Ready for review on the Review page!`
+                        : `Model training completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}${{weights}}\\n\\nAll transactions already have predictions!`;
                     alert(message);
                 }} else {{
-                    alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
+                    alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{weights}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
                 }}
                 location.reload();
             }})
             .catch(error => {{
                 console.error('Auto-prediction failed:', error);
-                alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
+                alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{weights}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
                 location.reload();
             }});
         }}
@@ -764,10 +771,17 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             if (barEl) barEl.style.width = `${data.progress}%`;
         }
 
+        function formatEnsembleWeights(weights) {
+            if (!weights) return '';
+            const pct = (value) => `${Math.round((value || 0) * 100)}%`;
+            return `\\n- Voter weights: LightGBM ${pct(weights.lgbm)}, Naive Bayes ${pct(weights.nb)}, Merchant rules ${pct(weights.rule)}`;
+        }
+
         function handleTrainingComplete(result) {
             const accuracy = (result.accuracy * 100).toFixed(1);
             const samples = result.training_samples;
-            alert(`Model training completed!\\n\\nAccuracy: ${accuracy}%\\nTraining samples: ${samples}\\n\\nYour model is now ready to predict transactions!`);
+            const weights = formatEnsembleWeights(result.ensemble_weights);
+            alert(`Model training completed!\\n\\nAccuracy: ${accuracy}%\\nTraining samples: ${samples}${weights}\\n\\nYour model is now ready to predict transactions!`);
             location.reload();
         }
 

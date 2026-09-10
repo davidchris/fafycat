@@ -40,7 +40,8 @@ def main() -> None:
                 print(f"Validation Accuracy: {cv_results['validation_accuracy']:.3f}")
                 print(
                     f"Optimal Weights: LightGBM={cv_results['best_weights']['lgbm']:.1f}, "
-                    f"NB={cv_results['best_weights']['nb']:.1f}"
+                    f"NB={cv_results['best_weights']['nb']:.1f}, "
+                    f"Merchant rule={cv_results['best_weights'].get('rule', 0.0):.1f}"
                 )
                 print(f"Training samples: {cv_results['n_training_samples']}")
                 print(f"Validation samples: {cv_results['n_validation_samples']}")

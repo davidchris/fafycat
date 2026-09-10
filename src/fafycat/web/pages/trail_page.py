@@ -29,10 +29,10 @@ def _pct(value: float | None) -> str:
     return f"{value:.1%}" if value is not None else "n/a"
 
 
-def _ranked_table(title: str, rows: list[Ranked], weight: float | None = None) -> Div:
+def _ranked_table(title: str, rows: list[Ranked], weight: float | None = None, empty: str = "not recorded") -> Div:
     heading = title if weight is None else f"{title} (weight {weight:.2f})"
     if not rows:
-        return Div(H3(heading, cls="text-sm font-medium mb-1"), P("not recorded", cls="text-secondary text-sm"))
+        return Div(H3(heading, cls="text-sm font-medium mb-1"), P(empty, cls="text-secondary text-sm"))
     return Div(
         H3(heading, cls="text-sm font-medium mb-1"),
         Table(
@@ -45,12 +45,18 @@ def _ranked_table(title: str, rows: list[Ranked], weight: float | None = None) -
 def _prediction_card(ev: PredictionEventView) -> Div:
     decision = "auto-accepted" if ev.decision == "auto_accepted" else "sent to review"
     if ev.rule_pattern is None:
-        rule = P("No merchant rule matched.", cls="text-secondary text-sm")
+        rule = P("No merchant rule matched, so the two models decided alone.", cls="text-secondary text-sm")
     else:
-        applied = "applied" if ev.source == "merchant_rule" else "not applied (below override bar)"
+        vote = (
+            f"voting with weight {ev.rule_weight:.2f}"
+            if ev.rule_weight
+            else "carrying no weight in this model"
+            if ev.source == "ensemble"
+            else "decided on its own"
+        )
         rule = P(
             Span("Merchant rule: ", cls="font-medium"),
-            f"{ev.rule_pattern} → {ev.rule_category} at {_pct(ev.rule_confidence)}, {applied}. ",
+            f"{ev.rule_pattern} proposed {ev.rule_category} at {_pct(ev.rule_confidence)}, {vote}. ",
             A("All rules", href="/rules", cls="text-secondary"),
             cls="text-sm",
         )
@@ -68,8 +74,9 @@ def _prediction_card(ev: PredictionEventView) -> Div:
         Div(
             _ranked_table("LightGBM", ev.lgbm_top, ev.lgbm_weight),
             _ranked_table("Naive Bayes", ev.nb_top, ev.nb_weight),
+            _ranked_table("Merchant rule", ev.rule_top, ev.rule_weight, empty="no rule matched"),
             _ranked_table("Ensemble", ev.ensemble_top),
-            cls="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3",
+            cls="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-3",
         ),
         cls="card mb-4",
     )
