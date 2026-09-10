@@ -233,9 +233,27 @@ class DatabaseManager:
         Base.metadata.create_all(bind=self.engine)
         with self.engine.connect() as conn:
             for table in Base.metadata.tables.values():
+                self._add_missing_columns(conn, table)
+            for table in Base.metadata.tables.values():
                 for index in table.indexes:
                     index.create(bind=conn, checkfirst=True)
             conn.commit()
+
+    @staticmethod
+    def _add_missing_columns(conn, table) -> None:
+        """Add columns the ORM declares but an older database lacks (SQLite ``ALTER TABLE ADD COLUMN``).
+
+        Only nullable or defaulted columns can be added this way; that is the
+        contract for evolving existing tables in this project.
+        """
+        existing = {row[1] for row in conn.exec_driver_sql(f'PRAGMA table_info("{table.name}")')}
+        if not existing:
+            return
+        for column in table.columns:
+            if column.name in existing:
+                continue
+            ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column.type.compile(conn.dialect)}'
+            conn.exec_driver_sql(ddl)
 
     def get_session(self) -> Session:
         """Get database session."""
