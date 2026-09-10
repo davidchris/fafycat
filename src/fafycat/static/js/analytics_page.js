@@ -87,6 +87,54 @@
         };
     }
 
+    function shouldIncludeUnreviewed() {
+        const toggle = document.getElementById('exclude-unreviewed-toggle');
+        return !(toggle && toggle.checked);
+    }
+
+    function withReviewFilter(url) {
+        const decorated = new URL(url, window.location.origin);
+        decorated.searchParams.set('include_unreviewed', shouldIncludeUnreviewed() ? 'true' : 'false');
+        return decorated.toString();
+    }
+
+    function renderUnreviewedAlert(summary) {
+        const container = document.getElementById('unreviewed-alert-container');
+        if (!container) return;
+
+        const count = Number(summary?.count || 0);
+        if (!count) {
+            container.replaceChildren();
+            return;
+        }
+
+        const amount = formatCurrency(Math.abs(Number(summary?.amount || 0)));
+        const alert = document.createElement('div');
+
+        if (summary?.included === false) {
+            alert.className = 'text-secondary';
+            alert.textContent = `${count} unreviewed transactions (${amount}) are excluded from these numbers.`;
+            container.replaceChildren(alert);
+            return;
+        }
+
+        alert.className = 'alert alert-warning';
+        const text = document.createElement('span');
+        text.textContent =
+            `${count} unreviewed transactions (${amount}) in this range ` +
+            'are counted under their predicted category. ';
+        const link = document.createElement('a');
+        link.href = '/review';
+        link.textContent = 'Review them';
+        alert.append(text, link);
+        container.replaceChildren(alert);
+    }
+
+    function unreviewedNote(amount, count) {
+        if (!Number(count)) return '';
+        return `<div class="text-secondary text-sm">of which ${formatCurrency(Math.abs(Number(amount || 0)))} unreviewed</div>`;
+    }
+
     function setContainerMessage(containerId, message, isError = false) {
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -275,7 +323,7 @@
         url.searchParams.set('month', String(selectedMonth));
 
         try {
-            const data = await fetchJson(url.toString(), 'Loading top transactions failed');
+            const data = await fetchJson(withReviewFilter(url), 'Loading top transactions failed');
             updateTopTransactionsDisplay(data);
             const chartTransactions = (data.top_transactions || []).map(transaction => ({
                 ...transaction,
@@ -306,28 +354,31 @@
 
         const tasks = [
             {
-                url: budgetUrl,
+                url: withReviewFilter(budgetUrl),
                 containerId: 'budget-variance-container',
                 success: 'Budget variance data loaded. Check chart below.',
                 error: 'Unable to load budget variance data.',
                 render: updateBudgetVarianceChart
             },
             {
-                url: monthlyUrl,
+                url: withReviewFilter(monthlyUrl),
                 containerId: 'monthly-overview-container',
                 success: 'Monthly overview data loaded. Check chart below.',
                 error: 'Unable to load monthly overview data.',
-                render: updateMonthlyOverviewChart
+                render: data => {
+                    renderUnreviewedAlert(data.unreviewed);
+                    updateMonthlyOverviewChart(data);
+                }
             },
             {
-                url: categoryUrl,
+                url: withReviewFilter(categoryUrl),
                 containerId: 'category-breakdown-container',
                 success: 'Category breakdown data loaded. Check charts below.',
                 error: 'Unable to load category breakdown data.',
                 render: updateCategoryBreakdownChart
             },
             {
-                url: savingsUrl,
+                url: withReviewFilter(savingsUrl),
                 containerId: 'savings-tracking-container',
                 success: 'Savings tracking data loaded. Check chart below.',
                 error: 'Unable to load savings tracking data.',
@@ -385,7 +436,7 @@
         if (categoryType) url.searchParams.set('category_type', categoryType);
 
         try {
-            const data = await fetchJson(url.toString(), 'Loading category analysis failed');
+            const data = await fetchJson(withReviewFilter(url), 'Loading category analysis failed');
             setContainerMessage('category-breakdown-container', 'Category analysis updated. Check charts below.');
             updateCategoryBreakdownChart(data);
         } catch (error) {
@@ -683,7 +734,10 @@
                 const yearData = category.yearly_data?.[year] || {};
                 const value = viewMode === 'monthly_avg' ? yearData.monthly_avg : yearData.total;
                 const amount = Math.abs(Number(value || 0));
-                html += `<td class="text-right">${formatCurrency(amount)}</td>`;
+                const note = viewMode === 'monthly_avg'
+                    ? ''
+                    : unreviewedNote(yearData.unreviewed_amount, yearData.unreviewed_count);
+                html += `<td class="text-right">${formatCurrency(amount)}${note}</td>`;
             });
 
             if (years.length > 1) {
@@ -742,7 +796,7 @@
         url.searchParams.set('years', selectedYears.join(','));
 
         try {
-            const data = await fetchJson(url.toString(), 'Loading year-over-year comparison failed');
+            const data = await fetchJson(withReviewFilter(url), 'Loading year-over-year comparison failed');
             updateYearOverYearDisplay(data, viewMode);
             if (typeof updateYearOverYearCharts === 'function') {
                 updateYearOverYearCharts(data, viewMode);
@@ -775,7 +829,7 @@
         url.searchParams.set('years', selectedYears.join(','));
 
         try {
-            const data = await fetchJson(url.toString(), 'Loading cumulative category data failed');
+            const data = await fetchJson(withReviewFilter(url), 'Loading cumulative category data failed');
             if (data && data.category_name && typeof updateCategoryCumulativeChartDisplay === 'function') {
                 updateCategoryCumulativeChartDisplay(data);
             }
@@ -895,6 +949,18 @@
         document.getElementById('cumulative-category-selector')?.addEventListener('change', () => {
             updateCategoryCumulativeChart();
         });
+
+        document.getElementById('exclude-unreviewed-toggle')?.addEventListener('change', () => {
+            reloadWithReviewFilter().catch(error => {
+                console.error('Failed to reload analytics:', error);
+            });
+        });
+    }
+
+    async function reloadWithReviewFilter() {
+        await loadDashboardData();
+        await updateYearOverYearComparison();
+        await updateCategoryCumulativeChart();
     }
 
     async function initializePage() {
@@ -930,6 +996,8 @@
         window.__ANALYTICS_PAGE_TEST_HOOKS__.getYearSelection = getYearSelection;
         window.__ANALYTICS_PAGE_TEST_HOOKS__.renderYoyYearCheckboxes = renderYoyYearCheckboxes;
         window.__ANALYTICS_PAGE_TEST_HOOKS__.syncAnalyticsPageConfig = syncAnalyticsPageConfig;
+        window.__ANALYTICS_PAGE_TEST_HOOKS__.renderUnreviewedAlert = renderUnreviewedAlert;
+        window.__ANALYTICS_PAGE_TEST_HOOKS__.withReviewFilter = withReviewFilter;
         window.__ANALYTICS_PAGE_TEST_HOOKS__.syncTopTransactionsMonthToYearSelection =
             syncTopTransactionsMonthToYearSelection;
     }

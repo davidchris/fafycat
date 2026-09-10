@@ -18,9 +18,25 @@ router = APIRouter()
 @router.get("/", response_class=HTMLResponse)
 async def home_page(request: Request) -> HTMLResponse:
     """Home page with workflow navigation."""
+    from calendar import monthrange
+    from datetime import date
+
+    from fafycat.api.services import AnalyticsService
     from fafycat.web.pages.home_page import render_home_page
 
-    return HTMLResponse(create_page_layout("FafyCat - Family Finance Categorizer", render_home_page()))
+    today = date.today()
+    month_start = today.replace(day=1)
+    month_end = today.replace(day=monthrange(today.year, today.month)[1])
+
+    db_manager = get_db_manager(request)
+    with db_manager.get_session() as db_session:
+        unreviewed_this_month = AnalyticsService.get_unreviewed_count(db_session, month_start, month_end)
+
+    return HTMLResponse(
+        create_page_layout(
+            "FafyCat - Family Finance Categorizer", render_home_page(unreviewed_this_month=unreviewed_this_month)
+        )
+    )
 
 
 @router.get("/app", response_class=HTMLResponse)
