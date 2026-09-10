@@ -241,6 +241,9 @@ class TransactionCategorizer:
         The model scores every transaction in one batch. A Merchant Rule that
         matches at or above ``RULE_OVERRIDE_CONFIDENCE`` decides instead, but
         the model's probabilities are still captured for the Audit Trail.
+
+        This hard override is kept only for the single-model fallback. The
+        default ensemble treats a rule as a weighted voter instead.
         """
         if not self.is_trained:
             raise ValueError("Model must be trained before prediction")

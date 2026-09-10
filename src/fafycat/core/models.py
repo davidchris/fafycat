@@ -100,8 +100,8 @@ class PredictionDetail(BaseModel):
     """Everything each component of the Categorizer said about one transaction.
 
     Captured so the Audit Trail can show what the Merchant Rule, LightGBM, and
-    Naive Bayes each proposed, how they were weighted, and which one decided.
-    Probability maps are keyed by category id.
+    Naive Bayes each proposed and how their votes were weighted into the
+    outcome. Probability maps are keyed by category id.
     """
 
     source: str
@@ -111,9 +111,12 @@ class PredictionDetail(BaseModel):
     rule_confidence: float | None = None
     lgbm_probs: dict[int, float] = Field(default_factory=dict)
     nb_probs: dict[int, float] = Field(default_factory=dict)
+    rule_probs: dict[int, float] = Field(default_factory=dict)
+    """What the Merchant Rule voted, empty when no rule matched."""
     ensemble_probs: dict[int, float] = Field(default_factory=dict)
     lgbm_weight: float | None = None
     nb_weight: float | None = None
+    rule_weight: float | None = None
 
 
 class TransactionPrediction(BaseModel):

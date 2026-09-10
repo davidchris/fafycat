@@ -1,9 +1,17 @@
 """Audit Trail: Prediction Events and Review Events are recorded and rendered."""
 
+import json
 from datetime import UTC, date, datetime
 
 from fafycat.core.audit_trail import ReviewActor, get_trail, record_review_event
-from fafycat.core.database import CategoryORM, MerchantMappingORM, PredictionEventORM, ReviewEventORM, TransactionORM
+from fafycat.core.database import (
+    CategoryORM,
+    MerchantMappingORM,
+    ModelMetadataORM,
+    PredictionEventORM,
+    ReviewEventORM,
+    TransactionORM,
+)
 from fafycat.core.models import PredictionDetail, ReviewPriority, TransactionInput, TransactionPrediction
 from fafycat.ml.merchant_mapper import MerchantMapper
 from fafycat.ml.prediction_pipeline import predict_unpredicted
@@ -35,9 +43,11 @@ class DetailedFakeCategorizer:
                         rule_confidence=0.85,
                         lgbm_probs={self.predicted_category_id: score, 99: 1 - score},
                         nb_probs={self.predicted_category_id: 0.5, 99: 0.5},
+                        rule_probs={self.predicted_category_id: 0.85, 99: 0.15},
                         ensemble_probs={self.predicted_category_id: score, 99: 1 - score},
-                        lgbm_weight=0.7,
-                        nb_weight=0.3,
+                        lgbm_weight=0.6,
+                        nb_weight=0.2,
+                        rule_weight=0.2,
                     ),
                 )
             )
@@ -88,8 +98,9 @@ class TestPipelineWritesEvents:
         assert rewe.decision == ReviewPriority.AUTO_ACCEPTED.value
         assert rewe.source == "ensemble"
         assert rewe.rule_pattern == "REWE" and rewe.rule_confidence == 0.85
-        assert rewe.lgbm_weight == 0.7 and rewe.nb_weight == 0.3
+        assert rewe.lgbm_weight == 0.6 and rewe.nb_weight == 0.2 and rewe.rule_weight == 0.2
         assert '"99"' in rewe.lgbm_probs and rewe.nb_probs and rewe.ensemble_probs
+        assert json.loads(rewe.rule_probs) == {str(groceries.id): 0.85, "99": 0.15}
         assert events["b" * 16].decision == ReviewPriority.STANDARD.value
 
     def test_auto_accept_writes_a_review_event_but_needs_review_does_not(self, db_session):
@@ -162,6 +173,8 @@ class TestTrailAssembly:
         prediction = trail.events[1]
         assert prediction.final_category == "eating out"
         assert prediction.rule_category == "eating out"
+        assert prediction.rule_weight == 0.2
+        assert [r.category for r in prediction.rule_top][0] == "eating out"
         assert [r.category for r in prediction.lgbm_top][0] == "eating out"
         assert trail.events[0].to_category == "groceries"
 
@@ -184,11 +197,13 @@ class TestPages:
             "LightGBM",
             "Naive Bayes",
             "Ensemble",
-            "Merchant rule",
+            "Merchant rule (weight 0.20)",
+            "proposed groceries at 85.0%, voting with weight 0.20",
             "auto-accepted",
             "abc123def456",
         ):
             assert needle in resp.text, needle
+        assert "applied" not in resp.text
 
     def test_trail_page_without_events_explains_why(self, test_client, db_session):
         _categories(db_session)
@@ -226,6 +241,23 @@ class TestPages:
         assert resp.status_code == 200
         assert "Merchant rules (1)" in resp.text
         assert "VISA PAYPAL SPOTIFY" in resp.text and "98%" in resp.text
+        assert "No model is trained yet" in resp.text
+
+    def test_rules_page_names_the_learned_rule_weight(self, test_client, db_session):
+        db_session.add(
+            ModelMetadataORM(
+                model_version="1.0-ensemble",
+                accuracy=0.83,
+                feature_importance=json.dumps({"ensemble_weights": {"lgbm": 0.5, "nb": 0.3, "rule": 0.2}}),
+                is_active=True,
+            )
+        )
+        db_session.commit()
+
+        resp = test_client.get("/rules")
+
+        assert "that weight is 20%" in resp.text
+        assert "50% for LightGBM" in resp.text and "30% for Naive Bayes" in resp.text
 
 
 class TestMerchantRuleRebuild:

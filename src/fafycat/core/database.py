@@ -181,8 +181,10 @@ class PredictionEventORM(Base):
     rule_confidence = Column(Float)
     lgbm_weight = Column(Float)
     nb_weight = Column(Float)
+    rule_weight = Column(Float)
     lgbm_probs = Column(Text)  # JSON {category_id: prob}
     nb_probs = Column(Text)  # JSON
+    rule_probs = Column(Text)  # JSON, absent when no Merchant Rule matched
     ensemble_probs = Column(Text)  # JSON
     feature_contributions = Column(Text)  # JSON
 

@@ -4,7 +4,8 @@ from fasthtml.common import H1, A, Div, P, Table, Tbody, Td, Th, Thead, Tr, to_x
 from sqlalchemy.orm import Session
 
 from fafycat.core.database import CategoryORM, MerchantMappingORM
-from fafycat.ml.merchant_mapper import RULE_MIN_SHARE, RULE_OVERRIDE_CONFIDENCE
+from fafycat.ml.ensemble_categorizer import active_ensemble_weights
+from fafycat.ml.merchant_mapper import RULE_MIN_SHARE
 from fafycat.web.components.layout import create_page_layout
 
 
@@ -17,11 +18,20 @@ def render_rules_page(session: Session) -> str:
         .all()
     )
 
+    weights = active_ensemble_weights(session)
+    weight_sentence = (
+        f"In the model in use now that weight is {weights['rule']:.0%}, against "
+        f"{weights['lgbm']:.0%} for LightGBM and {weights['nb']:.0%} for Naive Bayes."
+        if weights
+        else "No model is trained yet, so no weight has been learned."
+    )
+
     intro = P(
         "A merchant rule maps a cleaned merchant name to a category. Rules are rebuilt from your reviewed "
-        f"transactions every time the model is trained: a merchant needs at least 3 reviews with one category "
-        f"holding {RULE_MIN_SHARE:.0%} or more of them. A rule decides a prediction on its own only when it matches "
-        f"exactly and its confidence is at least {RULE_OVERRIDE_CONFIDENCE:.0%}; otherwise the ML ensemble decides.",
+        "transactions every time the model is trained: a merchant needs at least 3 reviews with one category "
+        f"holding {RULE_MIN_SHARE:.0%} or more of them. A rule never decides on its own. It votes in the ensemble "
+        "beside LightGBM and Naive Bayes, with a weight learned on a validation split, so the models can outvote "
+        f"a rule that disagrees with them. {weight_sentence}",
         cls="text-secondary mb-6",
     )
 

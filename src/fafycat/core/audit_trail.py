@@ -61,8 +61,10 @@ def record_prediction_event(
         rule_confidence=detail.rule_confidence if detail else None,
         lgbm_weight=detail.lgbm_weight if detail else None,
         nb_weight=detail.nb_weight if detail else None,
+        rule_weight=detail.rule_weight if detail else None,
         lgbm_probs=json.dumps(detail.lgbm_probs) if detail else None,
         nb_probs=json.dumps(detail.nb_probs) if detail else None,
+        rule_probs=json.dumps(detail.rule_probs) if detail and detail.rule_probs else None,
         ensemble_probs=json.dumps(detail.ensemble_probs) if detail else None,
         feature_contributions=json.dumps(prediction.feature_contributions),
     )
@@ -119,8 +121,10 @@ class PredictionEventView:
     rule_confidence: float | None
     lgbm_weight: float | None
     nb_weight: float | None
+    rule_weight: float | None = None
     lgbm_top: list[Ranked] = field(default_factory=list)
     nb_top: list[Ranked] = field(default_factory=list)
+    rule_top: list[Ranked] = field(default_factory=list)
     ensemble_top: list[Ranked] = field(default_factory=list)
     feature_contributions: dict[str, float] = field(default_factory=dict)
 
@@ -188,8 +192,10 @@ def get_trail(db: Session, transaction_id: str) -> TransactionTrail | None:
                 rule_confidence=cast(float | None, e.rule_confidence),
                 lgbm_weight=cast(float | None, e.lgbm_weight),
                 nb_weight=cast(float | None, e.nb_weight),
+                rule_weight=cast(float | None, e.rule_weight),
                 lgbm_top=top(e.lgbm_probs),
                 nb_top=top(e.nb_probs),
+                rule_top=top(e.rule_probs),
                 ensemble_top=top(e.ensemble_probs),
                 feature_contributions=json.loads(str(e.feature_contributions)) if e.feature_contributions else {},
             )
