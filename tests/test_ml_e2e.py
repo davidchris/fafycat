@@ -133,12 +133,12 @@ class TestTransactionCategorizerTrain:
             assert 0.0 <= pred.confidence_score <= 1.0
             assert pred.predicted_category_id > 0
 
-    def test_train_creates_calibrated_classifier(self, seeded_db, ml_config):
+    def test_train_fits_a_temperature_calibrator(self, seeded_db, ml_config):
         session, _ = seeded_db
         categorizer = TransactionCategorizer(session, ml_config)
         categorizer.train()
 
-        assert categorizer.calibrated_classifier is not None
+        assert categorizer.calibrator is not None
         assert categorizer.is_trained is True
 
 
@@ -159,7 +159,7 @@ class TestTransactionCategorizerFit:
         categorizer.fit(transactions, labels)
 
         assert categorizer.is_trained is True
-        assert categorizer.calibrated_classifier is not None
+        assert categorizer.calibrator is not None
 
     def test_fit_enables_predictions(self, seeded_db, ml_config):
         session, transactions = seeded_db
@@ -188,17 +188,16 @@ class TestEnsembleCategorizerTraining:
         session, _ = seeded_db
         ensemble = EnsembleCategorizer(session, ml_config)
 
-        results = ensemble.train_with_validation_optimization()
+        results = ensemble.train()
 
-        assert "best_weights" in results
-        assert "validation_accuracy" in results
-        weights = results["best_weights"]
-        assert set(weights) == {"lgbm", "nb", "rule"}
-        assert abs(weights["lgbm"] + weights["nb"] + weights["rule"] - 1.0) < 1e-6
+        assert 0.0 <= results["oof_accuracy"] <= 1.0
+        assert results["oof_logloss"] > 0.0
+        assert 0.0 <= results["auto_rate"] <= 1.0
+        assert results["temperature_lgbm"] > 0.0 and results["temperature_nb"] > 0.0
+        assert ensemble.stack is not None and ensemble.lgbm_component.calibrator is not None
+        assert set(results["stack_importance"]) >= {"lgbm_logp", "nb_logp", "rule_logp", "rule_hit"}
 
-    def test_weight_optimisation_scores_the_validation_split_with_training_split_rules(
-        self, seeded_db, ml_config, monkeypatch
-    ):
+    def test_out_of_fold_scoring_derives_rules_from_the_other_folds_only(self, seeded_db, ml_config, monkeypatch):
         session, transactions = seeded_db
         derive = EnsembleCategorizer._training_split_rules
         seen: list[int] = []
@@ -209,17 +208,17 @@ class TestEnsembleCategorizerTraining:
 
         monkeypatch.setattr(EnsembleCategorizer, "_training_split_rules", staticmethod(spy))
 
-        results = EnsembleCategorizer(session, ml_config).train_with_validation_optimization()
+        results = EnsembleCategorizer(session, ml_config).train()
 
-        assert seen, "weight optimisation must derive its own rules"
-        # 80/20 split: the rules must not see the fifth of the data they are scored against.
-        assert seen[0] < results["n_training_samples"]
-        assert seen[0] == pytest.approx(0.8 * results["n_training_samples"], abs=1)
+        assert len(seen) == results["n_folds"], "one rule set per fold"
+        # Each fold's rules must not see the rows they are scored against.
+        assert all(n < results["n_training_samples"] for n in seen)
+        assert seen[0] == pytest.approx((1 - 1 / results["n_folds"]) * results["n_training_samples"], abs=1)
 
     def test_ensemble_enables_predictions(self, seeded_db, ml_config):
         session, transactions = seeded_db
         ensemble = EnsembleCategorizer(session, ml_config)
-        ensemble.train_with_validation_optimization()
+        ensemble.train()
 
         preds = ensemble.predict_with_confidence(transactions[:5])
 
@@ -227,6 +226,7 @@ class TestEnsembleCategorizerTraining:
         for pred in preds:
             assert isinstance(pred, TransactionPrediction)
             assert 0.0 <= pred.confidence_score <= 1.0
-            # Ensemble predictions include weight keys
-            assert "ensemble_lgbm_weight" in pred.feature_contributions
+            assert "nb_text_features" in pred.feature_contributions
             assert pred.detail is not None and pred.detail.source == "ensemble"
+            assert len(pred.detail.meta_features) == 14
+            assert sum(pred.detail.ensemble_probs.values()) == pytest.approx(1.0, abs=1e-3)  # rounded to 4 places

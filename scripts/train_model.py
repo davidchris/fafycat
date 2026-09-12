@@ -33,18 +33,17 @@ def main() -> None:
                 ensemble_categorizer = EnsembleCategorizer(session, config.ml)
                 model_filename = "ensemble_categorizer.pkl"
 
-                print("Starting ensemble training with validation optimization...")
-                cv_results = ensemble_categorizer.train_with_validation_optimization()
+                print("Starting stacked ensemble training...")
+                summary = ensemble_categorizer.train()
 
                 print("\nEnsemble Training Results:")
-                print(f"Validation Accuracy: {cv_results['validation_accuracy']:.3f}")
+                print(f"Out-of-fold accuracy: {summary['oof_accuracy']:.3f} (log-loss {summary['oof_logloss']:.3f})")
                 print(
-                    f"Optimal Weights: LightGBM={cv_results['best_weights']['lgbm']:.1f}, "
-                    f"NB={cv_results['best_weights']['nb']:.1f}, "
-                    f"Merchant rule={cv_results['best_weights'].get('rule', 0.0):.1f}"
+                    f"Auto-approve at {summary['auto_threshold']:.2f}: {summary['auto_rate']:.1%} of rows, "
+                    f"{summary['auto_error_rate']:.2%} of those wrong"
                 )
-                print(f"Training samples: {cv_results['n_training_samples']}")
-                print(f"Validation samples: {cv_results['n_validation_samples']}")
+                print(f"Temperatures: LightGBM {summary['temperature_lgbm']:.2f}, NB {summary['temperature_nb']:.2f}")
+                print(f"Training samples: {summary['n_training_samples']}")
 
                 # Save model
                 model_path = config.ml.model_dir / model_filename

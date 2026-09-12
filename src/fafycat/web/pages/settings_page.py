@@ -281,16 +281,16 @@ def render_empty_categories_state(ml_status, calibration=None):
             if (barEl) barEl.style.width = `${{data.progress}}%`;
         }}
 
-        function formatEnsembleWeights(weights) {{
-            if (!weights) return '';
-            const pct = (value) => `${{Math.round((value || 0) * 100)}}%`;
-            return `\\n- Voter weights: LightGBM ${{pct(weights.lgbm)}}, Naive Bayes ${{pct(weights.nb)}}, Merchant rules ${{pct(weights.rule)}}`;
+        function formatAutoApprove(result) {{
+            if (result.auto_rate === undefined) return '';
+            const pct = (value) => `${{(value * 100).toFixed(1)}}%`;
+            return `\\n- Auto-approve at ${{pct(result.auto_threshold)}}: ${{pct(result.auto_rate)}} of rows, ${{pct(result.auto_error_rate)}} of those wrong (out-of-fold)`;
         }}
 
         function handleTrainingComplete(result) {{
             const accuracy = (result.accuracy * 100).toFixed(1);
             const samples = result.training_samples;
-            const weights = formatEnsembleWeights(result.ensemble_weights);
+            const autoApprove = formatAutoApprove(result);
 
             // Update button to show prediction phase
             const trainButton = document.getElementById('trainButton');
@@ -308,17 +308,17 @@ def render_empty_categories_state(ml_status, calibration=None):
                 if (predictData.status === 'success') {{
                     const predicted = predictData.predictions_made;
                     const message = predicted > 0
-                        ? `Training and prediction completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}${{weights}}\\n\\nAuto-Prediction Results:\\n- ${{predicted}} transactions now have predictions\\n- Ready for review on the Review page!`
-                        : `Model training completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}${{weights}}\\n\\nAll transactions already have predictions!`;
+                        ? `Training and prediction completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}${{autoApprove}}\\n\\nAuto-Prediction Results:\\n- ${{predicted}} transactions now have predictions\\n- Ready for review on the Review page!`
+                        : `Model training completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}${{autoApprove}}\\n\\nAll transactions already have predictions!`;
                     alert(message);
                 }} else {{
-                    alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{weights}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
+                    alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{autoApprove}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
                 }}
                 location.reload();
             }})
             .catch(error => {{
                 console.error('Auto-prediction failed:', error);
-                alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{weights}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
+                alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{autoApprove}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
                 location.reload();
             }});
         }}
@@ -773,17 +773,17 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             if (barEl) barEl.style.width = `${data.progress}%`;
         }
 
-        function formatEnsembleWeights(weights) {
-            if (!weights) return '';
-            const pct = (value) => `${Math.round((value || 0) * 100)}%`;
-            return `\\n- Voter weights: LightGBM ${pct(weights.lgbm)}, Naive Bayes ${pct(weights.nb)}, Merchant rules ${pct(weights.rule)}`;
+        function formatAutoApprove(result) {
+            if (result.auto_rate === undefined) return '';
+            const pct = (value) => `${(value * 100).toFixed(1)}%`;
+            return `\\n- Auto-approve at ${pct(result.auto_threshold)}: ${pct(result.auto_rate)} of rows, ${pct(result.auto_error_rate)} of those wrong (out-of-fold)`;
         }
 
         function handleTrainingComplete(result) {
             const accuracy = (result.accuracy * 100).toFixed(1);
             const samples = result.training_samples;
-            const weights = formatEnsembleWeights(result.ensemble_weights);
-            alert(`Model training completed!\\n\\nAccuracy: ${accuracy}%\\nTraining samples: ${samples}${weights}\\n\\nYour model is now ready to predict transactions!`);
+            const autoApprove = formatAutoApprove(result);
+            alert(`Model training completed!\\n\\nAccuracy: ${accuracy}%\\nTraining samples: ${samples}${autoApprove}\\n\\nYour model is now ready to predict transactions!`);
             location.reload();
         }
 

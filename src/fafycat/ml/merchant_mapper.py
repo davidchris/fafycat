@@ -19,21 +19,46 @@ from ..core.database import CategoryORM, MerchantMappingORM, TransactionORM
 from ..core.models import MerchantMapping
 from .feature_extractor import MerchantCleaner
 
-RULE_OVERRIDE_CONFIDENCE = 0.95
+RULE_OVERRIDE_CONFIDENCE = 0.98
 """Confidence at which a rule decides alone in the single-model Categorizer.
 
-The ensemble ignores this bar: there a rule is a weighted voter, so every
-match adds its confidence to the blend instead of replacing it.
+Only a rule backed by three or more agreeing reviews reaches this bar (see
+:data:`RULE_CONFIDENCE_CAPS`). The ensemble ignores it: there a rule is a
+voter the stack reads, never a decision.
 """
 
 RULE_MIN_SHARE = 0.8
 """Minimum share of one category among a merchant's reviews to form a rule."""
 
-RULE_MAX_CONFIDENCE = 0.98
-"""Rules never claim certainty; leaves room for the reviewer to disagree."""
+RULE_CONFIDENCE_CAPS = (0.90, 0.95, 0.98)
+"""Confidence cap for a rule backed by one, two, and three or more reviews.
 
-RULE_MIN_REVIEWS = 3
+A rule forms after the first review so the label propagates to the next
+import at once, but it speaks quietly until more reviews agree. Rules never
+claim certainty; the last cap leaves room for the reviewer to disagree.
+Measured in experiments/03-rule-after-one-review: a flat 0.98 after one
+review breaks the auto-approve error budget, this schedule does not.
+"""
+
+RULE_MAX_CONFIDENCE = RULE_CONFIDENCE_CAPS[-1]
+"""The most a rule may ever claim."""
+
+RULE_MIN_REVIEWS = 1
 """Reviews a merchant pattern needs before it can form a rule."""
+
+
+def rule_confidence(share: float, review_count: int) -> float:
+    """Confidence of a rule from its majority share and how many reviews back it.
+
+    Args:
+        share: Share of the majority category among the reviews, in (0, 1].
+        review_count: Number of reviews the rule is derived from.
+
+    Returns:
+        ``share`` capped by the :data:`RULE_CONFIDENCE_CAPS` entry for ``review_count``.
+    """
+    cap = RULE_CONFIDENCE_CAPS[min(review_count, len(RULE_CONFIDENCE_CAPS)) - 1]
+    return min(cap, share)
 
 
 def refresh_rule_for_pattern(session: Session, pattern: str, min_occurrences: int = RULE_MIN_REVIEWS) -> bool:
@@ -90,7 +115,7 @@ def refresh_rule_for_pattern(session: Session, pattern: str, min_occurrences: in
     if existing is None:
         session.add(mapping)
     mapping.category_id = category_id
-    mapping.confidence = min(RULE_MAX_CONFIDENCE, top / total)
+    mapping.confidence = rule_confidence(top / total, total)
     mapping.occurrence_count = total
     mapping.last_seen = last_seen
     session.commit()
@@ -145,7 +170,7 @@ def derive_rules(
         category_id, top = counts.most_common(1)[0]
         share = top / total
         if total >= min_occurrences and share >= RULE_MIN_SHARE:
-            rules[pattern] = DerivedRule(category_id, min(RULE_MAX_CONFIDENCE, share), total, last_seen[pattern])
+            rules[pattern] = DerivedRule(category_id, rule_confidence(share, total), total, last_seen[pattern])
     return rules
 
 

@@ -114,9 +114,12 @@ class PredictionDetail(BaseModel):
     rule_probs: dict[int, float] = Field(default_factory=dict)
     """What the Merchant Rule voted, empty when no rule matched."""
     ensemble_probs: dict[int, float] = Field(default_factory=dict)
+    meta_features: dict[str, float] = Field(default_factory=dict)
+    """What the stacked ensemble read beside the votes; empty for older models."""
     lgbm_weight: float | None = None
     nb_weight: float | None = None
     rule_weight: float | None = None
+    """Voter weights of the weighted blend that preceded the stack; None since."""
 
 
 class TransactionPrediction(BaseModel):

@@ -286,25 +286,38 @@ class TestRuleRefresh:
     def _review(self, db_session, txn_id: str, category: CategoryORM, pattern: str) -> None:
         _seed(db_session, SHELL, txn_id, merchant_pattern=pattern, is_reviewed=True, category_id=category.id)
 
-    def test_creates_a_rule_once_the_third_consistent_review_lands(self, db_session):
+    def test_creates_a_rule_after_the_first_review_and_grows_more_confident(self, db_session):
         fuel, _ = _categories(db_session)
         pattern = _pattern_of(SHELL)
 
         self._review(db_session, "a", fuel, pattern)
-        self._review(db_session, "b", fuel, pattern)
-        db_session.commit()
-        assert refresh_rule_for_pattern(db_session, pattern) is False
-        assert db_session.query(MerchantMappingORM).count() == 0
-
-        self._review(db_session, "c", fuel, pattern)
         db_session.commit()
         assert refresh_rule_for_pattern(db_session, pattern) is True
-
         rule = db_session.query(MerchantMappingORM).one()
         assert rule.merchant_pattern == pattern
         assert rule.category_id == fuel.id
-        assert rule.occurrence_count == 3
-        assert rule.confidence == 0.98  # capped by RULE_MAX_CONFIDENCE
+        assert (rule.occurrence_count, rule.confidence) == (1, 0.90)
+
+        self._review(db_session, "b", fuel, pattern)
+        db_session.commit()
+        refresh_rule_for_pattern(db_session, pattern)
+        rule = db_session.query(MerchantMappingORM).one()
+        assert (rule.occurrence_count, rule.confidence) == (2, 0.95)
+
+        self._review(db_session, "c", fuel, pattern)
+        db_session.commit()
+        refresh_rule_for_pattern(db_session, pattern)
+        rule = db_session.query(MerchantMappingORM).one()
+        assert (rule.occurrence_count, rule.confidence) == (3, 0.98)  # capped by RULE_MAX_CONFIDENCE
+
+    def test_a_rule_from_one_review_still_needs_the_share(self, db_session):
+        fuel, groceries = _categories(db_session)
+        pattern = _pattern_of(SHELL)
+        self._review(db_session, "a", fuel, pattern)
+        self._review(db_session, "b", groceries, pattern)
+        db_session.commit()
+
+        assert refresh_rule_for_pattern(db_session, pattern) is False
 
     def test_deletes_the_rule_once_the_reviews_diverge(self, db_session):
         fuel, groceries = _categories(db_session)
@@ -331,7 +344,10 @@ class TestRuleRefresh:
         _seed(db_session, SHELL, "c", merchant_pattern=pattern, category_id=fuel.id)
         db_session.commit()
 
-        assert refresh_rule_for_pattern(db_session, pattern) is False
+        assert refresh_rule_for_pattern(db_session, pattern) is True
+        rule = db_session.query(MerchantMappingORM).one()
+        # Only the reviewed row counts: one review, so the rule stays at its first cap.
+        assert (rule.occurrence_count, rule.confidence) == (1, 0.90)
 
     def test_saving_a_category_refreshes_the_rule_without_a_retrain(self, test_client, db_session):
         fuel, _ = _categories(db_session)

@@ -15,8 +15,25 @@ _ACTOR_LABELS = {
 
 _SOURCE_LABELS = {
     "merchant_rule": "Merchant rule decided",
-    "ensemble": "Ensemble decided",
+    "ensemble": "Stacked ensemble decided",
     "lgbm": "LightGBM decided",
+}
+
+_META_LABELS = {
+    "lgbm_top": "LightGBM top probability",
+    "lgbm_entropy": "LightGBM spread",
+    "nb_top": "Naive Bayes top probability",
+    "nb_entropy": "Naive Bayes spread",
+    "rule_top": "Rule top probability",
+    "rule_entropy": "Rule spread",
+    "rule_hit": "Rule matched",
+    "rule_conf": "Rule confidence",
+    "agree_lgbm_nb": "LightGBM and Naive Bayes agree",
+    "agree_lgbm_rule": "LightGBM and rule agree",
+    "agree_nb_rule": "Naive Bayes and rule agree",
+    "seen_log": "Merchant seen in training (log)",
+    "log_amount": "Amount (log)",
+    "amount_sign": "Amount sign",
 }
 
 _TRIGGER_LABELS = {
@@ -50,13 +67,14 @@ def _prediction_card(ev: PredictionEventView) -> Div:
     if ev.rule_pattern is None:
         rule = P("No merchant rule matched, so the two models decided alone.", cls="text-secondary text-sm")
     else:
-        vote = (
-            f"voting with weight {ev.rule_weight:.2f}"
-            if ev.rule_weight
-            else "carrying no weight in this model"
-            if ev.source == "ensemble"
-            else "decided on its own"
-        )
+        if ev.rule_weight:
+            vote = f"voting with weight {ev.rule_weight:.2f}"
+        elif ev.meta_features:
+            vote = "read by the stacked ensemble beside the two models"
+        elif ev.source == "ensemble":
+            vote = "carrying no weight in this model"
+        else:
+            vote = "decided on its own"
         rule = P(
             Span("Merchant rule: ", cls="font-medium"),
             f"{ev.rule_pattern} proposed {ev.rule_category} at {_pct(ev.rule_confidence)}, {vote}. ",
@@ -86,7 +104,17 @@ def _prediction_card(ev: PredictionEventView) -> Div:
             _ranked_table("Ensemble", ev.ensemble_top),
             cls="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-3",
         ),
+        *([_meta_table(ev.meta_features)] if ev.meta_features else []),
         cls="card mb-4",
+    )
+
+
+def _meta_table(meta: dict[str, float]) -> Div:
+    """What the stacked ensemble read beside the three votes."""
+    rows = [Tr(Td(_META_LABELS.get(name, name)), Td(f"{value:.2f}", cls="amount-cell")) for name, value in meta.items()]
+    return Div(
+        H3("What the stack read", cls="text-sm font-medium mb-1 mt-3"),
+        Table(Tbody(*rows), cls="text-sm"),
     )
 
 

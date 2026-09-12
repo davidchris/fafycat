@@ -18,8 +18,9 @@ class TrainingPhase(StrEnum):
     PENDING = "pending"
     PREPARING_DATA = "preparing_data"
     TRAINING_LGBM = "training_lgbm"
-    TRAINING_NB = "training_nb"
-    OPTIMIZING_WEIGHTS = "optimizing_weights"
+    TRAINING_FOLDS = "training_folds"
+    FITTING_STACK = "fitting_stack"
+    TRAINING_FINAL = "training_final"
     SAVING_MODEL = "saving_model"
     DONE = "done"
     ERROR = "error"
@@ -29,8 +30,9 @@ PHASE_DESCRIPTIONS = {
     TrainingPhase.PENDING: "Waiting to start...",
     TrainingPhase.PREPARING_DATA: "Preparing training data from database...",
     TrainingPhase.TRAINING_LGBM: "Training LightGBM model...",
-    TrainingPhase.TRAINING_NB: "Training Naive Bayes model...",
-    TrainingPhase.OPTIMIZING_WEIGHTS: "Optimizing ensemble weights...",
+    TrainingPhase.TRAINING_FOLDS: "Scoring the voters out-of-fold...",
+    TrainingPhase.FITTING_STACK: "Calibrating and fitting the stacked ensemble...",
+    TrainingPhase.TRAINING_FINAL: "Training the final voters on all rows...",
     TrainingPhase.SAVING_MODEL: "Saving trained model...",
     TrainingPhase.DONE: "Training completed successfully!",
     TrainingPhase.ERROR: "Training failed",
@@ -40,8 +42,9 @@ PHASE_PROGRESS = {
     TrainingPhase.PENDING: 0,
     TrainingPhase.PREPARING_DATA: 10,
     TrainingPhase.TRAINING_LGBM: 30,
-    TrainingPhase.TRAINING_NB: 55,
-    TrainingPhase.OPTIMIZING_WEIGHTS: 75,
+    TrainingPhase.TRAINING_FOLDS: 20,
+    TrainingPhase.FITTING_STACK: 70,
+    TrainingPhase.TRAINING_FINAL: 80,
     TrainingPhase.SAVING_MODEL: 90,
     TrainingPhase.DONE: 100,
     TrainingPhase.ERROR: 0,

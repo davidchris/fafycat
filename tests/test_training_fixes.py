@@ -133,7 +133,7 @@ class TestFitWithSmallClasses:
         categorizer.fit(transactions, labels)
 
         assert categorizer.is_trained is True
-        assert categorizer.calibrated_classifier is not None
+        assert categorizer.calibrator is not None
 
 
 class TestTrainingStatusLogFilter:

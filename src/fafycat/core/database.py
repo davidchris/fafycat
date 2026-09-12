@@ -189,6 +189,7 @@ class PredictionEventORM(Base):
     nb_probs = Column(Text)  # JSON
     rule_probs = Column(Text)  # JSON, absent when no Merchant Rule matched
     ensemble_probs = Column(Text)  # JSON
+    meta_features = Column(Text)  # JSON {name: value}, what the stack read beside the votes
     feature_contributions = Column(Text)  # JSON
 
     __table_args__ = (Index("idx_prediction_events_transaction", "transaction_id", "created_at"),)

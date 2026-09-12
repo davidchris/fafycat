@@ -73,6 +73,7 @@ def record_prediction_event(
         nb_probs=json.dumps(detail.nb_probs) if detail else None,
         rule_probs=json.dumps(detail.rule_probs) if detail and detail.rule_probs else None,
         ensemble_probs=json.dumps(detail.ensemble_probs) if detail else None,
+        meta_features=json.dumps(detail.meta_features) if detail and detail.meta_features else None,
         feature_contributions=json.dumps(prediction.feature_contributions),
     )
     db.add(event)
@@ -133,6 +134,7 @@ class PredictionEventView:
     nb_top: list[Ranked] = field(default_factory=list)
     rule_top: list[Ranked] = field(default_factory=list)
     ensemble_top: list[Ranked] = field(default_factory=list)
+    meta_features: dict[str, float] = field(default_factory=dict)
     feature_contributions: dict[str, float] = field(default_factory=dict)
 
     kind: str = "prediction"
@@ -204,6 +206,7 @@ def get_trail(db: Session, transaction_id: str) -> TransactionTrail | None:
                 nb_top=top(e.nb_probs),
                 rule_top=top(e.rule_probs),
                 ensemble_top=top(e.ensemble_probs),
+                meta_features=json.loads(str(e.meta_features)) if e.meta_features else {},
                 feature_contributions=json.loads(str(e.feature_contributions)) if e.feature_contributions else {},
             )
         )

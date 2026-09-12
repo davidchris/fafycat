@@ -7,6 +7,31 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+- **Honest confidence.** LightGBM and Naive Bayes are calibrated with a
+  temperature fitted on out-of-fold predictions instead of an in-sample
+  Platt fit that pushed everything past 0.95. LightGBM now uses 80 trees
+  (down from 1000, which was 13x past its early-stopping point).
+- **Stacked ensemble replaces voter weights.** A logistic regression over
+  the three voters' probabilities plus meta features (agreement, rule
+  match, how often the merchant was seen, amount) decides, fitted on
+  out-of-fold outputs with merchant rules derived per fold. Training
+  reports out-of-fold accuracy and the auto-approve rate and error at the
+  threshold. Models trained before this change must be retrained.
+- **Merchant rule after one review.** A rule forms after the first review
+  and grows more confident with each agreeing one: capped at 90%, 95%,
+  and 98% for one, two, and three or more reviews.
+- **Review queue ordered by review impact.** Pending rows are sorted by
+  pending siblings times uncertainty, so one review resolves the most.
+  Each row shows how many other pending transactions share its merchant.
+  Sorting by confidence is still available.
+- **Audit trail shows what the stack read.** The trail page lists the
+  meta features beside the three votes.
+
+### Removed
+- The simplex weight grid, `MIN_MODEL_WEIGHT`, and the unused k-fold
+  validator module.
+
 ## [0.2.0] - 2026-09-10
 
 ### Added

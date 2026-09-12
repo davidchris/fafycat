@@ -4,8 +4,7 @@ from fasthtml.common import H1, A, Div, P, Table, Tbody, Td, Th, Thead, Tr, to_x
 from sqlalchemy.orm import Session
 
 from fafycat.core.database import CategoryORM, MerchantMappingORM
-from fafycat.ml.ensemble_categorizer import active_ensemble_weights
-from fafycat.ml.merchant_mapper import RULE_MIN_SHARE
+from fafycat.ml.merchant_mapper import RULE_CONFIDENCE_CAPS, RULE_MIN_REVIEWS, RULE_MIN_SHARE
 from fafycat.web.components.layout import create_page_layout
 
 
@@ -18,20 +17,14 @@ def render_rules_page(session: Session) -> str:
         .all()
     )
 
-    weights = active_ensemble_weights(session)
-    weight_sentence = (
-        f"In the model in use now that weight is {weights['rule']:.0%}, against "
-        f"{weights['lgbm']:.0%} for LightGBM and {weights['nb']:.0%} for Naive Bayes."
-        if weights
-        else "No model is trained yet, so no weight has been learned."
-    )
-
+    caps = ", ".join(f"{cap:.0%}" for cap in RULE_CONFIDENCE_CAPS)
     intro = P(
         "A merchant rule maps a cleaned merchant name to a category. Rules are rebuilt from your reviewed "
-        "transactions every time the model is trained: a merchant needs at least 3 reviews with one category "
-        f"holding {RULE_MIN_SHARE:.0%} or more of them. A rule never decides on its own. It votes in the ensemble "
-        "beside LightGBM and Naive Bayes, with a weight learned on a validation split, so the models can outvote "
-        f"a rule that disagrees with them. {weight_sentence}",
+        f"transactions after every review: a merchant needs {RULE_MIN_REVIEWS} review with one category holding "
+        f"{RULE_MIN_SHARE:.0%} or more of them. A rule speaks more confidently the more reviews back it, capped at "
+        f"{caps} for one, two, and three or more reviews. A rule never decides on its own. It votes in the "
+        "ensemble beside LightGBM and Naive Bayes, and the stacked model learns from out-of-fold training rows "
+        "how far to trust it.",
         cls="text-secondary mb-6",
     )
 

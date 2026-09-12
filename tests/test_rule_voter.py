@@ -1,4 +1,4 @@
-"""The Merchant Rule as the ensemble's third voter: its vote, the blend, its weight."""
+"""The Merchant Rule as the ensemble's third voter: its vote and how the stack records it."""
 
 from datetime import date
 from types import SimpleNamespace
@@ -8,15 +8,10 @@ import pytest
 
 from fafycat.core.config import MLConfig
 from fafycat.core.models import MerchantMapping, TransactionInput
-from fafycat.ml.ensemble_categorizer import (
-    MIN_MODEL_WEIGHT,
-    EnsembleCategorizer,
-    blend_probabilities,
-    rule_probability_vector,
-    rule_votes,
-    weight_grid,
-)
+from fafycat.ml.calibration import TemperatureScaler
+from fafycat.ml.ensemble_categorizer import EnsembleCategorizer, rule_probability_vector, rule_votes
 from fafycat.ml.merchant_mapper import MerchantRuleSet, derive_rules
+from fafycat.ml.stack import META_NAMES, Voters
 
 CLASS_IDS = [1, 2, 3]
 
@@ -56,68 +51,6 @@ class TestRuleVote:
         assert votes[1] == pytest.approx([0.0, 0.0, 0.0])
 
 
-class TestBlend:
-    lgbm = np.array([[0.6, 0.3, 0.1], [0.6, 0.3, 0.1]])
-    nb = np.array([[0.2, 0.7, 0.1], [0.2, 0.7, 0.1]])
-    rule = np.array([[0.05, 0.9, 0.05], [0.0, 0.0, 0.0]])
-    has_rule = np.array([True, False])
-
-    def test_rule_row_is_the_weighted_sum_of_all_three_voters(self):
-        weights = {"lgbm": 0.5, "nb": 0.3, "rule": 0.2}
-
-        blended = blend_probabilities(self.lgbm, self.nb, self.rule, self.has_rule, weights)
-
-        assert blended[0] == pytest.approx(0.5 * self.lgbm[0] + 0.3 * self.nb[0] + 0.2 * self.rule[0])
-        assert blended[0].sum() == pytest.approx(1.0)
-
-    def test_row_without_a_rule_renormalises_over_the_two_models(self):
-        weights = {"lgbm": 0.5, "nb": 0.3, "rule": 0.2}
-
-        blended = blend_probabilities(self.lgbm, self.nb, self.rule, self.has_rule, weights)
-
-        assert blended[1] == pytest.approx((0.5 * self.lgbm[1] + 0.3 * self.nb[1]) / 0.8)
-        assert blended[1].sum() == pytest.approx(1.0)
-
-    def test_merchants_without_a_rule_predict_exactly_as_the_two_models_did(self):
-        two_voters = blend_probabilities(
-            self.lgbm, self.nb, self.rule, self.has_rule, {"lgbm": 0.625, "nb": 0.375, "rule": 0.0}
-        )
-        three_voters = blend_probabilities(
-            self.lgbm, self.nb, self.rule, self.has_rule, {"lgbm": 0.5, "nb": 0.3, "rule": 0.2}
-        )
-
-        assert three_voters[1] == pytest.approx(two_voters[1])
-
-    def test_a_rule_pulls_the_outcome_but_can_be_outvoted(self):
-        heavy_rule = blend_probabilities(
-            self.lgbm, self.nb, self.rule, self.has_rule, {"lgbm": 0.1, "nb": 0.1, "rule": 0.8}
-        )
-        light_rule = blend_probabilities(
-            self.lgbm, self.nb, self.rule, self.has_rule, {"lgbm": 0.8, "nb": 0.1, "rule": 0.1}
-        )
-
-        assert int(np.argmax(heavy_rule[0])) == 1, "the rule's category wins when the rule is heavy"
-        assert int(np.argmax(light_rule[0])) == 0, "LightGBM outvotes the rule when the rule is light"
-
-
-class TestWeightGrid:
-    def test_every_candidate_sums_to_one(self):
-        assert all(sum(w.values()) == pytest.approx(1.0) for w in weight_grid())
-
-    def test_both_models_keep_a_minimum_weight_and_the_rule_may_be_silent(self):
-        grid = weight_grid()
-
-        assert all(w["lgbm"] >= MIN_MODEL_WEIGHT and w["nb"] >= MIN_MODEL_WEIGHT for w in grid)
-        assert all(w["rule"] >= 0.0 for w in grid)
-        assert any(w["rule"] == 0.0 for w in grid), "the two-voter ensemble stays reachable"
-
-    def test_the_grid_walks_the_whole_simplex_in_steps(self):
-        grid = weight_grid(step=0.1)
-
-        assert len(grid) == 45
-        assert len({tuple(sorted(w.items())) for w in grid}) == 45
-
-
 class TestLeakageFreeRules:
     """Rules that score the validation split must come from the training split."""
 
@@ -148,26 +81,41 @@ class _FakeComponent:
     def __init__(self, probabilities: list[float], classes: list[int]):
         self.probabilities = np.array(probabilities)
         self.classes_ = np.array(classes)
-        self.classifier = SimpleNamespace()  # no feature_importances_, so contributions stay empty
+        self.classifier = SimpleNamespace()  # no feature_importances_, so contributions stay short
+        self.feature_names: list[str] = []
         self.merchant_mapper = SimpleNamespace(rule_set=MerchantRuleSet({}), reload=lambda: None)
 
     def predict_proba(self, transactions: list[TransactionInput]) -> np.ndarray:
         return np.tile(self.probabilities, (len(transactions), 1))
 
 
-def _ensemble(db_session, rules: dict[str, tuple[int, float]], weights: dict[str, float]) -> EnsembleCategorizer:
+class _MeanStack:
+    """A stand-in level-1 model: the plain mean of the three voters' distributions."""
+
+    def __init__(self) -> None:
+        self.seen: list[Voters] = []
+
+    def predict_proba(self, voters: Voters) -> np.ndarray:
+        self.seen.append(voters)
+        return (voters.lgbm + voters.nb + voters.rule_probs()) / 3
+
+
+def _ensemble(db_session, rules: dict[str, tuple[int, float]]) -> EnsembleCategorizer:
     ensemble = EnsembleCategorizer(db_session, MLConfig())
     ensemble.lgbm_component = _FakeComponent([0.6, 0.3, 0.1], CLASS_IDS)
     ensemble.lgbm_component.merchant_mapper.rule_set = MerchantRuleSet(rules)
     ensemble.nb_component = _FakeComponent([0.2, 0.7, 0.1], CLASS_IDS)
-    ensemble.ensemble_weights = weights
+    ensemble.nb_temperature = TemperatureScaler()  # T = 1: leaves the fake probabilities alone
+    ensemble.stack = _MeanStack()
+    ensemble.seen_counts = {"REWE": 4}
+    ensemble.classes_ = np.array(CLASS_IDS)
     ensemble.is_trained = True
     return ensemble
 
 
 class TestEnsemblePrediction:
-    def test_prediction_detail_carries_the_rule_vote_and_its_weight(self, db_session):
-        ensemble = _ensemble(db_session, {"REWE": (3, 0.9)}, {"lgbm": 0.4, "nb": 0.3, "rule": 0.3})
+    def test_prediction_detail_carries_every_vote_and_the_meta_features(self, db_session):
+        ensemble = _ensemble(db_session, {"REWE": (3, 0.9)})
 
         detail = ensemble.predict_with_confidence([_txn("REWE")])[0].detail
 
@@ -175,26 +123,41 @@ class TestEnsemblePrediction:
         assert detail.source == "ensemble"
         assert detail.rule_pattern == "REWE" and detail.rule_category_id == 3
         assert detail.rule_probs == {1: 0.05, 2: 0.05, 3: 0.9}
-        assert detail.rule_weight == 0.3
-        assert detail.lgbm_weight == 0.4 and detail.nb_weight == 0.3
+        assert detail.lgbm_probs == pytest.approx({1: 0.6, 2: 0.3, 3: 0.1})
+        assert detail.nb_probs == pytest.approx({1: 0.2, 2: 0.7, 3: 0.1})
+        assert set(detail.meta_features) == set(META_NAMES)
+        assert detail.meta_features["rule_hit"] == 1.0 and detail.meta_features["rule_conf"] == 0.9
+        assert detail.meta_features["seen_log"] == pytest.approx(np.log1p(4))
+        assert detail.lgbm_weight is None and detail.rule_weight is None
 
-    def test_a_rule_no_longer_overrides_the_models(self, db_session):
-        ensemble = _ensemble(db_session, {"REWE": (3, 0.98)}, {"lgbm": 0.4, "nb": 0.4, "rule": 0.2})
+    def test_the_stack_decides_and_a_rule_never_overrides_it(self, db_session):
+        ensemble = _ensemble(db_session, {"REWE": (3, 0.98)})
 
         prediction = ensemble.predict_with_confidence([_txn("REWE")])[0]
 
-        assert prediction.predicted_category_id == 2, "the models outvote a 98% rule at weight 0.2"
+        # Mean of (0.6, 0.3, 0.1), (0.2, 0.7, 0.1), (0.01, 0.01, 0.98): category 3 by a hair.
+        assert prediction.detail is not None
+        assert prediction.detail.ensemble_probs == pytest.approx({1: 0.27, 2: 0.3367, 3: 0.3933}, abs=1e-4)
+        assert prediction.predicted_category_id == 3
         assert prediction.confidence_score < 0.98
 
     def test_a_transaction_without_a_rule_records_no_rule_vote(self, db_session):
-        ensemble = _ensemble(db_session, {"REWE": (3, 0.9)}, {"lgbm": 0.4, "nb": 0.3, "rule": 0.3})
+        ensemble = _ensemble(db_session, {"REWE": (3, 0.9)})
 
         prediction = ensemble.predict_with_confidence([_txn("Fielmann")])[0]
 
         assert prediction.detail is not None
         assert prediction.detail.rule_probs == {}
-        assert prediction.detail.rule_weight == 0.0
         assert prediction.detail.rule_pattern is None
-        # Renormalised over the two models, which agree on category 2
+        assert prediction.detail.meta_features["rule_hit"] == 0.0
+        assert prediction.detail.meta_features["seen_log"] == 0.0
+        # The stack saw a flat rule vote, so the two models decide: they agree on category 2.
         assert prediction.predicted_category_id == 2
-        assert prediction.confidence_score == pytest.approx((0.4 * 0.3 + 0.3 * 0.7) / 0.7)
+        assert prediction.confidence_score == pytest.approx((0.3 + 0.7 + 1 / 3) / 3)
+
+    def test_prediction_requires_a_stack(self, db_session):
+        ensemble = _ensemble(db_session, {})
+        ensemble.stack = None
+
+        with pytest.raises(ValueError, match="retrain"):
+            ensemble.predict_with_confidence([_txn("REWE")])

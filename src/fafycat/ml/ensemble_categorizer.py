@@ -1,8 +1,11 @@
-"""Ensemble categorizer blending LightGBM, Naive Bayes, and the Merchant Rules.
+"""Ensemble categorizer stacking LightGBM, Naive Bayes, and the Merchant Rules.
 
 All three are voters: each one turns a transaction into a probability vector
-over the categories, and the ensemble adds them up with weights learned on a
-validation split.
+over the categories. A level-1 model (:class:`~fafycat.ml.stack.StackLR`)
+reads the three vectors plus a few meta features and produces the final
+probabilities. Everything the stack learns from is out-of-fold: the voters
+are refitted on five folds so that no row is judged by a model, or a rule,
+that saw it during training.
 """
 
 import json
@@ -13,83 +16,21 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+from sklearn.model_selection import StratifiedKFold
 from sqlalchemy.orm import Session
 
 from ..core.config import MLConfig
 from ..core.database import CategoryORM, ModelMetadataORM, TransactionORM
 from ..core.models import MerchantMapping, PredictionDetail, TransactionInput, TransactionPrediction
+from .calibration import TemperatureScaler, fold_count
 from .categorizer import TransactionCategorizer
-from .cross_validation import StratifiedKFoldValidator
 from .merchant_mapper import MerchantRuleSet, derive_rules
 from .model_identity import model_fingerprint, probs_by_category
 from .naive_bayes_classifier import NaiveBayesTextClassifier
+from .stack import META_NAMES, StackLR, Voters, lookup_seen, meta_features, seen_counts
 
-DEFAULT_WEIGHTS = {"lgbm": 0.7, "nb": 0.3, "rule": 0.0}
-"""Weights used until a training run learns better ones."""
-
-MIN_MODEL_WEIGHT = 0.1
-"""Neither model may be switched off: the grid keeps both at or above this."""
-
-
-def normalize_weights(weights: dict[str, float]) -> dict[str, float]:
-    """Read voter weights that may predate the Merchant Rule voter.
-
-    Args:
-        weights: Weights loaded from a pickle or from model metadata.
-
-    Returns:
-        The same weights with a ``rule`` entry, 0.0 when the model was trained
-        before rules became a voter.
-    """
-    return {"lgbm": weights["lgbm"], "nb": weights["nb"], "rule": weights.get("rule", 0.0)}
-
-
-def active_ensemble_weights(session: Session) -> dict[str, float] | None:
-    """Read the voter weights of the model currently in use.
-
-    Args:
-        session: Database session.
-
-    Returns:
-        The weights recorded by the last training run, or None when no ensemble
-        has been trained.
-    """
-    row = (
-        session.query(ModelMetadataORM)
-        .filter(ModelMetadataORM.is_active.is_(True))
-        .order_by(ModelMetadataORM.training_date.desc())
-        .first()
-    )
-    if row is None or not row.feature_importance:
-        return None
-    weights = json.loads(str(row.feature_importance)).get("ensemble_weights")
-    return normalize_weights(weights) if weights else None
-
-
-def weight_grid(step: float = 0.1) -> list[dict[str, float]]:
-    """Enumerate the voter weights to try, a simplex grid that sums to 1.
-
-    Args:
-        step: Grid resolution. Weights are multiples of this.
-
-    Returns:
-        Every ``{"lgbm", "nb", "rule"}`` combination summing to 1 with both
-        models at or above ``MIN_MODEL_WEIGHT``. The rule may reach 0, which
-        reproduces today's two-voter ensemble.
-    """
-    steps = round(1 / step)
-    min_model_steps = round(MIN_MODEL_WEIGHT / step)
-    grid: list[dict[str, float]] = []
-    for lgbm in range(min_model_steps, steps + 1):
-        for nb in range(min_model_steps, steps - lgbm + 1):
-            grid.append(
-                {
-                    "lgbm": round(lgbm * step, 10),
-                    "nb": round(nb * step, 10),
-                    "rule": round((steps - lgbm - nb) * step, 10),
-                }
-            )
-    return grid
+OOF_SEED = 0
+"""Shuffle seed of the out-of-fold split; fixed so retrains are comparable."""
 
 
 def rule_probability_vector(rule: MerchantMapping | None, class_ids: list[int]) -> np.ndarray | None:
@@ -142,38 +83,12 @@ def rule_votes(
     return matches, votes, voted
 
 
-def blend_probabilities(
-    lgbm_probs: np.ndarray,
-    nb_probs: np.ndarray,
-    rule_probs: np.ndarray,
-    has_rule: np.ndarray,
-    weights: dict[str, float],
-) -> np.ndarray:
-    """Blend the three voters row by row.
-
-    Rows without a Merchant Rule are renormalised over the two models: the rule
-    weight is redistributed between LightGBM and Naive Bayes in proportion to
-    their own weights. A merchant without a rule therefore gets exactly the
-    prediction the two models gave before rules became a voter, instead of one
-    damped by a missing third vote.
-
-    Args:
-        lgbm_probs: LightGBM probabilities, aligned to the ensemble's classes.
-        nb_probs: Naive Bayes probabilities.
-        rule_probs: Merchant Rule votes; rows without a rule are ignored.
-        has_rule: Mask of the rows a rule voted on.
-        weights: ``lgbm``, ``nb``, and ``rule`` weights summing to 1.
-
-    Returns:
-        Blended probabilities of the same shape as the inputs.
-    """
-    w_lgbm, w_nb, w_rule = weights["lgbm"], weights["nb"], weights.get("rule", 0.0)
-    blended = w_lgbm * lgbm_probs + w_nb * nb_probs + w_rule * rule_probs
-    model_weight = w_lgbm + w_nb
-    no_rule = ~has_rule
-    if model_weight > 0 and no_rule.any():
-        blended[no_rule] = (w_lgbm * lgbm_probs[no_rule] + w_nb * nb_probs[no_rule]) / model_weight
-    return blended
+def _rule_confidences(matches: list[MerchantMapping | None], voted: np.ndarray) -> np.ndarray:
+    """Confidence of the rule that voted on each row, 0 where none did."""
+    return np.array(
+        [m.confidence if (m is not None and hit) else 0.0 for m, hit in zip(matches, voted, strict=True)],
+        dtype=float,
+    )
 
 
 class EnsembleCategorizer:
@@ -183,23 +98,30 @@ class EnsembleCategorizer:
         self.session = session
         self.config = config
 
-        # Component models
+        # Level 0: the voters
         self.lgbm_component = TransactionCategorizer(session, config)
-        self.nb_component = NaiveBayesTextClassifier(
-            alpha=getattr(config, "nb_alpha", 1.0),
-            use_complement=getattr(config, "nb_use_complement", True),
-            max_features=getattr(config, "nb_max_features", 2000),
-        )
+        self.nb_component = self._new_nb()
+        self.nb_temperature: TemperatureScaler | None = None
+        """Naive Bayes is under-confident on its own; this is fitted on out-of-fold rows."""
+        self.seen_counts: dict[str, int] = {}
+        """Training rows per cleaned merchant pattern, for the ``seen_log`` meta feature."""
 
-        # Cross-validation framework
-        self.cv_validator = StratifiedKFoldValidator(n_splits=getattr(config, "ensemble_cv_folds", 5), random_state=42)
+        # Level 1
+        self.stack: StackLR | None = None
+        self.n_folds = config.ensemble_cv_folds
 
-        # Ensemble parameters
-        self.ensemble_weights = dict(DEFAULT_WEIGHTS)
         self.is_trained = False
-        self.cv_results: dict[str, Any] | None = None
-        self.model_version = "1.0-ensemble"
+        self.classes_: np.ndarray | None = None
+        self.training_summary: dict[str, Any] | None = None
+        self.model_version = "2.0-stack"
         self.model_id = "untrained"
+
+    def _new_nb(self) -> NaiveBayesTextClassifier:
+        return NaiveBayesTextClassifier(
+            alpha=self.config.nb_alpha,
+            use_complement=self.config.nb_use_complement,
+            max_features=self.config.nb_max_features,
+        )
 
     def prepare_training_data(self) -> tuple[list[TransactionInput], np.ndarray]:
         """Prepare training data from database transactions."""
@@ -213,7 +135,7 @@ class EnsembleCategorizer:
             )
 
         # Filter out categories with too few samples for cross-validation
-        min_samples_per_category = max(5, self.cv_validator.n_splits)  # Need at least 5 (or n_splits) for CV
+        min_samples_per_category = max(5, self.n_folds)  # every class must reach every fold
 
         # Count transactions per category
         category_counts: dict[int, int] = {}
@@ -284,185 +206,198 @@ class EnsembleCategorizer:
         reviews = [(txn.name, int(label), txn.date) for txn, label in zip(transactions, labels, strict=True)]
         return MerchantRuleSet.from_derived(derive_rules(reviews))
 
-    def train_with_validation_optimization(
-        self, progress_callback: Callable[[str], None] | None = None
-    ) -> dict[str, Any]:
-        """Train the ensemble and learn the weight of each voter on a validation split.
+    def train(self, progress_callback: Callable[[str], None] | None = None) -> dict[str, Any]:
+        """Train the voters and the stack that combines them.
 
-        Grid-searches the LightGBM, Naive Bayes, and Merchant Rule weights over
-        a simplex and keeps the combination with the best validation accuracy.
+        Five stratified folds produce out-of-fold outputs of every voter for
+        every training row. Those fit the two temperatures and the stack.
+        The final voters are then fitted on all rows and carry the
+        temperatures learned from the folds.
 
         Args:
-            progress_callback: Optional callback for progress updates. Called with phase name
-                              (e.g., "training_nb", "optimizing_weights").
+            progress_callback: Called with ``training_folds``, ``fitting_stack``
+                and ``training_final`` as each phase starts.
 
         Returns:
-            The chosen weights, the validation accuracy, and the sample counts.
+            The training summary: out-of-fold accuracy and log-loss of the
+            stack, its auto-approve rate and error at the configured threshold,
+            the temperatures, and the sample counts.
         """
+
+        def progress(phase: str) -> None:
+            if progress_callback:
+                progress_callback(phase)
+
         print("🔍 Preparing training data for ensemble...")
         transactions, labels = self.prepare_training_data()
+        classes = np.unique(labels)
+        class_ids = [int(c) for c in classes]
+        y = np.searchsorted(classes, labels)
+        print(f"📝 Training stacked ensemble on {len(transactions)} transactions, {len(classes)} categories...")
 
-        print(f"📝 Training ensemble on {len(transactions)} transactions...")
+        progress("training_folds")
+        oof = self._out_of_fold_voters(transactions, labels, y, class_ids)
 
-        # Split into train/validation for weight optimization
-        from sklearn.model_selection import train_test_split
+        progress("fitting_stack")
+        print("🎚️ Fitting temperatures on out-of-fold predictions...")
+        lgbm_temperature = TemperatureScaler().fit(oof.lgbm, y)
+        self.nb_temperature = TemperatureScaler().fit(oof.nb, y)
+        oof = self._scale(oof, lgbm_temperature)
+        print(f"  LightGBM T={lgbm_temperature.temperature_:.2f}, Naive Bayes T={self.nb_temperature.temperature_:.2f}")
 
-        train_transactions, val_transactions, train_labels, val_labels = train_test_split(
-            transactions, labels, test_size=0.2, stratify=labels, random_state=42
+        print("🧠 Fitting the stack...")
+        self.stack = StackLR(c=self.config.stack_l2_c).fit(oof, y, len(classes))
+        self.training_summary = self._summarise(oof, y, len(classes))
+        self.training_summary.update(
+            {
+                "temperature_lgbm": lgbm_temperature.temperature_,
+                "temperature_nb": self.nb_temperature.temperature_,
+                "n_training_samples": len(transactions),
+                "n_classes": len(classes),
+                "n_folds": fold_count(y, self.n_folds),
+                "stack_importance": self.stack.block_importance(),
+            }
         )
-
-        print("🚀 Training individual models...")
-
-        # Train LightGBM component
-        print("  Training LightGBM...")
-        lgbm_temp = TransactionCategorizer(self.session, self.config)
-        lgbm_temp.fit(train_transactions, train_labels)
-
-        # Train Naive Bayes component
-        if progress_callback:
-            progress_callback("training_nb")
-        print("  Training Naive Bayes...")
-        nb_temp = NaiveBayesTextClassifier(
-            alpha=getattr(self.config, "nb_alpha", 1.0),
-            use_complement=getattr(self.config, "nb_use_complement", True),
-            max_features=getattr(self.config, "nb_max_features", 2000),
-        )
-        nb_temp.fit(train_transactions, train_labels)
-
-        if progress_callback:
-            progress_callback("optimizing_weights")
-        print("🔄 Optimizing ensemble weights on validation set...")
-
-        # Get probability vectors on validation set
-        lgbm_val_probas_raw = lgbm_temp.predict_proba(val_transactions)
-        nb_val_probas = nb_temp.predict_proba(val_transactions)
-
-        # Align LightGBM probabilities to NB class order
-        if nb_temp.classes_ is None:
-            raise ValueError("Naive Bayes model must be fitted before converting predictions")
-        lgbm_val_probas = self._align_probas(lgbm_val_probas_raw, lgbm_temp.classes_, nb_temp.classes_)
-
-        class_ids = [int(c) for c in nb_temp.classes_]
-        _, rule_val_votes, val_has_rule = rule_votes(
-            self._training_split_rules(train_transactions, train_labels), val_transactions, class_ids
-        )
-        print(f"  Merchant rules matched {int(val_has_rule.sum())}/{len(val_transactions)} validation transactions")
-
-        from sklearn.metrics import accuracy_score
-
-        weight_candidates = weight_grid()
-        scored: list[tuple[float, dict[str, float]]] = []
-        for weights in weight_candidates:
-            ensemble_probas = blend_probabilities(lgbm_val_probas, nb_val_probas, rule_val_votes, val_has_rule, weights)
-            ensemble_predictions = nb_temp.label_encoder.inverse_transform(np.argmax(ensemble_probas, axis=1))
-            scored.append((float(accuracy_score(val_labels, ensemble_predictions)), weights))
-
-        # Ties go to the smallest rule weight: prefer the ensemble that leans on the models.
-        scored.sort(key=lambda pair: (-pair[0], pair[1]["rule"]))
-        for score, weights in scored[:5]:
-            print(f"  LightGBM={weights['lgbm']:.1f}, NB={weights['nb']:.1f}, rule={weights['rule']:.1f}: {score:.4f}")
-        best_score, best_weights = scored[0]
-
+        summary = self.training_summary
         print(
-            f"🎯 Best weights: LightGBM={best_weights['lgbm']:.1f}, NB={best_weights['nb']:.1f}, "
-            f"rule={best_weights['rule']:.1f} (accuracy: {best_score:.4f})"
+            f"  Out-of-fold accuracy {summary['oof_accuracy']:.3f}, log-loss {summary['oof_logloss']:.3f}; "
+            f"at {summary['auto_threshold']:.2f}: {summary['auto_rate']:.1%} auto-approved, "
+            f"{summary['auto_error_rate']:.2%} of those wrong"
         )
 
-        # Set optimal weights
-        self.ensemble_weights = best_weights
-
-        # Train final models on full dataset
-        print("🚀 Training final models on full dataset...")
-        self.lgbm_component.fit(transactions, labels)
+        progress("training_final")
+        print("🚀 Training final voters on all rows...")
+        self.lgbm_component.fit(transactions, labels, calibrate=False)
+        self.lgbm_component.calibrator = lgbm_temperature
+        self.nb_component = self._new_nb()
         self.nb_component.fit(transactions, labels)
+        self.seen_counts = seen_counts(transactions)
 
-        # Save results
-        self.cv_results = {
-            "best_weights": best_weights,
-            "validation_accuracy": best_score,
-            "top_weight_candidates": [{"weights": w, "accuracy": s} for s, w in scored[:5]],
-            "n_weight_candidates": len(weight_candidates),
-            "n_training_samples": len(transactions),
-            "n_validation_samples": len(val_transactions),
-        }
-
-        # Update merchant mappings
         print("🏪 Updating merchant mappings...")
         self.lgbm_component.merchant_mapper.update_from_transactions()
 
-        # Save model metadata
         self._save_ensemble_metadata()
-
         self.is_trained = True
-        self.classes_ = self.nb_component.classes_
-        print(f"✅ Ensemble training complete! Validation accuracy: {best_score:.3f}")
+        self.classes_ = classes
+        print(f"✅ Ensemble training complete! Out-of-fold accuracy: {summary['oof_accuracy']:.3f}")
+        return summary
 
-        return self.cv_results
+    def _out_of_fold_voters(
+        self, transactions: list[TransactionInput], labels: np.ndarray, y: np.ndarray, class_ids: list[int]
+    ) -> Voters:
+        """Score every training row with voters that never saw it.
 
-    def _align_probas(
-        self, probas: np.ndarray, source_classes: np.ndarray | None, target_classes: np.ndarray
-    ) -> np.ndarray:
-        """Align probability matrix columns from source class order to target class order.
+        Within each fold LightGBM and Naive Bayes are fitted on the other
+        folds and the Merchant Rules are derived from those folds alone;
+        rules from all rows would let a rule grade the row it was built from.
+        """
+        n, k = len(y), len(class_ids)
+        oof = Voters(
+            lgbm=np.zeros((n, k)),
+            nb=np.zeros((n, k)),
+            rule_vote=np.zeros((n, k)),
+            rule_hit=np.zeros(n, dtype=bool),
+            rule_conf=np.zeros(n),
+            seen=np.zeros(n),
+            amount=np.array([t.amount for t in transactions], dtype=float),
+        )
+        n_folds = fold_count(y, self.n_folds)
+        folds = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=OOF_SEED)
+        for fold, (train_idx, test_idx) in enumerate(folds.split(np.zeros(n), y), start=1):
+            print(f"  Fold {fold}/{n_folds}: fitting voters on {len(train_idx)} rows...")
+            fold_txns = [transactions[i] for i in train_idx]
+            fold_labels = labels[train_idx]
+            held_out = [transactions[i] for i in test_idx]
+
+            lgbm = TransactionCategorizer(self.session, self.config)
+            lgbm.fit(fold_txns, fold_labels, calibrate=False)
+            oof.lgbm[test_idx] = self._align_probas(lgbm.predict_proba(held_out), lgbm.classes_, class_ids)
+
+            nb = self._new_nb()
+            nb.fit(fold_txns, fold_labels)
+            oof.nb[test_idx] = self._align_probas(nb.predict_proba(held_out), nb.classes_, class_ids)
+
+            rules = self._training_split_rules(fold_txns, fold_labels)
+            matches, votes, voted = rule_votes(rules, held_out, class_ids)
+            oof.rule_vote[test_idx], oof.rule_hit[test_idx] = votes, voted
+            oof.rule_conf[test_idx] = _rule_confidences(matches, voted)
+            oof.seen[test_idx] = lookup_seen(seen_counts(fold_txns), held_out)
+        return oof
+
+    def _scale(self, v: Voters, lgbm_temperature: TemperatureScaler) -> Voters:
+        """Apply the two temperatures to the model voters; the rule vote is hand-made."""
+        assert self.nb_temperature is not None
+        return Voters(
+            lgbm=lgbm_temperature.predict_proba(v.lgbm),
+            nb=self.nb_temperature.predict_proba(v.nb),
+            rule_vote=v.rule_vote,
+            rule_hit=v.rule_hit,
+            rule_conf=v.rule_conf,
+            seen=v.seen,
+            amount=v.amount,
+        )
+
+    def _summarise(self, oof: Voters, y: np.ndarray, n_classes: int) -> dict[str, Any]:
+        """Judge the stack on its own out-of-fold predictions over the out-of-fold voters.
+
+        Scoring the stack in-sample would repeat, one level up, the mistake
+        of calibrating a model on its own training rows.
+        """
+        n_folds = fold_count(y, self.n_folds)
+        folds = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=OOF_SEED + 1)
+        probs = np.zeros((len(y), n_classes))
+        for train_idx, test_idx in folds.split(np.zeros(len(y)), y):
+            model = StackLR(c=self.config.stack_l2_c).fit(oof.subset(train_idx), y[train_idx], n_classes)
+            probs[test_idx] = model.predict_proba(oof.subset(test_idx))
+        rows = np.arange(len(y))
+        correct = probs.argmax(axis=1) == y
+        confidence = probs.max(axis=1)
+        threshold = self.config.auto_approve_threshold
+        auto = confidence >= threshold
+        return {
+            "oof_accuracy": float(correct.mean()),
+            "oof_logloss": float(-np.log(np.clip(probs[rows, y], 1e-12, 1.0)).mean()),
+            "auto_threshold": threshold,
+            "auto_rate": float(auto.mean()),
+            "auto_error_rate": float((auto & ~correct).sum() / auto.sum()) if auto.any() else 0.0,
+        }
+
+    @staticmethod
+    def _align_probas(probas: np.ndarray, source_classes: np.ndarray | None, class_ids: list[int]) -> np.ndarray:
+        """Move probability columns from a voter's class order to the ensemble's.
 
         Args:
             probas: Probability matrix of shape (n_samples, n_source_classes).
             source_classes: Class labels corresponding to columns of probas.
-            target_classes: Desired class label order for output columns.
+            class_ids: The ensemble's category ids, in column order.
 
         Returns:
-            Aligned probability matrix of shape (n_samples, n_target_classes),
-            renormalized so rows sum to 1.
+            Aligned probabilities of shape (n_samples, len(class_ids)); rows are
+            renormalised so a voter that never saw a class still sums to 1.
         """
         if source_classes is None:
-            return np.ones((probas.shape[0], len(target_classes))) / len(target_classes)
-
-        n_samples = probas.shape[0]
-        n_target = len(target_classes)
-        aligned = np.zeros((n_samples, n_target))
-
-        source_class_list = list(source_classes)
-        for i, cls in enumerate(target_classes):
-            if cls in source_class_list:
-                src_idx = source_class_list.index(cls)
-                aligned[:, i] = probas[:, src_idx]
-
+            return np.full((probas.shape[0], len(class_ids)), 1.0 / len(class_ids))
+        aligned = np.zeros((probas.shape[0], len(class_ids)))
+        position = {cls: i for i, cls in enumerate(class_ids)}
+        for j, cls in enumerate(source_classes):
+            if int(cls) in position:
+                aligned[:, position[int(cls)]] = probas[:, j]
         row_sums = aligned.sum(axis=1, keepdims=True)
-        row_sums[row_sums == 0] = 1  # avoid division by zero
-        aligned = aligned / row_sums
-        return aligned
-
-    def _align_single_proba(
-        self, probas: np.ndarray, source_classes: np.ndarray | None, target_classes: np.ndarray | None
-    ) -> np.ndarray:
-        """Align a single probability vector from source class order to target class order.
-
-        Args:
-            probas: 1-D probability vector of shape (n_source_classes,).
-            source_classes: Class labels corresponding to entries of probas.
-            target_classes: Desired class label order for output.
-
-        Returns:
-            Aligned 1-D probability vector of shape (n_target_classes,),
-            renormalized so entries sum to 1.
-        """
-        if source_classes is None or target_classes is None:
-            return probas
-        aligned_2d = self._align_probas(probas.reshape(1, -1), source_classes, target_classes)
-        return aligned_2d[0]
+        row_sums[row_sums == 0] = 1
+        return aligned / row_sums
 
     def predict_with_confidence(self, transactions: list[TransactionInput]) -> list[TransactionPrediction]:
-        """Predict categories by blending LightGBM, Naive Bayes, and the Merchant Rules.
+        """Predict categories by stacking LightGBM, Naive Bayes, and the Merchant Rules.
 
-        All three voters score every transaction in one batch and their votes
-        are blended with the learned weights. A rule never decides on its own:
-        it can only pull the blend towards its category, and the models can
-        outvote it. Transactions whose merchant has no rule are scored by the
-        two models renormalised, so they predict exactly as before rules
-        joined the ensemble. Every voter's probabilities are recorded for the
-        Audit Trail.
+        All three voters score every transaction in one batch; the stack
+        turns their votes and the meta features into the final probabilities.
+        A rule never decides on its own. Every voter's probabilities and the
+        meta features are recorded for the Audit Trail.
         """
         if not self.is_trained:
             raise ValueError("Ensemble must be trained before prediction")
+        if self.stack is None or self.nb_temperature is None or self.classes_ is None:
+            raise ValueError("Ensemble has no stack; retrain the model")
         if not transactions:
             return []
 
@@ -470,18 +405,25 @@ class EnsembleCategorizer:
         # long-lived singleton would otherwise keep a stale rule cache.
         self.lgbm_component.merchant_mapper.reload()
 
-        nb_classes = self.nb_component.classes_
-        assert nb_classes is not None, "NB component must be trained before prediction"
+        class_ids = [int(c) for c in self.classes_]
         lgbm_probas = self._align_probas(
-            self.lgbm_component.predict_proba(transactions), self.lgbm_component.classes_, nb_classes
+            self.lgbm_component.predict_proba(transactions), self.lgbm_component.classes_, class_ids
         )
-        nb_probas = self.nb_component.predict_proba(transactions)
-        class_ids = [int(c) for c in nb_classes]
+        nb_probas = self.nb_temperature.predict_proba(
+            self._align_probas(self.nb_component.predict_proba(transactions), self.nb_component.classes_, class_ids)
+        )
         rules, rule_probas, has_rule = rule_votes(self.lgbm_component.merchant_mapper.rule_set, transactions, class_ids)
-        combined = blend_probabilities(lgbm_probas, nb_probas, rule_probas, has_rule, self.ensemble_weights)
-
-        lgbm_weight, nb_weight = self.ensemble_weights["lgbm"], self.ensemble_weights["nb"]
-        rule_weight = self.ensemble_weights.get("rule", 0.0)
+        voters = Voters(
+            lgbm=lgbm_probas,
+            nb=nb_probas,
+            rule_vote=rule_probas,
+            rule_hit=has_rule,
+            rule_conf=_rule_confidences(rules, has_rule),
+            seen=lookup_seen(self.seen_counts, transactions),
+            amount=np.array([t.amount for t in transactions], dtype=float),
+        )
+        combined = self.stack.predict_proba(voters)
+        meta = meta_features(voters)
 
         predictions: list[TransactionPrediction] = []
         for i, txn in enumerate(transactions):
@@ -495,9 +437,7 @@ class EnsembleCategorizer:
                 nb_probs=probs_by_category(class_ids, nb_probas[i]),
                 rule_probs=probs_by_category(class_ids, rule_probas[i]) if has_rule[i] else {},
                 ensemble_probs=probs_by_category(class_ids, combined[i]),
-                lgbm_weight=lgbm_weight,
-                nb_weight=nb_weight,
-                rule_weight=rule_weight if has_rule[i] else 0.0,
+                meta_features={name: float(value) for name, value in zip(META_NAMES, meta[i], strict=True)},
             )
             pred_idx = int(np.argmax(combined[i]))
             predictions.append(
@@ -505,43 +445,25 @@ class EnsembleCategorizer:
                     transaction_id=txn.generate_id(),
                     predicted_category_id=class_ids[pred_idx],
                     confidence_score=float(combined[i][pred_idx]),
-                    feature_contributions=self._combine_feature_contributions(
-                        lgbm_probas[i], nb_probas[i], bool(has_rule[i])
-                    ),
+                    feature_contributions=self._feature_contributions(nb_probas[i]),
                     detail=detail,
                 )
             )
 
         return predictions
 
-    def _combine_feature_contributions(
-        self, lgbm_probas: np.ndarray, nb_probas: np.ndarray, has_rule: bool
-    ) -> dict[str, float]:
-        """Combine feature contributions from both models using global importances."""
+    def _feature_contributions(self, nb_probas: np.ndarray) -> dict[str, float]:
+        """LightGBM's top global importances plus Naive Bayes' confidence, for the explanation view."""
         contributions: dict[str, float] = {}
-
-        lgbm_weight = self.ensemble_weights["lgbm"]
-        nb_weight = self.ensemble_weights["nb"]
-
-        # Use LightGBM's global feature importance (top 5)
-        if hasattr(self.lgbm_component.classifier, "feature_importances_"):
-            importances = self.lgbm_component.classifier.feature_importances_
+        classifier = self.lgbm_component.classifier
+        if hasattr(classifier, "feature_importances_"):
+            importances = classifier.feature_importances_
             top_indices = np.argsort(importances)[-5:]
-            total_imp = float(importances[top_indices].sum()) or 1.0
+            total = float(importances[top_indices].sum()) or 1.0
             for idx in top_indices:
                 if idx < len(self.lgbm_component.feature_names):
-                    name = self.lgbm_component.feature_names[idx]
-                    contributions[f"lgbm_{name}"] = float(importances[idx]) / total_imp * lgbm_weight
-
-        # Add Naive Bayes contribution summary
-        nb_confidence = float(np.max(nb_probas))
-        contributions["nb_text_features"] = nb_confidence * nb_weight
-
-        # Add ensemble metadata
-        contributions["ensemble_lgbm_weight"] = lgbm_weight
-        contributions["ensemble_nb_weight"] = nb_weight
-        contributions["ensemble_rule_weight"] = self.ensemble_weights.get("rule", 0.0) if has_rule else 0.0
-
+                    contributions[f"lgbm_{self.lgbm_component.feature_names[idx]}"] = float(importances[idx]) / total
+        contributions["nb_text_features"] = float(np.max(nb_probas))
         return contributions
 
     def _save_ensemble_metadata(self) -> None:
@@ -550,18 +472,19 @@ class EnsembleCategorizer:
         self.session.query(ModelMetadataORM).update({"is_active": False})
 
         # Create ensemble metadata
-        cv_results = self.cv_results or {}
+        summary = self.training_summary or {}
         metadata = ModelMetadataORM(
             model_version=self.model_version,
-            accuracy=cv_results.get("validation_accuracy", 0.0),
-            feature_importance=json.dumps({"ensemble_weights": self.ensemble_weights, "cv_results": self.cv_results}),
+            accuracy=summary.get("oof_accuracy", 0.0),
+            feature_importance=json.dumps({"training_summary": summary}),
             parameters=json.dumps(
                 {
                     "lgbm_params": self.config.lgbm_params,
-                    "nb_alpha": getattr(self.config, "nb_alpha", 1.0),
-                    "nb_use_complement": getattr(self.config, "nb_use_complement", True),
-                    "nb_max_features": getattr(self.config, "nb_max_features", 2000),
-                    "cv_folds": getattr(self.config, "ensemble_cv_folds", 5),
+                    "nb_alpha": self.config.nb_alpha,
+                    "nb_use_complement": self.config.nb_use_complement,
+                    "nb_max_features": self.config.nb_max_features,
+                    "cv_folds": self.config.ensemble_cv_folds,
+                    "stack_l2_c": self.config.stack_l2_c,
                 }
             ),
             is_active=True,
@@ -580,7 +503,7 @@ class EnsembleCategorizer:
         # Create a copy of lgbm_component without the session to avoid pickle issues
         lgbm_model_data = {
             "classifier": self.lgbm_component.classifier,
-            "calibrated_classifier": self.lgbm_component.calibrated_classifier,
+            "calibrator": self.lgbm_component.calibrator,
             "char_vectorizer": self.lgbm_component.char_vectorizer,
             "word_vectorizer": self.lgbm_component.word_vectorizer,
             "svd": self.lgbm_component.svd,
@@ -594,8 +517,11 @@ class EnsembleCategorizer:
         ensemble_data = {
             "lgbm_model_data": lgbm_model_data,
             "nb_component": self.nb_component,
-            "ensemble_weights": self.ensemble_weights,
-            "cv_results": self.cv_results,
+            "nb_temperature": self.nb_temperature,
+            "stack": self.stack,
+            "seen_counts": self.seen_counts,
+            "classes_": self.classes_,
+            "training_summary": self.training_summary,
             "model_version": self.model_version,
             "config": self.config.model_dump(),
         }
@@ -634,34 +560,31 @@ class EnsembleCategorizer:
                 else:
                     raise
 
-        # Recreate lgbm_component from saved data
-        if "lgbm_model_data" in ensemble_data:
-            # New format - reconstruct TransactionCategorizer
-            lgbm_data = ensemble_data["lgbm_model_data"]
-            self.lgbm_component = TransactionCategorizer(self.session, self.config)
-            self.lgbm_component.classifier = lgbm_data["classifier"]
-            self.lgbm_component.calibrated_classifier = lgbm_data["calibrated_classifier"]
-            self.lgbm_component.label_encoder = lgbm_data["label_encoder"]
-            self.lgbm_component.feature_names = lgbm_data["feature_names"]
-            self.lgbm_component.classes_ = lgbm_data["classes_"]
-            self.lgbm_component.model_version = lgbm_data["model_version"]
-            self.lgbm_component.is_trained = True
-            # Load vectorizers with backward compat for old pickles
-            self.lgbm_component.char_vectorizer = lgbm_data.get("char_vectorizer", lgbm_data.get("text_vectorizer"))
-            self.lgbm_component.word_vectorizer = lgbm_data.get("word_vectorizer", None)
-            self.lgbm_component.svd = lgbm_data.get("svd", None)
-        else:
-            # Old format - direct assignment (legacy support)
-            self.lgbm_component = ensemble_data["lgbm_component"]
+        if "stack" not in ensemble_data:
+            raise ValueError("This ensemble was trained before the stacked ensemble existed; retrain the model")
+
+        lgbm_data = ensemble_data["lgbm_model_data"]
+        self.lgbm_component = TransactionCategorizer(self.session, self.config)
+        self.lgbm_component.classifier = lgbm_data["classifier"]
+        self.lgbm_component.calibrator = lgbm_data["calibrator"]
+        self.lgbm_component.label_encoder = lgbm_data["label_encoder"]
+        self.lgbm_component.feature_names = lgbm_data["feature_names"]
+        self.lgbm_component.classes_ = lgbm_data["classes_"]
+        self.lgbm_component.model_version = lgbm_data["model_version"]
+        self.lgbm_component.char_vectorizer = lgbm_data["char_vectorizer"]
+        self.lgbm_component.word_vectorizer = lgbm_data["word_vectorizer"]
+        self.lgbm_component.svd = lgbm_data["svd"]
+        self.lgbm_component.is_trained = True
 
         self.nb_component = ensemble_data["nb_component"]
-        self.ensemble_weights = normalize_weights(ensemble_data["ensemble_weights"])
-        self.cv_results = ensemble_data["cv_results"]
+        self.nb_temperature = ensemble_data["nb_temperature"]
+        self.stack = ensemble_data["stack"]
+        self.seen_counts = ensemble_data["seen_counts"]
+        self.classes_ = ensemble_data["classes_"]
+        self.training_summary = ensemble_data["training_summary"]
         self.model_version = ensemble_data["model_version"]
         self.model_id = model_fingerprint(model_path)
-
         self.is_trained = True
-        self.classes_ = self.lgbm_component.classes_
 
     def get_ensemble_explanation(self, transaction: TransactionInput) -> dict[str, Any]:
         """Get detailed explanation for ensemble prediction."""
@@ -677,11 +600,7 @@ class EnsembleCategorizer:
 
         return {
             "ensemble_prediction": ensemble_pred,
-            "ensemble_weights": self.ensemble_weights,
             "lgbm_explanation": lgbm_explanation,
             "nb_explanation": nb_explanation,
-            "cv_performance": {
-                "validation_accuracy": (self.cv_results or {}).get("validation_accuracy", 0.0),
-                "ensemble_weights": self.ensemble_weights,
-            },
+            "training_summary": self.training_summary or {},
         }

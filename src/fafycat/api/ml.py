@@ -352,29 +352,28 @@ def _run_training_sync() -> None:
                 # Create progress callback to update job phases during training
                 def progress_callback(phase_name: str) -> None:
                     phase_map = {
-                        "training_nb": TrainingPhase.TRAINING_NB,
-                        "optimizing_weights": TrainingPhase.OPTIMIZING_WEIGHTS,
+                        "training_folds": TrainingPhase.TRAINING_FOLDS,
+                        "fitting_stack": TrainingPhase.FITTING_STACK,
+                        "training_final": TrainingPhase.TRAINING_FINAL,
                     }
                     if phase_name in phase_map:
                         update_job_phase(phase_map[phase_name])
 
-                # Train ensemble with validation optimization
-                update_job_phase(TrainingPhase.TRAINING_LGBM)
-                cv_results = ensemble_categorizer.train_with_validation_optimization(
-                    progress_callback=progress_callback
-                )
+                summary = ensemble_categorizer.train(progress_callback=progress_callback)
 
                 update_job_phase(TrainingPhase.SAVING_MODEL)
 
                 result_data = {
                     "status": "success",
                     "message": "Ensemble model retrained successfully",
-                    "accuracy": cv_results["validation_accuracy"],
-                    "validation_accuracy": cv_results["validation_accuracy"],
-                    "ensemble_weights": cv_results["best_weights"],
+                    "accuracy": summary["oof_accuracy"],
+                    "oof_accuracy": summary["oof_accuracy"],
+                    "oof_logloss": summary["oof_logloss"],
+                    "auto_threshold": summary["auto_threshold"],
+                    "auto_rate": summary["auto_rate"],
+                    "auto_error_rate": summary["auto_error_rate"],
                     "model_path": str(_config.ml.model_dir / model_filename),
-                    "training_samples": cv_results["n_training_samples"],
-                    "validation_samples": cv_results["n_validation_samples"],
+                    "training_samples": summary["n_training_samples"],
                 }
             else:
                 single_categorizer = TransactionCategorizer(training_session, _config.ml)

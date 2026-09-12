@@ -1,7 +1,10 @@
 """Main ML categorizer using LightGBM."""
 
+import contextlib
 import json
 import pickle
+import warnings
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 from typing import Any, cast
@@ -10,10 +13,8 @@ import numpy as np
 import pandas as pd
 from lightgbm import LGBMClassifier
 from scipy.sparse import hstack as sparse_hstack
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.frozen import FrozenEstimator
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sqlalchemy.orm import Session
@@ -21,9 +22,23 @@ from sqlalchemy.orm import Session
 from ..core.config import MLConfig
 from ..core.database import CategoryORM, ModelMetadataORM, TransactionORM
 from ..core.models import ModelMetrics, PredictionDetail, TransactionInput, TransactionPrediction
+from .calibration import TemperatureScaler, oof_probs
 from .feature_extractor import FeatureExtractor
 from .merchant_mapper import RULE_OVERRIDE_CONFIDENCE, MerchantMapper
 from .model_identity import model_fingerprint, probs_by_category
+
+
+@contextlib.contextmanager
+def _lgbm_predict() -> Iterator[None]:
+    """Silence LightGBM's feature-name warning.
+
+    The model is fitted and scored on plain arrays, yet LightGBM's
+    scikit-learn wrapper records placeholder feature names at fit time and
+    scikit-learn then warns on every array it scores. Nothing is mismatched.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="X does not have valid feature names", category=UserWarning)
+        yield
 
 
 class TransactionCategorizer:
@@ -41,7 +56,8 @@ class TransactionCategorizer:
         self.svd: TruncatedSVD | None = TruncatedSVD(n_components=config.svd_n_components, random_state=42)
         self.label_encoder = LabelEncoder()
         self.classifier = LGBMClassifier(**config.lgbm_params)
-        self.calibrated_classifier: CalibratedClassifierCV | None = None
+        self.calibrator: TemperatureScaler | None = None
+        """Temperature fitted on out-of-fold predictions; None scores raw."""
 
         # Model metadata
         self.feature_names: list[str] = []
@@ -64,8 +80,8 @@ class TransactionCategorizer:
 
         # Filter out categories with too few samples for cross-validation.
         # Each class must survive both the outer train_test_split (test_size=0.2)
-        # and the inner CalibratedClassifierCV(cv=5) on the train slice, so we
-        # need ceil(5 / 0.8) = 7 samples per class.
+        # and the 5 calibration folds on the train slice, so we need
+        # ceil(5 / 0.8) = 7 samples per class.
         min_samples_per_category = 7
 
         # Count transactions per category
@@ -144,19 +160,11 @@ class TransactionCategorizer:
         X_train_prepared = self._prepare_features(X_train, fit=True)
         X_test_prepared = self._prepare_features(X_test, fit=False)
 
-        # Train classifier
+        print("Calibrating probabilities on out-of-fold predictions...")
+        self.calibrator = self._fit_calibrator(X_train_prepared, y_train)
+
         print("Training LightGBM classifier...")
         self.classifier.fit(X_train_prepared, y_train)
-
-        # Calibrate probabilities using FrozenEstimator with internal CV
-        # Uses sigmoid (Platt scaling) — stable with small samples unlike isotonic
-        # Calibrates on train set with 5-fold CV for pseudo-out-of-sample predictions
-        print("Calibrating probabilities...")
-        frozen = FrozenEstimator(self.classifier)
-        min_class_count = int(np.min(np.bincount(y_train)))
-        cv_folds = max(2, min(5, min_class_count))
-        self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid", cv=cv_folds)
-        self.calibrated_classifier.fit(X_train_prepared, y_train)
 
         # Calculate metrics
         print("Calculating metrics...")
@@ -174,8 +182,17 @@ class TransactionCategorizer:
 
         return metrics
 
-    def fit(self, transactions: list[TransactionInput], labels: np.ndarray) -> None:
-        """Train the model on pre-split data without DB access."""
+    def fit(self, transactions: list[TransactionInput], labels: np.ndarray, *, calibrate: bool = True) -> None:
+        """Train the model on pre-split data without DB access.
+
+        Args:
+            transactions: Training rows.
+            labels: Their category ids, in the same order.
+            calibrate: Fit a temperature on out-of-fold predictions first. The
+                ensemble passes False for its fold models, which are only ever
+                read raw, and for its final model, whose temperature it fits
+                itself from the same folds.
+        """
         features_list = self.feature_extractor.extract_batch_features(transactions)
         X_df = pd.DataFrame(features_list)
 
@@ -183,16 +200,27 @@ class TransactionCategorizer:
         self.classes_ = self.label_encoder.classes_
 
         X_prepared = self._prepare_features(X_df, fit=True)
+        self.calibrator = self._fit_calibrator(X_prepared, y_encoded) if calibrate else None
         self.classifier.fit(X_prepared, y_encoded)
 
-        # Calibrate on training data with internal CV
-        frozen = FrozenEstimator(self.classifier)
-        min_class_count = int(np.min(np.bincount(y_encoded)))
-        cv_folds = max(2, min(5, min_class_count))
-        self.calibrated_classifier = CalibratedClassifierCV(frozen, method="sigmoid", cv=cv_folds)
-        self.calibrated_classifier.fit(X_prepared, y_encoded)
-
         self.is_trained = True
+
+    def _fit_calibrator(self, X_prepared: np.ndarray, y_encoded: np.ndarray) -> TemperatureScaler:
+        """Fit a temperature on out-of-fold predictions of fresh LightGBM models.
+
+        A temperature fitted on the final model's own training rows would learn
+        that the model is nearly always right, because on those rows it is.
+        The text vectorizers and SVD are already fitted on all rows at this
+        point; only the classifier is refitted per fold, as in the experiment
+        this recipe comes from. The ensemble refits everything per fold.
+        """
+        with _lgbm_predict():
+            oof = oof_probs(lambda: LGBMClassifier(**self.config.lgbm_params), X_prepared, y_encoded)
+        return TemperatureScaler().fit(oof, y_encoded)
+
+    def calibrate_probas(self, probas: np.ndarray) -> np.ndarray:
+        """Apply the fitted temperature, or return ``probas`` unchanged without one."""
+        return self.calibrator.predict_proba(probas) if self.calibrator is not None else probas
 
     @property
     def _has_combined_vectorizer(self) -> bool:
@@ -258,14 +286,8 @@ class TransactionCategorizer:
 
         features_list = self.feature_extractor.extract_batch_features(transactions)
         X_prepared = self._prepare_features(pd.DataFrame(features_list), fit=False)
-        try:
-            probas = (
-                self.calibrated_classifier.predict_proba(X_prepared)
-                if self.calibrated_classifier
-                else self.classifier.predict_proba(X_prepared)
-            )
-        except ValueError:
-            probas = self.classifier.predict_proba(X_prepared)
+        with _lgbm_predict():
+            probas = self.calibrate_probas(self.classifier.predict_proba(X_prepared))
         class_ids = [int(c) for c in self.classes_]
 
         predictions: list[TransactionPrediction] = []
@@ -314,9 +336,8 @@ class TransactionCategorizer:
         features_list = self.feature_extractor.extract_batch_features(transactions)
         X_df = pd.DataFrame(features_list)
         X_prepared = self._prepare_features(X_df, fit=False)
-        if self.calibrated_classifier is not None:
-            return self.calibrated_classifier.predict_proba(X_prepared)
-        return self.classifier.predict_proba(X_prepared)
+        with _lgbm_predict():
+            return self.calibrate_probas(self.classifier.predict_proba(X_prepared))
 
     def _get_feature_contributions(self, X_instance: np.ndarray, predicted_class: int) -> dict[str, float]:
         """Get feature contributions for explainability."""
@@ -345,10 +366,8 @@ class TransactionCategorizer:
         """Calculate model performance metrics."""
         from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
 
-        # Predictions
-        if self.calibrated_classifier:
-            y_pred = self.calibrated_classifier.predict(X_test)
-        else:
+        # Temperature scaling never re-ranks a row, so the raw argmax is the prediction.
+        with _lgbm_predict():
             y_pred = self.classifier.predict(X_test)
 
         # Overall accuracy
@@ -424,7 +443,7 @@ class TransactionCategorizer:
 
         model_data = {
             "classifier": self.classifier,
-            "calibrated_classifier": self.calibrated_classifier,
+            "calibrator": self.calibrator,
             "char_vectorizer": self.char_vectorizer,
             "word_vectorizer": self.word_vectorizer,
             "svd": self.svd,
@@ -470,7 +489,9 @@ class TransactionCategorizer:
                     raise
 
         self.classifier = model_data["classifier"]
-        self.calibrated_classifier = model_data["calibrated_classifier"]
+        # Models saved before temperature scaling carry an in-sample Platt
+        # calibrator instead; raw probabilities are the honest choice until retrain.
+        self.calibrator = model_data.get("calibrator")
         self.label_encoder = model_data["label_encoder"]
         self.feature_names = model_data["feature_names"]
         self.classes_ = model_data["classes_"]

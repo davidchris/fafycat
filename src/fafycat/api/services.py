@@ -5,8 +5,9 @@ import statistics
 from datetime import date, datetime
 from typing import Any, cast
 
-from sqlalchemy import and_, case, func, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, case, func, literal, or_, select
+from sqlalchemy.orm import Session, aliased, joinedload
+from sqlalchemy.sql import ColumnElement
 
 from fafycat.api.models import CategoryCreate, CategoryResponse, CategoryUpdate, TransactionResponse, TransactionUpdate
 from fafycat.core.audit_trail import ReviewActor, record_review_event
@@ -20,6 +21,61 @@ from fafycat.ml.prediction_pipeline import get_auto_approve_threshold
 def _pattern_of(transaction: TransactionORM | None) -> str:
     """Merchant pattern of a transaction, or empty when it has none."""
     return str(transaction.merchant_pattern) if transaction is not None and transaction.merchant_pattern else ""
+
+
+REVIEW_IMPACT_SORT = "review_impact"
+"""Sort key: pending siblings times uncertainty, so one review resolves the most.
+
+Measured in experiments/04-queue-ordering: at every reviewer budget this order
+labels more of the backlog correctly than least-confident-first, because a
+review of a merchant with many pending rows propagates to all of them.
+"""
+
+
+def _pending_siblings_expr() -> ColumnElement:
+    """Correlated count of unreviewed rows sharing the outer row's merchant pattern, itself included.
+
+    Rows without a pattern have nothing to propagate to and count as 1. This
+    counts every pending row of the merchant, as the queue-ordering
+    experiment did; propagation itself is narrower (see
+    :func:`_unreviewed_siblings`), so the count is an upper bound on what one
+    review resolves.
+    """
+    sibling = aliased(TransactionORM)
+    count = (
+        select(func.count(sibling.id))
+        .where(sibling.merchant_pattern == TransactionORM.merchant_pattern, sibling.is_reviewed.is_(False))
+        .correlate(TransactionORM)
+        .scalar_subquery()
+    )
+    has_pattern = and_(TransactionORM.merchant_pattern.is_not(None), TransactionORM.merchant_pattern != "")
+    return case((has_pattern, count), else_=literal(1))
+
+
+def _review_impact_expr() -> ColumnElement:
+    """``pending_siblings x (1 - confidence)``; a row without a prediction is fully uncertain."""
+    return _pending_siblings_expr() * (1.0 - func.coalesce(TransactionORM.confidence_score, 0.0))
+
+
+def _pending_sibling_counts(session: Session, transactions: list[TransactionORM]) -> dict[str, int]:
+    """Unreviewed rows per merchant pattern, for the patterns of ``transactions``."""
+    patterns = {str(t.merchant_pattern) for t in transactions if t.merchant_pattern}
+    if not patterns:
+        return {}
+    rows = (
+        session.query(TransactionORM.merchant_pattern, func.count(TransactionORM.id))
+        .filter(TransactionORM.merchant_pattern.in_(patterns), TransactionORM.is_reviewed.is_(False))
+        .group_by(TransactionORM.merchant_pattern)
+        .all()
+    )
+    return {str(pattern): int(count) for pattern, count in rows}
+
+
+def _pending_siblings_of(transaction: TransactionORM, counts: dict[str, int]) -> int:
+    """The row's own pending-sibling count from :func:`_pending_sibling_counts`; 1 without a pattern."""
+    if transaction.is_reviewed:
+        return 0
+    return counts.get(_pattern_of(transaction), 1) if transaction.merchant_pattern else 1
 
 
 def _unreviewed_siblings(session: Session, source: TransactionORM, category_id: int | None):
@@ -243,12 +299,18 @@ class TransactionService:
         total_count = query.count()
 
         # Apply sorting
-        sort_column = getattr(TransactionORM, sort_by, TransactionORM.date)
-        query = query.order_by(sort_column.asc()) if sort_order.lower() == "asc" else query.order_by(sort_column.desc())
+        descending = sort_order.lower() != "asc"
+        if sort_by == REVIEW_IMPACT_SORT:
+            impact = _review_impact_expr()
+            query = query.order_by(impact.desc() if descending else impact.asc(), TransactionORM.date.asc())
+        else:
+            sort_column = getattr(TransactionORM, sort_by, TransactionORM.date)
+            query = query.order_by(sort_column.desc() if descending else sort_column.asc())
 
         # Apply pagination
         query = query.offset(skip).limit(limit)
         transactions = query.all()
+        sibling_counts = _pending_sibling_counts(session, transactions)
 
         # Calculate pagination info
         page = (skip // limit) + 1
@@ -269,6 +331,7 @@ class TransactionService:
                 confidence=_to_float(t.confidence_score) if t.confidence_score is not None else None,
                 is_reviewed=_to_bool(t.is_reviewed),
                 review_priority=_to_str(t.review_priority) if t.review_priority else None,
+                pending_siblings=_pending_siblings_of(t, sibling_counts),
                 created_at=_to_datetime(t.imported_at),
                 updated_at=_to_datetime(t.imported_at),  # Will update when we add updated_at to TransactionORM
             )

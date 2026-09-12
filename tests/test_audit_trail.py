@@ -45,6 +45,7 @@ class DetailedFakeCategorizer:
                         nb_probs={self.predicted_category_id: 0.5, 99: 0.5},
                         rule_probs={self.predicted_category_id: 0.85, 99: 0.15},
                         ensemble_probs={self.predicted_category_id: score, 99: 1 - score},
+                        meta_features={"rule_hit": 1.0, "seen_log": 1.386},
                         lgbm_weight=0.6,
                         nb_weight=0.2,
                         rule_weight=0.2,
@@ -100,6 +101,7 @@ class TestPipelineWritesEvents:
         assert rewe.rule_pattern == "REWE" and rewe.rule_confidence == 0.85
         assert rewe.lgbm_weight == 0.6 and rewe.nb_weight == 0.2 and rewe.rule_weight == 0.2
         assert '"99"' in rewe.lgbm_probs and rewe.nb_probs and rewe.ensemble_probs
+        assert json.loads(rewe.meta_features) == {"rule_hit": 1.0, "seen_log": 1.386}
         assert json.loads(rewe.rule_probs) == {str(groceries.id): 0.85, "99": 0.15}
         assert events["b" * 16].decision == ReviewPriority.STANDARD.value
 
@@ -215,9 +217,33 @@ class TestPages:
             "proposed groceries at 85.0%, voting with weight 0.20",
             "auto-accepted",
             "abc123def456",
+            "What the stack read",
+            "Merchant seen in training (log)",
+            "1.39",
         ):
             assert needle in resp.text, needle
         assert "applied" not in resp.text
+
+    def test_trail_page_without_weights_says_the_stack_read_the_rule(self, test_client, db_session):
+        groceries, _ = _categories(db_session)
+        _seed(db_session, "REWE", "b" * 16)
+        db_session.commit()
+        categorizer = DetailedFakeCategorizer({"REWE": 0.97}, groceries.id)
+        predictions = categorizer.predict_with_confidence
+        categorizer.predict_with_confidence = lambda txns: [  # type: ignore[method-assign]
+            p.model_copy(
+                update={
+                    "detail": p.detail.model_copy(update={"lgbm_weight": None, "nb_weight": None, "rule_weight": None})
+                }
+            )
+            for p in predictions(txns)
+        ]
+        predict_unpredicted(db_session, categorizer, threshold=0.9)
+
+        resp = test_client.get(f"/transactions/{'b' * 16}/trail")
+
+        assert "read by the stacked ensemble beside the two models" in resp.text
+        assert "weight" not in resp.text.split("What the stack read")[0].split("Merchant rule")[-1]
 
     def test_trail_page_without_events_explains_why(self, test_client, db_session):
         _categories(db_session)
@@ -255,23 +281,12 @@ class TestPages:
         assert resp.status_code == 200
         assert "Merchant rules (1)" in resp.text
         assert "VISA PAYPAL SPOTIFY" in resp.text and "98%" in resp.text
-        assert "No model is trained yet" in resp.text
 
-    def test_rules_page_names_the_learned_rule_weight(self, test_client, db_session):
-        db_session.add(
-            ModelMetadataORM(
-                model_version="1.0-ensemble",
-                accuracy=0.83,
-                feature_importance=json.dumps({"ensemble_weights": {"lgbm": 0.5, "nb": 0.3, "rule": 0.2}}),
-                is_active=True,
-            )
-        )
-        db_session.commit()
-
+    def test_rules_page_explains_the_review_schedule(self, test_client):
         resp = test_client.get("/rules")
 
-        assert "that weight is 20%" in resp.text
-        assert "50% for LightGBM" in resp.text and "30% for Naive Bayes" in resp.text
+        assert "needs 1 review" in resp.text
+        assert "capped at 90%, 95%, 98%" in resp.text
 
 
 class TestMerchantRuleRebuild:

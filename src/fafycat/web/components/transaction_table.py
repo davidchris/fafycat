@@ -56,11 +56,26 @@ def _row(tx, categories) -> Tr:
         badge = Span(category_name, cls="badge badge-saving")
         status_text, status_color = "Pending", "text-income"
 
+    # Listing endpoints count pending siblings; single-row responses (after a save) do not.
+    pending_siblings = getattr(tx, "pending_siblings", None) or 0
+    others = max(pending_siblings - 1, 0)
+    alike = (
+        [
+            Span(
+                f"+{others} pending alike",
+                cls="badge badge-saving text-sm ml-2",
+                title="Other unreviewed transactions with this merchant.",
+            )
+        ]
+        if others > 0
+        else []
+    )
     return Tr(
         Td(str(tx.date)),
         Td(
             Div(str(tx.description)),
             A("trail", href=f"/transactions/{tx.id}/trail", cls="text-secondary text-sm", title="Why this category?"),
+            *alike,
             style="max-width: 24rem; overflow-wrap: anywhere; word-break: break-word;",
         ),
         Td(f"€{tx.amount:,.2f}", cls="amount-cell"),

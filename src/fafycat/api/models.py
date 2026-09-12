@@ -20,6 +20,8 @@ class TransactionResponse(BaseModel):
     confidence: float | None = None
     is_reviewed: bool = False
     review_priority: str | None = None
+    pending_siblings: int | None = None
+    """Unreviewed transactions sharing the merchant pattern, this one included; None when not counted."""
     created_at: datetime
     updated_at: datetime
 

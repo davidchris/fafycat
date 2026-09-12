@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_manager
 from fafycat.api.ml_insights import TrainingRecency, get_training_recency
-from fafycat.api.services import CategoryService, TransactionService
+from fafycat.api.services import REVIEW_IMPACT_SORT, CategoryService, TransactionService
 from fafycat.core.config import AppConfig
 from fafycat.core.database import TransactionORM
 from fafycat.ml.prediction_pipeline import get_auto_approve_threshold
@@ -198,14 +198,14 @@ def render_review_page(request: Request):
 
     try:
         with db_manager.get_session() as session:
-            # Default view: everything not yet reviewed, least confident first.
+            # Default view: everything not yet reviewed, the rows one review resolves most of first.
             result = TransactionService.get_transactions_with_pagination(
                 session=session,
                 skip=0,
                 limit=50,
                 is_reviewed=False,
-                sort_by="confidence_score",
-                sort_order="asc",
+                sort_by=REVIEW_IMPACT_SORT,
+                sort_order="desc",
                 search="",
             )
             threshold = get_auto_approve_threshold(session)
@@ -241,7 +241,7 @@ def render_review_page(request: Request):
 
         <div class="mb-8">
             <h2 class="text-lg font-semibold mb-4">Needs review ({transaction_count} transactions)</h2>
-            <p class="text-secondary mb-4">Predictions at or above {threshold:.0%} confidence are auto-accepted. Everything else is listed here, least confident first, until you save a category.</p>
+            <p class="text-secondary mb-4">Predictions at or above {threshold:.0%} confidence are auto-accepted. Everything else is listed here until you save a category, ordered so that one review resolves the most: merchants with many pending transactions and uncertain predictions come first.</p>
             {transactions_html}
         </div>
 
@@ -340,7 +340,8 @@ def render_review_page(request: Request):
                                 hx-target="#transaction-table"
                                 hx-include="[name='status']:checked, [name='search'], [name='sort_order'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                 class="form-select">
-                            <option value="confidence_score" selected>Confidence</option>
+                            <option value="review_impact" selected>Review impact</option>
+                            <option value="confidence_score">Confidence</option>
                             <option value="date">Date</option>
                             <option value="amount">Amount</option>
                             <option value="name">Description</option>
@@ -354,8 +355,8 @@ def render_review_page(request: Request):
                                 hx-target="#transaction-table"
                                 hx-include="[name='status']:checked, [name='search'], [name='sort_by'], [name='category_filter'], [name='start_date'], [name='end_date']"
                                 class="form-select">
-                            <option value="asc" selected>Ascending</option>
-                            <option value="desc">Descending</option>
+                            <option value="asc">Ascending</option>
+                            <option value="desc" selected>Descending</option>
                         </select>
                     </div>
                 </div>

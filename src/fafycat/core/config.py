@@ -43,6 +43,15 @@ def _default_model_dir() -> Path:
     return _default_data_dir() / "models"
 
 
+def training_threads() -> int:
+    """Threads for model training: about 90% of the cores, at least one.
+
+    Retraining runs as a background job and may take a minute, so it should
+    use nearly the whole machine without starving the web server.
+    """
+    return max(1, int((os.cpu_count() or 1) * 0.9))
+
+
 class DatabaseConfig(BaseModel):
     """Database configuration."""
 
@@ -57,22 +66,25 @@ class MLConfig(BaseModel):
     use_ensemble: bool = True
     ensemble_cv_folds: int = 5
 
-    # LightGBM parameters (Optuna-tuned, 5x5 CV macro F1: 0.8549 vs 0.8466 baseline)
+    # LightGBM parameters. Optuna-tuned for the shape (5x5 CV macro F1), then
+    # cut to size in experiments/00-lgbm-capacity: on ~3k rows the log-loss
+    # bottoms out near 80 trees; 1000 was 13x past that point. Re-derive
+    # n_estimators when the labelled set grows a lot.
     lgbm_params: dict[str, Any] = Field(
         default_factory=lambda: {
-            "n_estimators": 1000,
-            "num_leaves": 97,
+            "n_estimators": 80,
+            "num_leaves": 63,
             "max_depth": 8,
             "learning_rate": 0.043,
             "feature_fraction": 0.475,
             "bagging_fraction": 0.92,
             "bagging_freq": 9,
-            "min_child_samples": 13,
+            "min_child_samples": 30,
             "reg_alpha": 3.3e-05,
             "reg_lambda": 7.0e-05,
             "class_weight": "balanced",
             "random_state": 42,
-            "n_jobs": -1,
+            "n_jobs": training_threads(),
             "verbose": -1,
         }
     )
@@ -102,6 +114,10 @@ class MLConfig(BaseModel):
     nb_alpha: float = 1.0
     nb_use_complement: bool = True
     nb_max_features: int = 2000
+
+    # L2 strength of the stacked ensemble's logistic regression. Chosen by
+    # 3-fold log-loss over {0.03, 0.1, 0.3, 1.0} in experiments/02-stacked-gate.
+    stack_l2_c: float = 0.03
 
     confidence_thresholds: dict[str, float] = Field(default_factory=lambda: {"high": 0.9, "medium": 0.7, "low": 0.5})
 

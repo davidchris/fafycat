@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_session
 from fafycat.api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
-from fafycat.api.services import CategoryService, TransactionService
+from fafycat.api.services import REVIEW_IMPACT_SORT, CategoryService, TransactionService
 from fafycat.core.models import ReviewPriority
 from fafycat.web.components.transaction_table import (
     render_propagation_result,
@@ -134,8 +134,8 @@ async def get_transactions_table(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     status: str = Query("pending"),  # pending, reviewed, all
-    sort_by: str = Query("confidence_score"),  # date, confidence_score, amount, name
-    sort_order: str = Query("asc"),  # asc, desc
+    sort_by: str = Query(REVIEW_IMPACT_SORT),  # review_impact, date, confidence_score, amount, name
+    sort_order: str = Query("desc"),  # asc, desc
     search: str = Query(""),
     category_filter: str = Query(""),
     start_date: str = Query(""),
