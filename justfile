@@ -4,4 +4,4 @@ verify:
     uv run ruff check
     uv run ty check
     uv run pytest
-    node --test tests_js/
+    node --test tests_js/*.test.js
