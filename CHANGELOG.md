@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
 ### Changed
 - **Honest confidence.** LightGBM and Naive Bayes are calibrated with a
   temperature fitted on out-of-fold predictions instead of an in-sample
@@ -177,7 +179,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - The repository was prepared for wider public sharing with updated
   documentation.
 
-[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/davidchris/fafycat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/davidchris/fafycat/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/davidchris/fafycat/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/davidchris/fafycat/releases/tag/v0.1.0
