@@ -32,6 +32,13 @@ from .stack import META_NAMES, StackLR, Voters, lookup_seen, meta_features, seen
 OOF_SEED = 0
 """Shuffle seed of the out-of-fold split; fixed so retrains are comparable."""
 
+MODEL_VERSION = "2.0-stack"
+"""Format of the saved ensemble; a file with any other version must be retrained."""
+
+
+class IncompatibleModelError(Exception):
+    """The saved model file exists, but this version of FafyCat cannot load it."""
+
 
 def rule_probability_vector(rule: MerchantMapping | None, class_ids: list[int]) -> np.ndarray | None:
     """Turn a Merchant Rule match into a vote over the ensemble's categories.
@@ -113,7 +120,7 @@ class EnsembleCategorizer:
         self.is_trained = False
         self.classes_: np.ndarray | None = None
         self.training_summary: dict[str, Any] | None = None
-        self.model_version = "2.0-stack"
+        self.model_version = MODEL_VERSION
         self.model_id = "untrained"
 
     def _new_nb(self) -> NaiveBayesTextClassifier:
@@ -531,38 +538,33 @@ class EnsembleCategorizer:
         self.model_id = model_fingerprint(model_path)
 
     def load_model(self, model_path: Path) -> None:
-        """Load trained ensemble model from disk."""
-        with open(model_path, "rb") as f:
-            try:
+        """Load trained ensemble model from disk.
+
+        Raises:
+            IncompatibleModelError: The file was saved in another model format,
+                by a FafyCat version this one cannot read.
+        """
+        retrain = "Retrain the model on the Settings page."
+        try:
+            with open(model_path, "rb") as f:
                 ensemble_data = pickle.load(f)
-            except ModuleNotFoundError as e:
-                # Handle legacy pickle files with different module paths
-                if "fafycat" in str(e):
-                    # Create a custom unpickler that can handle the old module path
-                    import pickle as _pickle
+        except (pickle.UnpicklingError, ImportError, AttributeError, EOFError) as e:
+            raise IncompatibleModelError(f"The saved model cannot be read by this version ({e}). {retrain}") from e
 
-                    # Temporarily add the module mapping for old pickle files
-                    class LegacyUnpickler(_pickle.Unpickler):
-                        def find_class(self, module, name) -> Any:
-                            # Map old module paths to new ones
-                            if module.startswith("fafycat."):
-                                # Remove the old 'fafycat.' prefix and use the current structure
-                                new_module = module.replace("fafycat.", "src.fafycat.")
-                                return super().find_class(new_module, name)
-                            if module == "fafycat":
-                                # Handle direct fafycat imports
-                                return super().find_class("src.fafycat", name)
-                            return super().find_class(module, name)
+        version = ensemble_data.get("model_version") if isinstance(ensemble_data, dict) else None
+        if version != MODEL_VERSION:
+            raise IncompatibleModelError(
+                f"The saved model has format {version!r}, but this version needs {MODEL_VERSION!r}. {retrain}"
+            )
+        try:
+            self._restore(ensemble_data)
+        except KeyError as e:
+            raise IncompatibleModelError(f"The saved model is missing {e}. {retrain}") from e
+        self.model_id = model_fingerprint(model_path)
+        self.is_trained = True
 
-                    f.seek(0)  # Reset file pointer
-                    unpickler = LegacyUnpickler(f)
-                    ensemble_data = unpickler.load()
-                else:
-                    raise
-
-        if "stack" not in ensemble_data:
-            raise ValueError("This ensemble was trained before the stacked ensemble existed; retrain the model")
-
+    def _restore(self, ensemble_data: dict[str, Any]) -> None:
+        """Copy the saved components onto this ensemble."""
         lgbm_data = ensemble_data["lgbm_model_data"]
         self.lgbm_component = TransactionCategorizer(self.session, self.config)
         self.lgbm_component.classifier = lgbm_data["classifier"]
@@ -583,8 +585,6 @@ class EnsembleCategorizer:
         self.classes_ = ensemble_data["classes_"]
         self.training_summary = ensemble_data["training_summary"]
         self.model_version = ensemble_data["model_version"]
-        self.model_id = model_fingerprint(model_path)
-        self.is_trained = True
 
     def get_ensemble_explanation(self, transaction: TransactionInput) -> dict[str, Any]:
         """Get detailed explanation for ensemble prediction."""

@@ -30,7 +30,7 @@ from fafycat.core.config import AppConfig
 from fafycat.core.database import AppSettingsORM, CategoryORM
 from fafycat.core.models import TransactionInput
 from fafycat.ml.categorizer import TransactionCategorizer
-from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
+from fafycat.ml.ensemble_categorizer import EnsembleCategorizer, IncompatibleModelError
 from fafycat.ml.prediction_pipeline import (
     CategorizationSummary,
     get_auto_approve_threshold,
@@ -56,56 +56,63 @@ def reset_singletons() -> None:
     _config = None
 
 
-def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategorizer | EnsembleCategorizer:
-    """Get or create the ML categorizer instance."""
+def load_categorizer(db: Session) -> TransactionCategorizer | EnsembleCategorizer:
+    """Return the cached Categorizer, loading the saved model on first use.
+
+    Raises:
+        FileNotFoundError: No trained model has been saved yet.
+        IncompatibleModelError: The saved model is in a format this version cannot read.
+    """
     global _categorizer, _config
 
     if _categorizer is None or _config is None:
-        _config = AppConfig()
-        _config.ensure_dirs()
+        config = AppConfig()
+        config.ensure_dirs()
 
         # Choose between ensemble and single model based on config
-        if _config.ml.use_ensemble:
-            _categorizer = EnsembleCategorizer(db, _config.ml)
-            model_path = _config.ml.model_dir / "ensemble_categorizer.pkl"
+        if config.ml.use_ensemble:
+            categorizer = EnsembleCategorizer(db, config.ml)
+            model_path = config.ml.model_dir / "ensemble_categorizer.pkl"
         else:
-            _categorizer = TransactionCategorizer(db, _config.ml)
-            model_path = _config.ml.model_dir / "categorizer.pkl"
+            categorizer = TransactionCategorizer(db, config.ml)
+            model_path = config.ml.model_dir / "categorizer.pkl"
 
-        # Try to load saved model
-        if model_path.exists():
-            try:
-                _categorizer.load_model(model_path)
-            except Exception as e:
-                error_msg = str(e)
-                if "No module named 'fafycat'" in error_msg:
-                    detail = (
-                        "The ML model is corrupted (module path issue). "
-                        "Please retrain the model using the Settings page or 'uv run scripts/train_model.py'"
-                    )
-                elif "no such table:" in error_msg:
-                    detail = (
-                        "Database schema is incomplete. "
-                        "Please run 'uv run scripts/init_prod_db.py' and then retrain the model."
-                    )
-                else:
-                    detail = (
-                        f"Failed to load ML model: {error_msg}. "
-                        "Please retrain the model using the Settings page or 'uv run scripts/train_model.py'"
-                    )
-
-                raise HTTPException(status_code=503, detail=detail) from e
-        else:
-            model_type = "ensemble" if _config.ml.use_ensemble else "single"
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    f"No trained {model_type} ML model found. Please train a model first using "
-                    "'uv run scripts/train_model.py'"
-                ),
+        if not model_path.exists():
+            model_type = "ensemble" if config.ml.use_ensemble else "single"
+            raise FileNotFoundError(
+                f"No trained {model_type} ML model found. Please train a model first using "
+                "'uv run scripts/train_model.py'"
             )
+        # Cache only a loaded model, so a failed load is retried and reported every time.
+        categorizer.load_model(model_path)
+        _categorizer, _config = categorizer, config
 
     return _categorizer
+
+
+def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategorizer | EnsembleCategorizer:
+    """FastAPI dependency: the loaded Categorizer, or a 503 that says why there is none."""
+    try:
+        return load_categorizer(db)
+    except (FileNotFoundError, IncompatibleModelError) as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        error_msg = str(e)
+        if "No module named 'fafycat'" in error_msg:
+            detail = (
+                "The ML model is corrupted (module path issue). "
+                "Please retrain the model using the Settings page or 'uv run scripts/train_model.py'"
+            )
+        elif "no such table:" in error_msg:
+            detail = (
+                "Database schema is incomplete. Please run 'uv run scripts/init_prod_db.py' and then retrain the model."
+            )
+        else:
+            detail = (
+                f"Failed to load ML model: {error_msg}. "
+                "Please retrain the model using the Settings page or 'uv run scripts/train_model.py'"
+            )
+        raise HTTPException(status_code=503, detail=detail) from e
 
 
 @router.get("/settings")

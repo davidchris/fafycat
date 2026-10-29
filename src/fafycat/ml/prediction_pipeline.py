@@ -47,6 +47,15 @@ class CategorizationSummary:
         """Number of transactions the run predicted."""
         return self.auto_accepted + self.needs_review + self.already_reviewed
 
+    def to_dict(self) -> dict[str, int]:
+        """The counts under the keys the API responses use."""
+        return {
+            "predictions_made": self.total,
+            "auto_accepted": self.auto_accepted,
+            "needs_review": self.needs_review,
+            "already_reviewed": self.already_reviewed,
+        }
+
 
 def get_auto_approve_threshold(db: Session) -> float:
     """Resolve the Auto-approve Threshold: DB setting with config fallback."""

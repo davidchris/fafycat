@@ -1,6 +1,7 @@
 """API routes for file upload operations."""
 
 import html
+import logging
 import tempfile
 import uuid
 from pathlib import Path
@@ -14,59 +15,42 @@ from fafycat.api.models import UploadResponse
 from fafycat.data.csv_processor import CSVProcessor
 from fafycat.ml.prediction_pipeline import CategorizationSummary, predict_new
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 # Store upload sessions temporarily (in production, use Redis or database)
 upload_sessions = {}
 
 
-def _summary_to_dict(summary: CategorizationSummary) -> dict:
-    """Map a Categorization Summary to the upload response fields."""
-    return {
-        "predictions_made": summary.total,
-        "auto_accepted": summary.auto_accepted,
-        "needs_review": summary.needs_review,
-        "already_reviewed": summary.already_reviewed,
-    }
-
-
-def empty_categorization_summary() -> dict:
-    """Return a zeroed categorization summary."""
-    return _summary_to_dict(CategorizationSummary())
+def empty_categorization_summary(prediction_error: str | None = None) -> dict:
+    """Return a zeroed categorization summary, with why nothing was predicted if that was a failure."""
+    return {**CategorizationSummary().to_dict(), "prediction_error": prediction_error}
 
 
 def predict_transaction_categories(db: Session, transactions: list, new_count: int) -> dict:
     """Predict categories for newly imported transactions via the Prediction Pipeline.
 
-    Gracefully degrades to an empty categorization summary when no trained
-    Categorizer is available - the import itself still succeeds.
+    The import itself always succeeds. Without a trained Categorizer the
+    summary is empty; when the saved model cannot be loaded or prediction
+    fails, ``prediction_error`` says why.
     """
     if new_count <= 0:
         return empty_categorization_summary()
 
+    from fafycat.api.ml import load_categorizer
+
     try:
-        from fafycat.api.ml import get_categorizer
-
-        categorizer = get_categorizer(db)
+        categorizer = load_categorizer(db)
         summary = predict_new(db, categorizer, [t.generate_id() for t in transactions])
-    except Exception as e:
-        _handle_prediction_error(e)
+    except FileNotFoundError:
+        logger.info("No ML model available for predictions during upload")
         return empty_categorization_summary()
+    except Exception as e:
+        logger.exception("ML prediction failed during upload")
+        return empty_categorization_summary(prediction_error=str(e))
 
-    return _summary_to_dict(summary)
-
-
-def _handle_prediction_error(e: Exception):
-    """Handle prediction errors gracefully."""
-    import logging
-    import traceback
-
-    error_msg = str(e)
-    if "No trained ML model found" in error_msg:
-        logging.info("No ML model available for predictions during upload")
-    else:
-        logging.error("ML prediction failed during upload: %s", e)
-        traceback.print_exc()
+    return {**summary.to_dict(), "prediction_error": None}
 
 
 @router.post("/csv", response_model=UploadResponse)
@@ -244,6 +228,7 @@ async def upload_csv_htmx(file: UploadFile = File(...), db: Session = Depends(ge
             auto_accepted=cat_summary["auto_accepted"],
             needs_review=cat_summary["needs_review"],
             already_reviewed=cat_summary["already_reviewed"],
+            prediction_error=cat_summary["prediction_error"],
         )
 
     except Exception as e:
@@ -267,6 +252,7 @@ def _render_upload_success(
     auto_accepted: int = 0,
     needs_review: int = 0,
     already_reviewed: int = 0,
+    prediction_error: str | None = None,
 ) -> str:
     """Render success message HTML for HTMX response."""
     alert_class = "alert-success" if new_count > 0 else "alert-info"
@@ -283,6 +269,13 @@ def _render_upload_success(
             <div class="alert alert-ml">
                 <p>🤖 ML Predictions</p>
                 <p>{predictions_made} transactions got predictions: {auto_accepted} auto-accepted, {needs_review} need your review{_kept_clause(already_reviewed)}.</p>
+            </div>
+        """
+    elif new_count > 0 and prediction_error:
+        prediction_info = f"""
+            <div class="alert alert-warning">
+                <p>⚠️ No ML Predictions</p>
+                <p>{html.escape(prediction_error)} <a href="/settings">Go to Settings</a>.</p>
             </div>
         """
     elif new_count > 0:
