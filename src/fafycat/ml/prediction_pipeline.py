@@ -47,6 +47,14 @@ class CategorizationSummary:
         """Number of transactions the run predicted."""
         return self.auto_accepted + self.needs_review + self.already_reviewed
 
+    def __add__(self, other: "CategorizationSummary") -> "CategorizationSummary":
+        """Combine the counts of two runs, e.g. consecutive batches."""
+        return CategorizationSummary(
+            auto_accepted=self.auto_accepted + other.auto_accepted,
+            needs_review=self.needs_review + other.needs_review,
+            already_reviewed=self.already_reviewed + other.already_reviewed,
+        )
+
     def to_dict(self) -> dict[str, int]:
         """The counts under the keys the API responses use."""
         return {

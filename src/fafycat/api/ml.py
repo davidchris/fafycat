@@ -335,6 +335,31 @@ async def get_calibration(db: Session = Depends(get_db_session)) -> dict:
     return get_calibration_report(db).to_dict()
 
 
+RETRAIN_PREDICT_BATCH_SIZE = 1000
+"""Transactions predicted per batch after a retrain."""
+
+
+def _predict_pending(db: Session, categorizer: TransactionCategorizer | EnsembleCategorizer) -> dict:
+    """Predict every transaction that has no Prediction yet with a freshly trained Categorizer.
+
+    Rows that already carry a Prediction are left for an explicit re-predict.
+    A failure is reported in the result, so it never fails the training itself.
+    """
+    total = CategorizationSummary()
+    try:
+        while True:
+            summary, remaining = predict_unpredicted(
+                db, categorizer, limit=RETRAIN_PREDICT_BATCH_SIZE, trigger="retrain"
+            )
+            total += summary
+            if remaining == 0 or summary.total == 0:
+                break
+    except Exception as e:
+        db.rollback()
+        return {**total.to_dict(), "prediction_error": f"Predicting pending transactions failed: {e}"}
+    return {**total.to_dict(), "prediction_error": None}
+
+
 def _run_training_sync() -> None:
     """Synchronous training function to run in executor."""
     global _categorizer, _config
@@ -352,8 +377,10 @@ def _run_training_sync() -> None:
             update_job_phase(TrainingPhase.PREPARING_DATA)
 
             # Choose between ensemble and single model based on config
+            categorizer: TransactionCategorizer | EnsembleCategorizer
             if _config.ml.use_ensemble:
                 ensemble_categorizer = EnsembleCategorizer(training_session, _config.ml)
+                categorizer = ensemble_categorizer
                 model_filename = "ensemble_categorizer.pkl"
 
                 # Create progress callback to update job phases during training
@@ -384,6 +411,7 @@ def _run_training_sync() -> None:
                 }
             else:
                 single_categorizer = TransactionCategorizer(training_session, _config.ml)
+                categorizer = single_categorizer
                 model_filename = "categorizer.pkl"
 
                 update_job_phase(TrainingPhase.TRAINING_LGBM)
@@ -399,12 +427,8 @@ def _run_training_sync() -> None:
                     "training_samples": len(single_categorizer.prepare_training_data()[0]),
                 }
 
-            # Save the trained model
-            model_path = _config.ml.model_dir / model_filename
-            if _config.ml.use_ensemble:
-                ensemble_categorizer.save_model(model_path)
-            else:
-                single_categorizer.save_model(model_path)
+            categorizer.save_model(_config.ml.model_dir / model_filename)
+            result_data.update(_predict_pending(training_session, categorizer))
 
         # Reset global categorizer to force reload
         _categorizer = None

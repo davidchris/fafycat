@@ -86,6 +86,7 @@ FafyCat is a privacy-focused financial transaction categorization tool that uses
    - Visit Settings → Train Model
    - Click "Train ML Model Now"
    - Training takes seconds to minutes
+   - Transactions without a prediction are predicted right after training
 
 4. **Enjoy Automation**
    - Future imports will be auto-categorized
