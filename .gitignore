@@ -45,3 +45,6 @@ docs/media/.raw-test/
 
 # Ralph AFK worker: host-side issue snapshots fed to sandbox
 plans/issue-*.md
+
+# Offline ML experiments: private data, prod-DB caches, credentials
+/experiments/
