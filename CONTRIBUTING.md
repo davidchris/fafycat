@@ -66,6 +66,8 @@ uv run pytest
    uv run pytest
    ```
 
+   `just verify` runs all of these as checks (format check, lint, typecheck, Python and JS tests). CI runs the same command as the required `verify` check.
+
 4. **Write tests** for new functionality
 
 5. **Update documentation** if needed

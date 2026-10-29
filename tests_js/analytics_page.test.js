@@ -30,7 +30,7 @@ function createElement(tagName) {
 }
 
 function loadAnalyticsPageController({ elements = {}, analyticsPageConfig = {}, now = '2026-04-08T12:00:00Z' } = {}) {
-    const scriptPath = path.join(__dirname, '..', 'static', 'js', 'analytics_page.js');
+    const scriptPath = path.join(__dirname, '..', 'src', 'fafycat', 'static', 'js', 'analytics_page.js');
     const source = fs.readFileSync(scriptPath, 'utf8');
 
     class FakeDate extends Date {
