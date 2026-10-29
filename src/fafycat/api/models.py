@@ -97,6 +97,8 @@ class UploadResponse(BaseModel):
     needs_review: int = 0
     already_reviewed: int = 0
     """Rows that came with a category in the CSV and kept it."""
+    prediction_error: str | None = None
+    """Why nothing was predicted when a model exists but could not be used."""
 
 
 class ExportRequest(BaseModel):

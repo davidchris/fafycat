@@ -40,6 +40,7 @@ _TRIGGER_LABELS = {
     "import": "on import",
     "batch_unpredicted": "batch prediction",
     "repredict": "re-prediction",
+    "retrain": "after retraining",
 }
 
 

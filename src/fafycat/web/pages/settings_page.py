@@ -287,40 +287,21 @@ def render_empty_categories_state(ml_status, calibration=None):
             return `\\n- Auto-approve at ${{pct(result.auto_threshold)}}: ${{pct(result.auto_rate)}} of rows, ${{pct(result.auto_error_rate)}} of those wrong (out-of-fold)`;
         }}
 
+        function formatPredictions(result) {{
+            if (result.prediction_error) {{
+                return `\\n\\nAuto-prediction failed: ${{result.prediction_error}}\\nYou can predict manually from this page.`;
+            }}
+            if (!result.predictions_made) return '\\n\\nAll transactions already have predictions.';
+            const kept = result.already_reviewed ? `\\n- ${{result.already_reviewed}} already reviewed (kept their category)` : '';
+            return `\\n\\nPredicted ${{result.predictions_made}} transactions without a prediction:\\n- ${{result.auto_accepted}} auto-accepted\\n- ${{result.needs_review}} need your review${{kept}}`;
+        }}
+
         function handleTrainingComplete(result) {{
             const accuracy = (result.accuracy * 100).toFixed(1);
             const samples = result.training_samples;
             const autoApprove = formatAutoApprove(result);
-
-            // Update button to show prediction phase
-            const trainButton = document.getElementById('trainButton');
-            if (trainButton) {{
-                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Auto-predicting...';
-            }}
-
-            // Automatically predict unpredicted transactions
-            fetch('/api/ml/predict/batch-unpredicted', {{
-                method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }}
-            }})
-            .then(response => response.json())
-            .then(predictData => {{
-                if (predictData.status === 'success') {{
-                    const predicted = predictData.predictions_made;
-                    const message = predicted > 0
-                        ? `Training and prediction completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}${{autoApprove}}\\n\\nAuto-Prediction Results:\\n- ${{predicted}} transactions now have predictions\\n- Ready for review on the Review page!`
-                        : `Model training completed!\\n\\nModel Performance:\\n- Accuracy: ${{accuracy}}%\\n- Training samples: ${{samples}}${{autoApprove}}\\n\\nAll transactions already have predictions!`;
-                    alert(message);
-                }} else {{
-                    alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{autoApprove}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
-                }}
-                location.reload();
-            }})
-            .catch(error => {{
-                console.error('Auto-prediction failed:', error);
-                alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{autoApprove}}\\n\\nAuto-prediction failed, but you can predict manually from this page.`);
-                location.reload();
-            }});
+            alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{autoApprove}}${{formatPredictions(result)}}`);
+            location.reload();
         }}
 
         function handleTrainingFailed(error) {{
@@ -779,11 +760,20 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             return `\\n- Auto-approve at ${pct(result.auto_threshold)}: ${pct(result.auto_rate)} of rows, ${pct(result.auto_error_rate)} of those wrong (out-of-fold)`;
         }
 
+        function formatPredictions(result) {
+            if (result.prediction_error) {
+                return `\\n\\nAuto-prediction failed: ${result.prediction_error}\\nYou can predict manually from this page.`;
+            }
+            if (!result.predictions_made) return '\\n\\nAll transactions already have predictions.';
+            const kept = result.already_reviewed ? `\\n- ${result.already_reviewed} already reviewed (kept their category)` : '';
+            return `\\n\\nPredicted ${result.predictions_made} transactions without a prediction:\\n- ${result.auto_accepted} auto-accepted\\n- ${result.needs_review} need your review${kept}`;
+        }
+
         function handleTrainingComplete(result) {
             const accuracy = (result.accuracy * 100).toFixed(1);
             const samples = result.training_samples;
             const autoApprove = formatAutoApprove(result);
-            alert(`Model training completed!\\n\\nAccuracy: ${accuracy}%\\nTraining samples: ${samples}${autoApprove}\\n\\nYour model is now ready to predict transactions!`);
+            alert(`Model training completed!\\n\\nAccuracy: ${accuracy}%\\nTraining samples: ${samples}${autoApprove}${formatPredictions(result)}`);
             location.reload();
         }
 

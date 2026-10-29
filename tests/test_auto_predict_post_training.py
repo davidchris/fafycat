@@ -1,73 +1,105 @@
 """Tests for auto-prediction after training completion."""
 
-from unittest.mock import patch, MagicMock
+from datetime import date
+
 from sqlalchemy import text
-from fafycat.core.database import TransactionORM, CategoryORM
+
+import fafycat.api.ml as ml_api
+from fafycat.api.ml_training_job import create_training_job, get_current_job, set_job_running
+from fafycat.core.database import CategoryORM, TransactionORM
 from fafycat.core.models import TransactionInput
 from fafycat.data.csv_processor import CSVProcessor
-from datetime import date
+
+MERCHANTS = {"groceries": "REWE Markt", "restaurants": "Pizzeria Roma", "utilities": "Stadtwerke Berlin"}
+
+
+def seed_training_and_pending(db_session) -> None:
+    """60 reviewed rows to train on and 10 pending rows without a prediction."""
+    db_session.execute(text("DELETE FROM transactions"))
+    db_session.execute(text("DELETE FROM categories"))
+    for name in MERCHANTS:
+        db_session.add(CategoryORM(name=name, type="spending"))
+    db_session.commit()
+
+    processor = CSVProcessor(db_session)
+    processor.save_transactions(
+        [
+            TransactionInput(
+                date=date(2024, 1, (i % 28) + 1),
+                name=merchant,
+                purpose=f"{category} order {i}",
+                amount=-50.0 - i,
+                category=category,
+            )
+            for i in range(20)
+            for category, merchant in MERCHANTS.items()
+        ],
+        "test_training",
+    )
+    processor.save_transactions(
+        [
+            TransactionInput(
+                date=date(2024, 2, (i % 28) + 1),
+                name=f"Pending Merchant {i}",
+                purpose=f"Pending transaction {i}",
+                amount=-25.0,
+            )
+            for i in range(10)
+        ],
+        "test_pending",
+    )
+
+
+def run_training_job() -> dict:
+    """Run one training job synchronously and return its final state."""
+    create_training_job()
+    set_job_running()
+    ml_api._run_training_sync()
+    job = get_current_job()
+    assert job is not None
+    return job.to_dict()
 
 
 class TestAutoPredictPostTraining:
     """Test automatic prediction after training completion."""
 
-    def test_retrain_endpoint_triggers_auto_prediction(self, test_client, db_session):
-        """Test that the retrain endpoint can trigger automatic prediction."""
-        # Clear existing data
-        db_session.execute(text("DELETE FROM transactions"))
-        db_session.execute(text("DELETE FROM categories"))
+    def test_training_job_predicts_every_unpredicted_transaction(self, db_session, monkeypatch):
+        seed_training_and_pending(db_session)
+        already_predicted = db_session.query(TransactionORM).filter(TransactionORM.name == "Pending Merchant 0").one()
+        already_predicted.predicted_category_id = db_session.query(CategoryORM).first().id
+        already_predicted.confidence_score = 0.42
         db_session.commit()
-        db_session.flush()
+        # Small batches, so the job has to keep going until nothing is left.
+        monkeypatch.setattr(ml_api, "RETRAIN_PREDICT_BATCH_SIZE", 4)
 
-        # Create categories
-        categories = ["groceries", "restaurants", "utilities"]
-        for cat_name in categories:
-            category = CategoryORM(name=cat_name, type="spending")
-            db_session.add(category)
-        db_session.commit()
+        job = run_training_job()
 
-        # Create sufficient training data (reviewed transactions)
-        processor = CSVProcessor(db_session)
-        training_transactions = []
-        for i in range(60):
-            category = categories[i % len(categories)]
-            transaction = TransactionInput(
-                date=date(2024, 1, (i % 28) + 1),
-                name=f"Training Merchant {i}",
-                purpose=f"Training transaction {i}",
-                amount=-50.0,
-                category=category,
-            )
-            training_transactions.append(transaction)
+        assert job["status"] == "completed"
+        result = job["result"]
+        assert result["auto_accepted"] + result["needs_review"] == 9
+        assert result["already_reviewed"] == 60
+        assert result["predictions_made"] == 69
+        assert result["prediction_error"] is None
+        db_session.expire_all()
+        assert db_session.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None)).count() == 0
+        # Rows that already had a prediction are left for an explicit re-predict.
+        db_session.refresh(already_predicted)
+        assert already_predicted.confidence_score == 0.42
 
-        processor.save_transactions(training_transactions, "test_training")
+    def test_a_prediction_failure_does_not_fail_the_training(self, db_session, tmp_data_dir, monkeypatch):
+        seed_training_and_pending(db_session)
 
-        # Create unpredicted transactions (no category, is_reviewed=False)
-        unpredicted_transactions = []
-        for i in range(10):
-            transaction = TransactionInput(
-                date=date(2024, 2, (i % 28) + 1),
-                name=f"Unpredicted Merchant {i}",
-                purpose=f"Unpredicted transaction {i}",
-                amount=-25.0,
-                # No category - these need prediction
-            )
-            unpredicted_transactions.append(transaction)
+        def broken_predict(*args, **kwargs):
+            raise RuntimeError("prediction exploded")
 
-        processor.save_transactions(unpredicted_transactions, "test_unpredicted")
+        monkeypatch.setattr(ml_api, "predict_unpredicted", broken_predict)
 
-        # Verify setup
-        reviewed_count = (
-            db_session.query(TransactionORM)
-            .filter(TransactionORM.is_reviewed, TransactionORM.category_id.is_not(None))
-            .count()
-        )
+        job = run_training_job()
 
-        # Count transactions that need predictions (no actual category set)
-        unpredicted_count = db_session.query(TransactionORM).filter(TransactionORM.category_id.is_(None)).count()
-
-        assert reviewed_count == 60, f"Expected 60 reviewed transactions, got {reviewed_count}"
-        assert unpredicted_count == 10, f"Expected 10 unpredicted transactions, got {unpredicted_count}"
+        assert job["status"] == "completed"
+        assert (tmp_data_dir / "models" / "ensemble_categorizer.pkl").exists()
+        assert job["result"]["predictions_made"] == 0
+        assert "prediction exploded" in job["result"]["prediction_error"]
 
     def test_batch_unpredicted_endpoint_works(self, test_client, db_session):
         """Test that batch unpredicted endpoint works correctly."""

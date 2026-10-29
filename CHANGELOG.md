@@ -32,6 +32,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - The simplex weight grid, `MIN_MODEL_WEIGHT`, and the unused k-fold
   validator module.
 
+### Fixed
+- **Incompatible model is reported, not hidden.** When the saved model was
+  written in another format (for example a `1.0-ensemble` model after the
+  stacked ensemble), loading fails with a clear "retrain the model" message
+  instead of the import page saying no model exists. The import still
+  succeeds; the upload result, the `/api/upload/csv` response
+  (`prediction_error`), the CLI import, and the ML status all name the
+  problem.
+- **Retraining predicts pending transactions.** After a successful retrain
+  the training job predicts every transaction that has no prediction yet
+  and reports how many were auto-accepted or need review. Transactions that
+  already have a prediction are not re-predicted. A prediction failure is
+  reported in the result and does not fail the training.
+
 ## [0.2.0] - 2026-09-10
 
 ### Added

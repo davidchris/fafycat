@@ -194,6 +194,12 @@ async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
                         f"{_kept_clause(cat_summary['already_reviewed'])}",
                     )
                 )
+            elif new_count > 0 and cat_summary["prediction_error"]:
+                prediction_component = str(
+                    create_info_alert(
+                        "No ML Predictions", cat_summary["prediction_error"], "Go to Settings", "/settings"
+                    )
+                )
             elif new_count > 0:
                 prediction_component = str(
                     create_info_alert("No ML Predictions", "No trained model available", "Train a model", "/settings")
