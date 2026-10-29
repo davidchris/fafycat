@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function loadAnalyticsHooks() {
-    const scriptPath = path.join(__dirname, '..', 'static', 'js', 'analytics.js');
+    const scriptPath = path.join(__dirname, '..', 'src', 'fafycat', 'static', 'js', 'analytics.js');
     const source = fs.readFileSync(scriptPath, 'utf8');
 
     const context = {

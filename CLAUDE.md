@@ -15,6 +15,7 @@
   `.venv`. Install the relevant group with `uv sync --group <name>` before running such a
   script.
 - **Run Tests**: `uv run pytest`
+- **Verify (all checks, same as CI)**: `just verify`
 - **Test Coverage**: Tests should be in `tests/` directory
 - use puppeteer to verify UI functionality
 - Dependencies managed via `pyproject.toml`
@@ -47,3 +48,21 @@ User data defaults to the platform user data directory. Override it with `--data
 - Is it about SELECTING from multiple results? pipe to 'fzf'
 - Is it about interacting with JSON? use 'jq'
 - Is it about interacting with YAML or XML? use 'yq'
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `davidchris/fafycat`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Workflow
+
+Definition of Ready and Done, evidence rules, filing rule, and merge gate. See `docs/agents/workflow.md`.
