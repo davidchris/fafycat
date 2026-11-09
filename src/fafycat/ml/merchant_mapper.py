@@ -9,6 +9,7 @@ non-default fallback, still lets a rule decide on its own at
 ``RULE_OVERRIDE_CONFIDENCE``.
 """
 
+import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from datetime import date, datetime
@@ -131,6 +132,11 @@ PARTIAL_MATCH_MIN_LENGTH = 5
 """Shorter patterns ("DM", "BVG") match exactly only; as words they occur in too many names."""
 
 
+def _words(name: str) -> set[str]:
+    """Words of a cleaned merchant name; spaces and punctuation both separate them."""
+    return set(re.findall(r"\w+", name))
+
+
 class DerivedRule(NamedTuple):
     """One Merchant Rule as computed from reviewed transactions."""
 
@@ -193,7 +199,7 @@ class MerchantRuleSet:
         """Partial-match candidates: each word of a long enough pattern mapped to its patterns."""
         for pattern in rules:
             if len(pattern) >= PARTIAL_MATCH_MIN_LENGTH:
-                for word in pattern.split():
+                for word in _words(pattern):
                     self._by_word[word].add(pattern)
 
     @classmethod
@@ -205,8 +211,9 @@ class MerchantRuleSet:
         """Find the rule for a merchant: exact match first, then partial.
 
         A partial match needs every word of the rule's pattern to appear as a
-        whole word in the merchant name ("AMAZON" matches "AMAZON MARKETPLACE",
-        never "AMAZING THAI"), and the pattern must be at least
+        whole word in the merchant name ("AMAZON" matches "AMAZON MARKETPLACE"
+        and "AMAZON.COM", never "AMAZING THAI"; spaces and punctuation
+        separate words), and the pattern must be at least
         ``PARTIAL_MATCH_MIN_LENGTH`` characters long. When several rules
         match, the most specific wins: most words, then longest, then
         alphabetical, so the result never depends on rule order.
@@ -226,13 +233,13 @@ class MerchantRuleSet:
         if exact is not None:
             return MerchantMapping(merchant_pattern=clean_merchant, category_id=exact[0], confidence=exact[1])
 
-        merchant_words = set(clean_merchant.split())
+        merchant_words = _words(clean_merchant)
         candidates = set().union(*(self._by_word.get(word, set()) for word in merchant_words))
-        matches = [p for p in candidates if p in self.rules and set(p.split()) <= merchant_words]
+        matches = [p for p in candidates if p in self.rules and _words(p) <= merchant_words]
         if not matches:
             return None
 
-        pattern = min(matches, key=lambda p: (-len(p.split()), -len(p), p))
+        pattern = min(matches, key=lambda p: (-len(_words(p)), -len(p), p))
         category_id, confidence = self.rules[pattern]
         return MerchantMapping(
             merchant_pattern=pattern,

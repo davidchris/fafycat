@@ -54,6 +54,15 @@ class TestPartialRuleMatching:
         assert (match.merchant_pattern, match.category_id) == ("AMAZON", 1)
         assert match.confidence == pytest.approx(0.9 * PARTIAL_MATCH_PENALTY)
 
+    @pytest.mark.parametrize("merchant", ["Amazon.com", "AMAZON-MARKETPLACE"])
+    def test_punctuation_separates_words(self, merchant):
+        rules = MerchantRuleSet({"AMAZON": (1, 0.9)})
+
+        match = rules.get_category(merchant)
+
+        assert match is not None
+        assert match.merchant_pattern == "AMAZON"
+
     def test_a_multi_word_rule_needs_all_its_words(self):
         rules = MerchantRuleSet({"REWE MARKT": (1, 0.9)})
 
