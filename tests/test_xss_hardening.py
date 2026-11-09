@@ -14,7 +14,7 @@ class TestUploadXSSEscaping:
     """Tests that upload responses escape filenames."""
 
     def test_upload_htmx_escapes_filename(self, test_client, db_session):
-        """POST CSV with XSS filename, assert escaped in error HTML."""
+        """POST CSV with XSS filename, assert failure page carries no raw payload."""
         csv_content = "not,a,valid,csv\n"
         with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             f.write(csv_content)
@@ -28,8 +28,10 @@ class TestUploadXSSEscaping:
                 )
             assert resp.status_code == 200
             body = resp.text
-            # The raw script tag should not appear unescaped
-            assert "<img src=x onerror=alert(1)>" not in body or "&lt;img" in body
+            # The error page never echoes the filename; it must be the failure
+            # path and must not carry the raw payload.
+            assert "Upload Failed" in body
+            assert XSS_PAYLOAD not in body
         finally:
             csv_path.unlink()
 
@@ -48,10 +50,10 @@ class TestUploadXSSEscaping:
                 )
             assert resp.status_code == 200
             body = resp.text
-            # Filename should be escaped in the response
-            if XSS_PAYLOAD in body:
-                # If the payload appears, it must be in escaped form
-                assert XSS_ESCAPED in body
+            assert "Successfully imported" in body
+            # The filename is echoed, and only in escaped form
+            assert XSS_PAYLOAD not in body
+            assert f"{XSS_ESCAPED}.csv" in body
         finally:
             csv_path.unlink()
 

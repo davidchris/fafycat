@@ -132,3 +132,46 @@ test('top transactions defaults to the latest month with data for the selected y
 
     assert.equal(monthSelector.value, '3');
 });
+
+test('withReviewFilter sends include_unreviewed=false only when the exclude toggle is checked', () => {
+    const toggle = { checked: false };
+    const hooks = loadAnalyticsPageController({ elements: { 'exclude-unreviewed-toggle': toggle } });
+
+    const included = new URL(hooks.withReviewFilter('/api/analytics/summary?year=2026'));
+    assert.equal(included.searchParams.get('include_unreviewed'), 'true');
+    assert.equal(included.searchParams.get('year'), '2026');
+
+    toggle.checked = true;
+    const excluded = new URL(hooks.withReviewFilter('/api/analytics/summary?year=2026'));
+    assert.equal(excluded.searchParams.get('include_unreviewed'), 'false');
+    assert.equal(excluded.searchParams.get('year'), '2026');
+});
+
+test('renderUnreviewedAlert warns with a review link when unreviewed rows are counted', () => {
+    const container = createElement('div');
+    const hooks = loadAnalyticsPageController({ elements: { 'unreviewed-alert-container': container } });
+
+    hooks.renderUnreviewedAlert({ count: 3, amount: -12.5, included: true });
+
+    assert.equal(container.children.length, 1);
+    const [alert] = container.children;
+    assert.equal(alert.className, 'alert alert-warning');
+    const [text, link] = alert.children;
+    assert.match(text.textContent, /^3 unreviewed transactions \(.*\) in this range are counted under their predicted category\./);
+    assert.equal(link.href, '/review');
+});
+
+test('renderUnreviewedAlert says rows are excluded when the toggle drops them, and clears at zero', () => {
+    const container = createElement('div');
+    const hooks = loadAnalyticsPageController({ elements: { 'unreviewed-alert-container': container } });
+
+    hooks.renderUnreviewedAlert({ count: 2, amount: 40, included: false });
+
+    assert.equal(container.children.length, 1);
+    assert.equal(container.children[0].className, 'text-secondary');
+    assert.match(container.children[0].textContent, /^2 unreviewed transactions \(.*\) are excluded from these numbers\.$/);
+
+    hooks.renderUnreviewedAlert({ count: 0, amount: 0, included: true });
+
+    assert.equal(container.children.length, 0);
+});

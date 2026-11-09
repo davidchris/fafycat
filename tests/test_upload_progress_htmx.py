@@ -1,170 +1,104 @@
-"""Tests for HTMX upload progress indicators and inline results."""
+"""Tests for the HTMX upload form on /import and the inline results it receives."""
 
 import io
-from fastapi.testclient import TestClient
-from fafycat.core.database import TransactionORM, CategoryORM
+from html.parser import HTMLParser
+
+CSV = "Date,Description,Amount\n2024-01-01,Test Transaction,-10.50\n"
 
 
-class TestUploadProgressHTMX:
-    """Test HTMX upload functionality with progress indicators and inline results."""
+class _Page(HTMLParser):
+    """Collects elements by id and the text of each ``<p>`` so tests can assert on structure."""
 
-    def test_htmx_upload_endpoint_exists(self, test_client):
-        """Test that the HTMX upload endpoint exists and accepts POST requests."""
-        # Create a test CSV content
-        csv_content = "Date,Description,Amount\n2024-01-01,Test Transaction,-10.50\n"
-        files = {"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")}
+    def __init__(self, html: str) -> None:
+        super().__init__()
+        self.by_id: dict[str, dict[str, str | None]] = {}
+        self.tags: list[tuple[str, dict[str, str | None]]] = []
+        self.paragraphs: list[str] = []
+        self._in_p = False
+        self._text: list[str] = []
+        self.feed(html)
 
-        response = test_client.post("/api/upload/csv-htmx", files=files)
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        self.tags.append((tag, attributes))
+        if "id" in attributes:
+            self.by_id[attributes["id"]] = {"tag": tag, **attributes}
+        if tag == "p":
+            self._in_p, self._text = True, []
 
-        # Should return HTML response (not JSON)
-        assert response.status_code == 200
-        assert "text/html" in response.headers.get("content-type", "")
+    def handle_data(self, data):
+        if self._in_p:
+            self._text.append(data)
 
-    def test_htmx_upload_success_html_response(self, test_client, db_session):
-        """Test that successful upload returns proper HTML response."""
-        # Clear existing data
-        db_session.query(TransactionORM).delete()
-        db_session.query(CategoryORM).delete()
-        db_session.commit()
+    def handle_endtag(self, tag):
+        if tag == "p" and self._in_p:
+            self.paragraphs.append("".join(self._text).strip())
+            self._in_p = False
 
-        # Create test CSV with valid transaction
-        csv_content = "Date,Description,Amount\n2024-01-01,Test Transaction,-10.50\n"
-        files = {"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")}
+    def with_class(self, name: str) -> list[dict[str, str | None]]:
+        return [attrs for _, attrs in self.tags if name in (attrs.get("class") or "").split()]
 
-        response = test_client.post("/api/upload/csv-htmx", files=files)
+    def links(self) -> list[str | None]:
+        return [attrs.get("href") for tag, attrs in self.tags if tag == "a"]
 
-        assert response.status_code == 200
-        html = response.text
 
-        # Check for success indicators
-        assert "Successfully imported" in html
-        assert "test.csv" in html
-        assert "Rows processed:" in html
-        assert "New transactions:" in html
-        assert "Review Transactions" in html
-        assert "Upload Another File" in html
+def _upload(client, name: str, content: bytes) -> _Page:
+    response = client.post("/api/upload/csv-htmx", files={"file": (name, io.BytesIO(content), "text/csv")})
+    assert response.status_code == 200  # HTMX only swaps 2xx responses, so errors are 200 with an error block
+    assert "text/html" in response.headers["content-type"]
+    return _Page(response.text)
 
-        # Check for proper CSS classes
-        assert "alert-success" in html  # Success styling
-        assert "upload-result" in html
 
-    def test_htmx_upload_error_html_response(self, test_client):
-        """Test that upload errors return proper HTML error response."""
-        # Create invalid file (wrong extension)
-        files = {"file": ("test.txt", io.BytesIO(b"invalid content"), "text/plain")}
+class TestUploadResults:
+    def test_success_reports_counts_and_links_to_review(self, test_client):
+        page = _upload(test_client, "test.csv", CSV.encode())
 
-        response = test_client.post("/api/upload/csv-htmx", files=files)
+        assert len(page.with_class("alert-success")) == 1
+        assert not page.with_class("alert-error")
+        assert "File: test.csv" in page.paragraphs
+        assert "Rows processed: 1" in page.paragraphs
+        assert "New transactions: 1" in page.paragraphs
+        assert "Duplicates skipped: 0" in page.paragraphs
+        assert "/review" in page.links()
 
-        assert response.status_code == 200  # HTMX endpoints return 200 with error HTML
-        html = response.text
+    def test_reuploading_the_same_file_counts_duplicates_not_new_rows(self, test_client):
+        _upload(test_client, "test.csv", CSV.encode())
 
-        # Check for error indicators
-        assert "Upload Failed" in html
-        assert "Only CSV files are allowed" in html
-        assert "Try Again" in html
+        page = _upload(test_client, "test.csv", CSV.encode())
 
-        # Check for proper CSS classes
-        assert "alert-error" in html  # Error styling
-        assert "upload-result" in html
+        assert "New transactions: 0" in page.paragraphs
+        assert "Duplicates skipped: 1" in page.paragraphs
 
-    def test_htmx_upload_with_predictions(self, test_client, db_session):
-        """Test that upload shows prediction information when ML model is available."""
-        # This test simulates having predictions made
-        # In real scenario, would need trained model
-        csv_content = "Date,Description,Amount\n2024-01-01,Test Transaction,-10.50\n"
-        files = {"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")}
+    def test_non_csv_upload_returns_an_error_block(self, test_client):
+        page = _upload(test_client, "test.txt", b"invalid content")
 
-        response = test_client.post("/api/upload/csv-htmx", files=files)
+        assert len(page.with_class("alert-error")) == 1
+        assert not page.with_class("alert-success")
+        assert "Only CSV files are allowed" in page.paragraphs
 
-        assert response.status_code == 200
-        html = response.text
 
-        # Should contain file processing information
-        assert "test.csv" in html
-        assert "Rows processed:" in html
-
-    def test_htmx_upload_duplicate_handling(self, test_client, db_session):
-        """Test that duplicate transactions are properly shown in HTML response."""
-        # First upload
-        csv_content = "Date,Description,Amount\n2024-01-01,Test Transaction,-10.50\n"
-        files = {"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")}
-        test_client.post("/api/upload/csv-htmx", files=files)
-
-        # Second upload (same data)
-        files = {"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")}
-        response = test_client.post("/api/upload/csv-htmx", files=files)
-
-        assert response.status_code == 200
-        html = response.text
-
-        # Should show no new imports, but duplicates skipped
-        assert "No new transactions imported" in html or "duplicates were skipped" in html
-        assert "Duplicates skipped:" in html
-
-    def test_import_page_has_htmx_form(self, test_client):
-        """Test that the import page includes the HTMX form elements."""
+class TestImportPageForm:
+    def test_form_posts_to_the_htmx_endpoint_and_targets_existing_elements(self, test_client):
         response = test_client.get("/import")
-
         assert response.status_code == 200
-        html = response.text
+        page = _Page(response.text)
 
-        # Check for HTMX attributes
-        assert 'hx-post="/api/upload/csv-htmx"' in html
-        assert 'hx-target="#uploadResults"' in html
-        assert 'hx-indicator="#uploadProgress"' in html
-        assert 'id="uploadProgress"' in html
-        assert 'id="uploadResults"' in html
+        form = page.by_id["uploadForm"]
+        assert form["tag"] == "form"
+        assert form["hx-post"] == "/api/upload/csv-htmx"
+        assert form["hx-encoding"] == "multipart/form-data"
+        # The swap target and progress indicator the form names must exist on the page.
+        assert form["hx-target"] == "#uploadResults"
+        assert form["hx-indicator"] == "#uploadProgress"
+        assert page.by_id["uploadResults"]["tag"] == "div"
+        assert "htmx-indicator" in (page.by_id["uploadProgress"]["class"] or "").split()
 
-        # Check for progress indicator
-        assert "Processing your file..." in html
-        assert "htmx-indicator" in html
+    def test_file_input_feeds_the_endpoint_and_submit_starts_disabled(self, test_client):
+        page = _Page(test_client.get("/import").text)
 
-        # Check for JavaScript functionality
-        assert "updateUploadButton()" in html
-        assert "htmx:afterRequest" in html
-
-    def test_upload_button_disabled_initially(self, test_client):
-        """Test that upload button is initially disabled until file is selected."""
-        response = test_client.get("/import")
-
-        assert response.status_code == 200
-        html = response.text
-
-        # Button should be disabled initially
-        assert "disabled" in html
-        assert 'id="uploadButton"' in html
-        assert "Select a file first" in html or "Upload and Process" in html
-
-    def test_htmx_form_reset_functionality(self, test_client):
-        """Test that the form includes reset functionality after successful upload."""
-        response = test_client.get("/import")
-
-        assert response.status_code == 200
-        html = response.text
-
-        # Check for form reset JavaScript
-        assert "htmx:afterRequest" in html
-        assert "uploadForm" in html
-        assert "reset()" in html
-
-    def test_inline_results_styling(self, test_client, db_session):
-        """Test that inline results have proper styling and actions."""
-        # Clear existing data
-        db_session.query(TransactionORM).delete()
-        db_session.commit()
-
-        csv_content = "Date,Description,Amount\n2024-01-01,Test Transaction,-10.50\n"
-        files = {"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")}
-
-        response = test_client.post("/api/upload/csv-htmx", files=files)
-
-        assert response.status_code == 200
-        html = response.text
-
-        # Check for action buttons
-        assert 'href="/review"' in html
-        assert "Review Transactions" in html
-        assert "Upload Another File" in html
-
-        # Check for clear results functionality
-        assert "document.getElementById('uploadResults').innerHTML = ''" in html
+        file_input = page.by_id["fileInput"]
+        assert file_input["type"] == "file"
+        assert file_input["name"] == "file"  # the endpoint reads the `file` form field
+        assert file_input["accept"] == ".csv"
+        # No file chosen yet, so submitting must not be possible.
+        assert "disabled" in page.by_id["uploadButton"]

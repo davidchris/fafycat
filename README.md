@@ -234,9 +234,7 @@ to change that.
 ## 📈 Performance
 
 - **Accuracy**: Designed to improve from your reviewed transactions; results depend on your data quality and category history
-- **Speed**: <100ms per transaction
-- **Scale**: Handles 100,000+ transactions
-- **Efficiency**: 70-90% reduction in manual review
+- **Speed and scale**: Not benchmarked. Speed depends on your hardware and data size.
 
 ## 🔧 Development
 

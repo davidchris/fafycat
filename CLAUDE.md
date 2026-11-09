@@ -9,15 +9,18 @@
 - **Custom data dir**: `uv run fafycat serve --data-dir /path/to/data`
 - **Lint**: `ruff check` (configured for line length 120, Python 3.13+)
 - **Format**: `ruff format`
-- **Type Check**: `ty check` (strict typing enabled). `scripts/` and `simulations/` are
-  type-checked with `unresolved-import` ignored — they import optional ML deps from
-  `[dependency-groups]` (`experiments`, `mlx`, `finetune`) that are not in the default
-  `.venv`. Install the relevant group with `uv sync --group <name>` before running such a
-  script.
-- **Run Tests**: `uv run pytest`
-- **Verify (all checks, same as CI)**: `just verify`
-- **Test Coverage**: Tests should be in `tests/` directory
-- use puppeteer to verify UI functionality
+- **Type Check**: `ty check`. Most rules are set to `warn` in `pyproject.toml`, so existing
+  warnings do not fail the check; do not add new ones. `scripts/` and `simulations/` are
+  type-checked with `unresolved-import` ignored: they may import optional deps (matplotlib,
+  optuna, mlx_lm, ...) that are not in the default `.venv`. `pyproject.toml` defines only the
+  `dev` dependency group, so install such a dep ad hoc with `uv pip install <dep>` before running
+  the script (do not use `uv sync --group <name>`, no such group exists).
+- **Run Tests**: `uv run pytest` (Python, in `tests/`) and `node --test tests_js/*.test.js` (JavaScript)
+- **Verify (all checks, same as CI)**: `just verify`. Run it before you report a change as done: it runs
+  `ruff format --check`, `ruff check`, `ty check`, `uv run pytest`, and the JavaScript tests.
+- **Test Coverage**: Python tests go in `tests/`, JavaScript tests in `tests_js/`
+- Verify UI behaviour in a real browser with Playwright. There is no browser test suite yet;
+  `scripts/capture_readme_demo.sh` shows how to install Playwright and drive an isolated dev server.
 - Dependencies managed via `pyproject.toml`
 - Use `uv add <dependency>` to add new dependencies
 - use `git`, not `git -C`
@@ -33,6 +36,8 @@ All application code lives under `src/fafycat/`:
 - `src/fafycat/data/` — CSV processing
 - `src/fafycat/ml/` — ML pipeline
 - `src/fafycat/static/` — CSS, JS, favicon
+
+Read `GLOSSARY.md` (the domain terms) before you change domain behaviour. Read the ADRs in `docs/adr/` too, if that directory exists.
 
 User data defaults to the platform user data directory. Override it with `--data-dir` or `FAFYCAT_DATA_DIR`.
 

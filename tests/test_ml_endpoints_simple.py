@@ -1,6 +1,17 @@
-"""Simple tests to verify ML endpoints are accessible."""
+"""Contract tests for the ML endpoints that need no trained model."""
 
 import pytest
+
+import fafycat.api.ml as ml_api
+from fafycat.api.ml_training_job import complete_job, create_training_job, fail_job, get_current_job, set_job_running
+
+
+@pytest.fixture
+def no_running_job():
+    """Start and end each test without a running training job in the process-wide slot."""
+    fail_job("cleared before test")
+    yield
+    fail_job("cleared after test")
 
 
 def test_ml_status_endpoint_exists(test_client):
@@ -13,17 +24,41 @@ def test_ml_status_endpoint_exists(test_client):
     assert "status" in data
 
 
-def test_ml_retrain_endpoint_exists(test_client):
-    """ML retrain endpoint exists (may return any non-404 status)."""
+def test_retrain_starts_a_background_job(test_client, monkeypatch, no_running_job):
+    """POST /retrain creates a job, hands it to the executor, and reports it as started."""
+    started = []
+
+    def fake_training() -> None:
+        started.append(get_current_job())
+        complete_job({})
+
+    monkeypatch.setattr(ml_api, "_run_training_sync", fake_training)
+
     response = test_client.post("/api/ml/retrain")
-    assert response.status_code != 404
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["message"] == "Training job started"
+    job = get_current_job()
+    assert job is not None
+    assert body["job_id"] == job.job_id
 
 
-def test_ml_batch_unpredicted_endpoint_exists(test_client):
-    """ML batch-unpredicted endpoint exists (may return 503 if no model)."""
+def test_retrain_rejects_a_second_job_while_one_runs(test_client, no_running_job):
+    """A retrain request during a running job gets 409 naming the running job."""
+    running = create_training_job()
+    set_job_running()
+
+    response = test_client.post("/api/ml/retrain")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {"message": "Training already in progress", "job_id": running.job_id}
+
+
+def test_batch_unpredicted_without_a_model_is_unavailable(test_client):
+    """With no trained model the batch endpoint answers 503 and asks for training."""
     response = test_client.post("/api/ml/predict/batch-unpredicted")
-    assert response.status_code != 404
 
-
-if __name__ == "__main__":
-    pytest.main([__file__])
+    assert response.status_code == 503
+    assert "train" in response.json()["detail"].lower()
