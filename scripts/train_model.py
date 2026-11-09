@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """Train the ML categorization model."""
 
-import os
 import sys
 from pathlib import Path
-
-# Set production environment to use the correct database
-os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_prod.db"
-os.environ["FAFYCAT_ENV"] = "production"
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fafycat.core.config import AppConfig
+from fafycat.core.config import resolve_config
 from fafycat.core.database import DatabaseManager
 from fafycat.ml.categorizer import TransactionCategorizer
 from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
@@ -20,7 +15,7 @@ from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
 
 def main() -> None:
     """Train and save the model."""
-    config = AppConfig()
+    config = resolve_config()
     config.ensure_dirs()
 
     db_manager = DatabaseManager(config)

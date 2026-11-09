@@ -20,12 +20,12 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fafycat.core.config import AppConfig
+from fafycat.core.config import AppConfig, export_to_environ, resolve_config
 from fafycat.core.database import DatabaseManager
 
 
 def reset_database(config: AppConfig) -> None:
-    """Remove existing database files to start fresh."""
+    """Remove the configured database file to start fresh; other database files are left alone."""
     # Extract database file path from URL
     db_url = config.database.url
     if db_url.startswith("sqlite:///"):
@@ -33,18 +33,6 @@ def reset_database(config: AppConfig) -> None:
         if db_file_path.exists():
             print(f"Removing existing database: {db_file_path}")
             db_file_path.unlink()
-
-    # Also remove common database locations
-    common_db_paths = [
-        Path("data/fafycat_prod.db"),
-        Path("data/fafycat_dev.db"),
-        Path("data/fafycat.db"),
-    ]
-
-    for db_path in common_db_paths:
-        if db_path.exists():
-            print(f"Removing existing database: {db_path}")
-            db_path.unlink()
 
 
 def initialize_fresh_database(config: AppConfig) -> DatabaseManager:
@@ -130,15 +118,11 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Set environment for production database by default (matches `fafycat serve`)
-    if not args.dev_mode:
-        os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_prod.db"
-        os.environ["FAFYCAT_ENV"] = "production"
-        db_mode = "PRODUCTION"
-    else:
-        os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_dev.db"
-        os.environ["FAFYCAT_ENV"] = "development"
-        db_mode = "DEVELOPMENT"
+    # Same database as `fafycat serve` (or `fafycat serve --dev`); the import and
+    # training subprocesses inherit it through the environment.
+    config = resolve_config(dev=args.dev_mode)
+    export_to_environ(config)
+    db_mode = "DEVELOPMENT" if args.dev_mode else "PRODUCTION"
 
     # Use sample data if requested
     if args.use_sample_data:
@@ -149,12 +133,11 @@ def main() -> None:
             sys.exit(1)
         args.labeled_data_path = sample_dir
 
-    print(f"🔄 Starting fresh database reset and import ({db_mode})...")
+    print(f"🔄 Starting fresh database reset and import ({db_mode}: {config.database.url})...")
     print("=" * 50)
 
     # Step 1: Reset database
     print("Step 1: Resetting database...")
-    config = AppConfig()
     reset_database(config)
 
     # Step 2: Initialize fresh database

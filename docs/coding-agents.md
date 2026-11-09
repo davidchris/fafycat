@@ -2,7 +2,7 @@
 
 FafyCat ships a small read-only CLI surface designed for use by coding agents like Claude Code, Cursor, or any tool that can shell out and read JSON. This guide shows how to wire it up and what the agent can do.
 
-The CLI never mutates your data. It only reads from your existing FafyCat database. Imports and re-categorization still happen through `fafycat import` and the web UI.
+The query commands (`status`, `tx`, `cat`, `budget`, `analytics`) never change your data. They open the database read-only and never create, upgrade, or repair it. Imports happen through `fafycat import` or the web UI, and re-categorization through the web UI. All of them use the same database file.
 
 ## Why a separate CLI for agents?
 
@@ -16,20 +16,25 @@ If you only ever want to ask "what did I spend on groceries last month?" from in
 
 ## One-time setup
 
-1. Make sure FafyCat is installed and you have at least one CSV imported. See the main [README](../README.md) for the install path.
+1. Make sure FafyCat is installed and you have at least one CSV imported, with `fafycat import path/to/file.csv` or through the web UI of `fafycat serve`. See the main [README](../README.md) for the install path.
 2. Verify the CLI sees your data:
+   ```bash
+   fafycat status
+   ```
+   `database.path` is the file that `fafycat serve` opens, and `database.transactions` should be greater than 0. `warnings` lists any other database file that holds transactions but is not in use.
+3. List your categories:
    ```bash
    fafycat cat list
    ```
    You should get a JSON envelope with your categories.
 
-If you keep your FafyCat database somewhere non-default, point the CLI at it with one of:
+If you keep your FafyCat data somewhere non-default, point the CLI at it with one of:
 
 - `--data-dir /path/to/data` flag (accepted at any position: root, group, or leaf)
 - `FAFYCAT_DATA_DIR` env var
 - `~/.config/fafycat/config.toml` with `[paths] data_dir = "..."`
 
-Precedence: flag > env var > config file > platform default.
+Precedence: flag > env var > config file > platform default. The database is `<data dir>/fafycat_prod.db`. Add `--dev` (also at any position) to query `<data dir>/fafycat_dev.db`, the database of `fafycat serve --dev`. The flags beat `FAFYCAT_DB_URL`, which beats `[paths] db_url` in the config file; `fafycat status` reports the winner in `database.source`. The README section "Where your data lives" has the full rules.
 
 ## Plugging into Claude Code
 
@@ -51,6 +56,16 @@ For other agents, point them at the same `SKILL.md` — it is plain Markdown des
 ## What the agent can do
 
 All commands return JSON. The full reference lives in the bundled `SKILL.md`; this is a short tour.
+
+### Check the setup
+
+```bash
+fafycat status
+fafycat --dev status
+fafycat --version
+```
+
+`status` returns `version`, `mode` (`production` or `development`), `data_dir`, `database` (`url`, `source`, `path`, `exists`, `schema_problems`, and the counts `transactions`, `reviewed`, `unreviewed`, `categories`; counts are `null` when the database does not exist), `model` (`path`, `exists`, `loads`, `error`), and `warnings`. It exits 0 even when the database is missing.
 
 ### Inspect categories and budgets
 
@@ -113,7 +128,9 @@ A few prompts that work well:
 
 ## Troubleshooting
 
-- **`{"error": "..."}` and exit 1.** Almost always a bad date flag combination, an unknown category name, or a missing database. Run `fafycat init` if the database is missing.
+- **`{"error": "..."}` and exit 1.** Almost always a bad date flag combination, an unknown category name, or a missing database. The error names the database path. Run `fafycat status` to compare it with what you expect, and `fafycat init` if the database is missing.
+- **"older than this FafyCat version".** The database lacks tables or columns that this version needs. The query commands do not upgrade it. Run `fafycat init` or start `fafycat serve` once.
+- **`Warning: Another FafyCat database ...` on stderr.** A second database file with transactions exists, for example a `fafycat.db` from `fafycat import` in 0.3 and earlier. FafyCat does not merge it. Set `FAFYCAT_DB_URL` to use that file instead.
 - **Exit code 2.** Argparse rejected the input (e.g. `--type` outside the allowed set, `--month` not in `YYYY-MM`).
 - **Empty results from a freshly installed FafyCat.** Run `fafycat import path/to/file.csv` first or boot `fafycat serve --dev` to seed synthetic data.
 - **Skill not picked up.** Confirm the file lives at `.claude/skills/fafycat/SKILL.md` relative to the directory you opened in Claude Code. Re-run `fafycat skill install --force` if you suspect drift.

@@ -11,13 +11,13 @@ from pathlib import Path
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from fafycat.core.config import AppConfig
+from fafycat.core.config import resolve_config
 from fafycat.core.database import BudgetPlanORM, CategoryORM, DatabaseManager
 
 
 def migrate_yearly_budgets():
     """Migrate existing category budgets to yearly budget plans."""
-    config = AppConfig()
+    config = resolve_config()
     db_manager = DatabaseManager(config)
 
     print("🔄 Starting yearly budget migration...")

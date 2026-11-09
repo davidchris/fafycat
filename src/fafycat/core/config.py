@@ -6,8 +6,48 @@ from typing import Any
 
 from platformdirs import user_data_dir
 from pydantic import BaseModel, Field
+from sqlalchemy.engine import make_url
 
 from fafycat.core.config_file import load_config_file
+
+PROD_DB_FILENAME = "fafycat_prod.db"
+"""The production database inside the data dir. ``fafycat serve`` has always used this file."""
+
+DEV_DB_FILENAME = "fafycat_dev.db"
+"""The development database inside the data dir (``--dev``), seeded with synthetic data."""
+
+LEGACY_DB_FILENAME = "fafycat.db"
+"""Up to 0.3, ``fafycat import`` and the query commands defaulted to this file, which ``serve`` never opened."""
+
+
+DB_SOURCE_FLAG = "--data-dir/--dev flag"
+DB_SOURCE_ENV = "FAFYCAT_DB_URL"
+DB_SOURCE_CONFIG_FILE = "config file db_url"
+DB_SOURCE_LEGACY_CWD = "legacy ./data/fafycat_prod.db"
+DB_SOURCE_DATA_DIR = "data dir"
+
+
+def database_filename(*, dev: bool) -> str:
+    """Return the database file name for the development or production mode."""
+    return DEV_DB_FILENAME if dev else PROD_DB_FILENAME
+
+
+def sqlite_url(path: Path) -> str:
+    """Return the SQLAlchemy URL of a SQLite database file."""
+    return f"sqlite:///{path}"
+
+
+def sqlite_path(url: str) -> Path | None:
+    """Return the file behind a SQLite URL, or None for other databases and in-memory SQLite."""
+    parsed = make_url(url)
+    if not parsed.drivername.startswith("sqlite") or parsed.database in (None, "", ":memory:"):
+        return None
+    return Path(parsed.database)
+
+
+def legacy_cwd_database() -> Path:
+    """Return ``./data/fafycat_prod.db``, the database the repo scripts and old ``serve`` used from a checkout."""
+    return (Path.cwd() / "data" / PROD_DB_FILENAME).resolve()
 
 
 def _default_data_dir() -> Path:
@@ -29,7 +69,7 @@ def _default_database_url() -> str:
     cfg = load_config_file(None)
     if "db_url" in cfg:
         return cfg["db_url"]
-    return f"sqlite:///{_default_data_dir() / 'fafycat.db'}"
+    return sqlite_url(_default_data_dir() / PROD_DB_FILENAME)
 
 
 def _default_model_dir() -> Path:
@@ -57,6 +97,8 @@ class DatabaseConfig(BaseModel):
 
     url: str = Field(default_factory=_default_database_url)
     echo: bool = Field(default_factory=lambda: os.getenv("FAFYCAT_DB_ECHO", "false").lower() == "true")
+    source: str = ""
+    """Which setting chose ``url``; filled in by ``resolve_config`` and shown by ``fafycat status``."""
 
 
 class MLConfig(BaseModel):
@@ -129,6 +171,11 @@ class MLConfig(BaseModel):
     model_dir: Path = Field(default_factory=_default_model_dir)
     min_training_samples: int = 50
 
+    @property
+    def model_path(self) -> Path:
+        """The saved Categorizer file that the server loads."""
+        return self.model_dir / ("ensemble_categorizer.pkl" if self.use_ensemble else "categorizer.pkl")
+
 
 class AppConfig(BaseModel):
     """Application configuration."""
@@ -147,7 +194,7 @@ class AppConfig(BaseModel):
         file_cfg = load_config_file(None)
 
         if "database" not in self.model_fields_set and "FAFYCAT_DB_URL" not in os.environ and "db_url" not in file_cfg:
-            self.database.url = f"sqlite:///{self.data_dir / 'fafycat.db'}"
+            self.database.url = sqlite_url(self.data_dir / PROD_DB_FILENAME)
 
         if "ml" not in self.model_fields_set and "FAFYCAT_MODEL_DIR" not in os.environ and "model_dir" not in file_cfg:
             self.ml.model_dir = self.data_dir / "models"
@@ -172,3 +219,73 @@ class AppConfig(BaseModel):
             self.export_dir = export_dir
         export_dir.mkdir(parents=True, exist_ok=True)
         self.ml.model_dir.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_config(data_dir: Path | None = None, *, dev: bool = False) -> AppConfig:
+    """Decide where FafyCat keeps its data; every entry point (server, CLI, scripts) calls this.
+
+    Precedence is command-line flag > environment > config file > default. The database is
+    the first of:
+
+    1. ``<data dir>/fafycat_prod.db`` (``fafycat_dev.db`` with ``dev``) when ``data_dir`` or
+       ``dev`` is given: the flags beat ``FAFYCAT_DB_URL`` and ``[paths] db_url``.
+    2. ``FAFYCAT_DB_URL``.
+    3. ``[paths] db_url`` in the config file.
+    4. ``./data/fafycat_prod.db`` when it exists and nothing at all is configured. Older
+       checkouts kept the real database there; ``fafycat status`` warns when it is in use.
+    5. ``<data dir>/fafycat_prod.db``.
+
+    The data dir is ``data_dir``, else ``FAFYCAT_DATA_DIR``, else ``[paths] data_dir``, else the
+    platform user-data dir. An explicit ``data_dir`` also puts the model and export dirs under it,
+    over ``FAFYCAT_MODEL_DIR`` / ``FAFYCAT_EXPORT_DIR`` and the config file.
+
+    ``config.database.source`` records which rule chose the database.
+
+    Args:
+        data_dir: The ``--data-dir`` flag, or None.
+        dev: The ``--dev`` flag: use the development database.
+
+    Returns:
+        The configuration. Nothing is created on disk.
+
+    Raises:
+        ConfigFileError: The config file exists but is not valid TOML.
+    """
+    file_cfg = load_config_file(None)
+    resolved_dir = data_dir.expanduser().resolve() if data_dir is not None else _default_data_dir()
+
+    if data_dir is not None or dev:
+        url, source = sqlite_url(resolved_dir / database_filename(dev=dev)), DB_SOURCE_FLAG
+    elif "FAFYCAT_DB_URL" in os.environ:
+        url, source = os.environ["FAFYCAT_DB_URL"], DB_SOURCE_ENV
+    elif "db_url" in file_cfg:
+        url, source = file_cfg["db_url"], DB_SOURCE_CONFIG_FILE
+    elif _nothing_configured(file_cfg) and legacy_cwd_database().exists():
+        url, source = sqlite_url(legacy_cwd_database()), DB_SOURCE_LEGACY_CWD
+    else:
+        url, source = sqlite_url(resolved_dir / PROD_DB_FILENAME), DB_SOURCE_DATA_DIR
+
+    config = AppConfig(data_dir=resolved_dir, database=DatabaseConfig(url=url, source=source))
+    if data_dir is not None:
+        config.ml.model_dir = resolved_dir / "models"
+        config.export_dir = resolved_dir / "exports"
+    return config
+
+
+def _nothing_configured(file_cfg: dict[str, str]) -> bool:
+    """True when no env var or config-file path names a data location."""
+    return "FAFYCAT_DATA_DIR" not in os.environ and "data_dir" not in file_cfg
+
+
+def export_to_environ(config: AppConfig) -> None:
+    """Publish a resolved configuration through ``FAFYCAT_*`` env vars.
+
+    The server process (and uvicorn's reload worker) and the import path build
+    ``AppConfig()`` in many places; with these set, each of them gets the same
+    paths as ``config``.
+    """
+    os.environ["FAFYCAT_DATA_DIR"] = str(config.data_dir)
+    os.environ["FAFYCAT_DB_URL"] = config.database.url
+    os.environ["FAFYCAT_MODEL_DIR"] = str(config.ml.model_dir)
+    if config.export_dir is not None:
+        os.environ["FAFYCAT_EXPORT_DIR"] = str(config.export_dir)
