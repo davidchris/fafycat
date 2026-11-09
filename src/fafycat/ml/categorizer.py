@@ -273,7 +273,7 @@ class TransactionCategorizer:
         the model's probabilities are still captured for the Audit Trail.
 
         This hard override is kept only for the single-model fallback. The
-        default ensemble treats a rule as a weighted voter instead.
+        default ensemble treats a rule as a voter the stack reads instead.
         """
         if not self.is_trained:
             raise ValueError("Model must be trained before prediction")

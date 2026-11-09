@@ -3,9 +3,10 @@
 from datetime import UTC, date, datetime
 
 from fafycat.core.audit_trail import ReviewActor
-from fafycat.core.database import CategoryORM, MerchantMappingORM, ReviewEventORM, TransactionORM
+from fafycat.core.database import AppSettingsORM, CategoryORM, MerchantMappingORM, ReviewEventORM, TransactionORM
 from fafycat.core.models import TransactionInput
-from fafycat.data.merchant_pattern import backfill_merchant_patterns
+from fafycat.data.merchant_pattern import CLEANER_VERSION_KEY, backfill_merchant_patterns
+from fafycat.ml.feature_extractor import MerchantCleaner
 from fafycat.ml.merchant_mapper import MerchantMapper, refresh_rule_for_pattern
 
 SHELL = "VISA SHELL 1234 Berlin"
@@ -57,6 +58,8 @@ class TestBackfill:
         assert patterns["b".ljust(16, "0")] == _pattern_of("REWE Markt 42")
 
     def test_is_idempotent_and_leaves_existing_patterns_alone(self, db_session):
+        # Patterns already computed by the current cleaner are not recomputed.
+        db_session.add(AppSettingsORM(key=CLEANER_VERSION_KEY, value=str(MerchantCleaner.VERSION)))
         _seed(db_session, SHELL, "a")
         _seed(db_session, "REWE", "b", merchant_pattern="HAND EDITED")
         db_session.commit()

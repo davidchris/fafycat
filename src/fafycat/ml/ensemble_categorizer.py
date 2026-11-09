@@ -33,8 +33,13 @@ from .stack import META_NAMES, StackLR, Voters, lookup_seen, meta_features, seen
 OOF_SEED = 0
 """Shuffle seed of the out-of-fold split; fixed so retrains are comparable."""
 
-MODEL_VERSION = "2.0-stack"
-"""Format of the saved ensemble; a file with any other version must be retrained."""
+MODEL_VERSION = "2.1-stack"
+"""Format of the saved ensemble; a file with any other version must be retrained.
+
+2.1: the merchant cleaner keeps "de" and city words inside names, keyword
+features match whole words, and training uses human labels only. A 2.0 model
+was fitted on the old features and on auto-accepted rows.
+"""
 
 
 class IncompatibleModelError(Exception):

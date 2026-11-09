@@ -1465,7 +1465,8 @@ def render_calibration_table(calibration):
             </table>
         </div>
         <p class="text-xs mt-2 text-secondary">
-            Counted over every reviewed transaction that has a prediction. Confidence is the latest prediction's
+            Counted over transactions a person categorised that have a prediction; auto-accepted and
+            bulk-approved ones are left out. Confidence is the latest prediction's
             score, which is not always the score shown when the transaction was reviewed.
         </p>
     </div>

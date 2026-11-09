@@ -8,7 +8,7 @@ import pytest
 
 from fafycat.core.config import MLConfig
 from fafycat.core.database import TransactionORM
-from fafycat.ml.ensemble_categorizer import EnsembleCategorizer, IncompatibleModelError
+from fafycat.ml.ensemble_categorizer import MODEL_VERSION, EnsembleCategorizer, IncompatibleModelError
 
 LEGACY_ENSEMBLE = {
     "model_version": "1.0-ensemble",
@@ -20,7 +20,7 @@ LEGACY_ENSEMBLE = {
 # A pickle that names a module the stacked ensemble removed.
 REMOVED_MODULE = b"cfafycat.ml.cross_validation\nStratifiedKFoldValidator\n."
 # The current version tag, but written before a key the loader needs existed.
-MISSING_KEYS = {"model_version": "2.0-stack", "lgbm_model_data": {}}
+MISSING_KEYS = {"model_version": MODEL_VERSION, "lgbm_model_data": {}}
 
 
 def write_legacy_model(model_dir: Path) -> None:

@@ -127,6 +127,9 @@ def refresh_rule_for_pattern(session: Session, pattern: str, min_occurrences: in
 PARTIAL_MATCH_PENALTY = 0.9
 """A rule matched on shared words, not exactly, speaks with less confidence."""
 
+PARTIAL_MATCH_MIN_LENGTH = 5
+"""Shorter patterns ("DM", "BVG") match exactly only; as words they occur in too many names."""
+
 
 class DerivedRule(NamedTuple):
     """One Merchant Rule as computed from reviewed transactions."""
@@ -186,6 +189,12 @@ class MerchantRuleSet:
     def __init__(self, rules: dict[str, tuple[int, float]]) -> None:
         self.rules = rules
         self._cleaner = MerchantCleaner()
+        self._by_word: dict[str, set[str]] = defaultdict(set)
+        """Partial-match candidates: each word of a long enough pattern mapped to its patterns."""
+        for pattern in rules:
+            if len(pattern) >= PARTIAL_MATCH_MIN_LENGTH:
+                for word in pattern.split():
+                    self._by_word[word].add(pattern)
 
     @classmethod
     def from_derived(cls, derived: dict[str, DerivedRule]) -> "MerchantRuleSet":
@@ -194,6 +203,13 @@ class MerchantRuleSet:
 
     def get_category(self, merchant_name: str) -> MerchantMapping | None:
         """Find the rule for a merchant: exact match first, then partial.
+
+        A partial match needs every word of the rule's pattern to appear as a
+        whole word in the merchant name ("AMAZON" matches "AMAZON MARKETPLACE",
+        never "AMAZING THAI"), and the pattern must be at least
+        ``PARTIAL_MATCH_MIN_LENGTH`` characters long. When several rules
+        match, the most specific wins: most words, then longest, then
+        alphabetical, so the result never depends on rule order.
 
         Args:
             merchant_name: Raw merchant name as imported.
@@ -210,34 +226,19 @@ class MerchantRuleSet:
         if exact is not None:
             return MerchantMapping(merchant_pattern=clean_merchant, category_id=exact[0], confidence=exact[1])
 
-        for pattern, (category_id, confidence) in self.rules.items():
-            if self._is_partial_match(clean_merchant, pattern):
-                return MerchantMapping(
-                    merchant_pattern=pattern,
-                    category_id=category_id,
-                    confidence=confidence * PARTIAL_MATCH_PENALTY,
-                )
+        merchant_words = set(clean_merchant.split())
+        candidates = set().union(*(self._by_word.get(word, set()) for word in merchant_words))
+        matches = [p for p in candidates if p in self.rules and set(p.split()) <= merchant_words]
+        if not matches:
+            return None
 
-        return None
-
-    @staticmethod
-    def _is_partial_match(merchant: str, pattern: str) -> bool:
-        """Check if merchant partially matches pattern."""
-        # For short patterns, require exact match
-        if len(pattern) < 5:
-            return False
-
-        # Check if pattern is contained in merchant or vice versa
-        merchant_words = set(merchant.split())
-        pattern_words = set(pattern.split())
-
-        # If pattern has only one word, check if it's in merchant
-        if len(pattern_words) == 1:
-            return any(word.startswith(list(pattern_words)[0][:4]) for word in merchant_words)
-
-        # For multi-word patterns, check overlap
-        overlap = len(merchant_words & pattern_words)
-        return overlap >= min(2, len(pattern_words))
+        pattern = min(matches, key=lambda p: (-len(p.split()), -len(p), p))
+        category_id, confidence = self.rules[pattern]
+        return MerchantMapping(
+            merchant_pattern=pattern,
+            category_id=category_id,
+            confidence=confidence * PARTIAL_MATCH_PENALTY,
+        )
 
 
 class MerchantMapper:
