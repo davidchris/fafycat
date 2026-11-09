@@ -41,13 +41,22 @@ fafycat analytics monthly --ytd
 ### `fafycat analytics breakdown`
 Per-category spending totals for a date range. Response: `categories`, `summary`, `date_range`, `unreviewed`.
 `--type` accepts exactly: `income`, `saving`, `spending` (invalid values exit 2).
+Each category: `amount` is the signed sum (spending is negative); `percentage` is its share of the total of
+its own type (a spending category's share of all spending); `budget` is the prorated budget for the range
+(same source as `variance`); `budget_variance` is `budget - spent` for spending (negative = overspent),
+`null` for income and saving.
 ```
 fafycat analytics breakdown --year 2025
 fafycat analytics breakdown --ytd --type spending
 ```
 
 ### `fafycat analytics variance`
-Budget-vs-actual variance per category. Response: `variances`, `summary`, `date_range`, `unreviewed`.
+Budget-vs-actual variance per spending category. Response: `variances`, `summary`, `date_range`, `unreviewed`.
+`actual` and `summary.total_actual` are money spent as a **positive** number. `variance = budget - actual`:
+positive is under budget, negative is overspent (`is_overspent: true`). A category with no budget is overspent
+by what it spent; its `variance_percentage` is `null`. Budgets come from the year's budget plan (fallback: the
+category default) and are prorated by day: each calendar month counts by the share of its days in the range,
+so `--year` is 12 monthly budgets and the 1st-15th of a 31-day month is 15/31 of one.
 ```
 fafycat analytics variance --year 2025
 fafycat analytics variance --ytd
