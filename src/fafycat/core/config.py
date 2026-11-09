@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from platformdirs import user_data_dir
 from pydantic import BaseModel, Field
@@ -27,22 +28,42 @@ DB_SOURCE_LEGACY_CWD = "legacy ./data/fafycat_prod.db"
 DB_SOURCE_DATA_DIR = "data dir"
 
 
+class DataLocationError(ValueError):
+    """The configured data location cannot be used."""
+
+
 def database_filename(*, dev: bool) -> str:
     """Return the database file name for the development or production mode."""
     return DEV_DB_FILENAME if dev else PROD_DB_FILENAME
 
 
 def sqlite_url(path: Path) -> str:
-    """Return the SQLAlchemy URL of a SQLite database file."""
-    return f"sqlite:///{path}"
+    """Return the SQLAlchemy URL of a SQLite database file.
+
+    Raises:
+        DataLocationError: The path contains ``?`` or ``#``, which a SQLAlchemy URL would cut off,
+            so the URL would name a different file.
+    """
+    url = f"sqlite:///{path}"
+    if sqlite_path(url) != path:
+        raise DataLocationError(f"FafyCat cannot keep a database at {path}: the path must not contain '?' or '#'")
+    return url
 
 
 def sqlite_path(url: str) -> Path | None:
-    """Return the file behind a SQLite URL, or None for other databases and in-memory SQLite."""
+    """Return the file behind a SQLite URL, or None for other databases and in-memory SQLite.
+
+    Handles both ``sqlite:///path`` and the URI form ``sqlite:///file:path?uri=true``.
+    """
     parsed = make_url(url)
-    if not parsed.drivername.startswith("sqlite") or parsed.database in (None, "", ":memory:"):
+    database = parsed.database
+    if not parsed.drivername.startswith("sqlite") or database in (None, "", ":memory:"):
         return None
-    return Path(parsed.database)
+    if database.startswith("file:") and str(parsed.query.get("uri", "")).lower() == "true":
+        database = urlparse(database).path
+        if database in ("", ":memory:"):
+            return None
+    return Path(database)
 
 
 def legacy_cwd_database() -> Path:
@@ -54,10 +75,10 @@ def _default_data_dir() -> Path:
     """Return the default application data directory."""
     env = os.getenv("FAFYCAT_DATA_DIR")
     if env:
-        return Path(env)
+        return Path(env).expanduser()
     cfg = load_config_file(None)
     if "data_dir" in cfg:
-        return Path(cfg["data_dir"])
+        return Path(cfg["data_dir"]).expanduser()
     return Path(user_data_dir("fafycat"))
 
 
@@ -250,6 +271,7 @@ def resolve_config(data_dir: Path | None = None, *, dev: bool = False) -> AppCon
 
     Raises:
         ConfigFileError: The config file exists but is not valid TOML.
+        DataLocationError: The database path cannot be written as a SQLite URL.
     """
     file_cfg = load_config_file(None)
     resolved_dir = data_dir.expanduser().resolve() if data_dir is not None else _default_data_dir()

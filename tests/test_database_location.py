@@ -255,6 +255,48 @@ def test_legacy_cwd_database_in_use_is_reported_with_the_unused_platform_databas
     assert [w for w in explicit if w.startswith("Using the legacy")] == []
 
 
+def test_data_dir_with_url_delimiter_is_rejected_instead_of_opening_another_file(tmp_path: Path, run_cli) -> None:
+    """``/x/a?b`` would become the URL of ``/x/a``: a different file."""
+    result = run_cli("--data-dir", str(tmp_path / "accounts?2026"), "init")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "must not contain" in json.loads(result.stdout)["error"]
+    assert not (tmp_path / "accounts").exists()
+    assert not (tmp_path / "accounts?2026").exists()
+
+
+def test_tilde_in_env_data_dir_means_home_like_the_flag(hermetic_env, monkeypatch) -> None:
+    from fafycat.core.config import resolve_config
+
+    monkeypatch.setenv("FAFYCAT_DATA_DIR", "~/fafycat-test-data")
+
+    assert resolve_config().data_dir == Path.home() / "fafycat-test-data"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("sqlite:////abs/x.db", Path("/abs/x.db")),
+        ("sqlite:///file:/abs/x.db?uri=true&mode=rw", Path("/abs/x.db")),
+        ("sqlite://", None),
+        ("sqlite:///:memory:", None),
+        ("postgresql://u@localhost/fafycat", None),
+    ],
+)
+def test_sqlite_path(url: str, expected: Path | None) -> None:
+    from fafycat.core.config import sqlite_path
+
+    assert sqlite_path(url) == expected
+
+
+def test_read_only_manager_refuses_non_sqlite_urls() -> None:
+    config = AppConfig()
+    config.database.url = "postgresql://u@localhost/fafycat"
+
+    with pytest.raises(ValueError, match="SQLite database file"):
+        DatabaseManager(config, read_only=True)
+
+
 # ---------------------------------------------------------------------------
 # G3: query commands never change the database
 # ---------------------------------------------------------------------------
@@ -366,6 +408,25 @@ def test_status_reports_paths_counts_model_and_stray_databases(tmp_path: Path, r
     assert len(status["warnings"]) == 1
     assert str(resolved / "fafycat.db") in status["warnings"][0]
     assert "3 transactions" in status["warnings"][0]
+
+
+def test_status_on_outdated_schema_reports_the_problem_instead_of_crashing(tmp_path: Path, run_cli) -> None:
+    data_dir = tmp_path / "d"
+    db_path = data_dir / "fafycat_prod.db"
+    _make_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        indexes = conn.execute("SELECT name FROM sqlite_master WHERE type = 'index' AND sql LIKE '%is_reviewed%'")
+        for (name,) in indexes.fetchall():
+            conn.execute(f'DROP INDEX "{name}"')
+        conn.execute("ALTER TABLE transactions DROP COLUMN is_reviewed")
+    conn.close()
+
+    result = run_cli("--data-dir", str(data_dir), "status")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    database = json.loads(result.stdout)["database"]
+    assert database["schema_problems"] == ["column transactions.is_reviewed"]
+    assert database["transactions"] is None
 
 
 def test_status_on_missing_database_reports_it_and_exits_zero(tmp_path: Path, run_cli) -> None:

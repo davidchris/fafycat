@@ -91,21 +91,24 @@ def _database_status(config: AppConfig) -> dict[str, Any]:
     if not exists:
         return status
 
-    db_manager = DatabaseManager(config, read_only=True)
+    try:
+        db_manager = DatabaseManager(config, read_only=True)
+    except ValueError as exc:
+        status["schema_problems"] = [str(exc)]
+        return status
     try:
         status["schema_problems"] = db_manager.schema_problems()
-        if any(problem.startswith("table transactions") for problem in status["schema_problems"]):
+        if status["schema_problems"]:
+            # Counting needs the current schema; the problems list is the answer.
             return status
         with db_manager.get_session() as session:
             total = session.query(func.count(TransactionORM.id)).scalar() or 0
-            reviewed = (
-                session.query(func.count(TransactionORM.id)).filter(TransactionORM.is_reviewed.is_(True)).scalar()
-            )
+            reviewed_filter = TransactionORM.is_reviewed.is_(True)
+            reviewed = session.query(func.count(TransactionORM.id)).filter(reviewed_filter).scalar() or 0
             status["transactions"] = total
-            status["reviewed"] = reviewed or 0
-            status["unreviewed"] = total - (reviewed or 0)
-            if "table categories" not in status["schema_problems"]:
-                status["categories"] = session.query(func.count(CategoryORM.id)).scalar() or 0
+            status["reviewed"] = reviewed
+            status["unreviewed"] = total - reviewed
+            status["categories"] = session.query(func.count(CategoryORM.id)).scalar() or 0
     finally:
         db_manager.engine.dispose()
     return status

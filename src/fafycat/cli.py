@@ -103,7 +103,10 @@ def _open_query_database(args: argparse.Namespace) -> "DatabaseManager":
     path = sqlite_path(config.database.url)
     if path is not None and not path.exists():
         emit_error(f"No FafyCat database at {path}. Run `fafycat init` or `fafycat import FILE` first.")
-    db_manager = DatabaseManager(config, read_only=True)
+    try:
+        db_manager = DatabaseManager(config, read_only=True)
+    except ValueError as exc:
+        emit_error(str(exc))
     problems = db_manager.schema_problems()
     if problems:
         emit_error(
@@ -968,6 +971,7 @@ def main() -> None:
         "status": cmd_status,
     }
 
+    from fafycat.core.config import DataLocationError
     from fafycat.core.config_file import ConfigFileError
 
     try:
@@ -976,7 +980,7 @@ def main() -> None:
             _dispatch_group(group_parser, args, handlers)
         else:
             leaf_commands[args.command](args)
-    except ConfigFileError as exc:
+    except (ConfigFileError, DataLocationError) as exc:
         from fafycat.cli_query.output import emit_error
 
         emit_error(str(exc))

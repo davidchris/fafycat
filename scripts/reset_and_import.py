@@ -115,6 +115,7 @@ def main() -> None:
     parser.add_argument(
         "--dev-mode", action="store_true", help="Use development database instead of production database"
     )
+    parser.add_argument("--yes", action="store_true", help="Delete the database without asking for confirmation")
 
     args = parser.parse_args()
 
@@ -132,6 +133,16 @@ def main() -> None:
             print("Error: Sample data directory not found")
             sys.exit(1)
         args.labeled_data_path = sample_dir
+
+    if not args.labeled_data_path.exists():
+        print(f"Error: Labeled data path does not exist: {args.labeled_data_path}")
+        sys.exit(1)
+
+    if not args.yes:
+        answer = input(f"This deletes {config.database.url} and all its transactions. Type 'delete' to continue: ")
+        if answer.strip() != "delete":
+            print("Aborted; nothing was changed.")
+            sys.exit(1)
 
     print(f"🔄 Starting fresh database reset and import ({db_mode}: {config.database.url})...")
     print("=" * 50)

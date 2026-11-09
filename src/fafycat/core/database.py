@@ -229,6 +229,9 @@ class DatabaseManager:
             read_only: Open a SQLite file with ``mode=ro``, so no statement can
                 change it. The file must exist. Callers must not call
                 ``create_tables`` on such a manager.
+
+        Raises:
+            ValueError: ``read_only`` is set but the URL is not a SQLite file.
         """
         self.config = config
         self.read_only = read_only
@@ -242,6 +245,8 @@ class DatabaseManager:
             }
 
         db_file = sqlite_path(config.database.url) if read_only else None
+        if read_only and db_file is None:
+            raise ValueError(f"Read-only access needs a SQLite database file, not {config.database.url}")
         if db_file is not None:
             uri = f"{db_file.resolve().as_uri()}?mode=ro"
             self.engine = create_engine(
