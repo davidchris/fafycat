@@ -10,6 +10,7 @@ from fafycat.api.ml_insights import TrainingRecency, get_training_recency
 from fafycat.api.services import REVIEW_IMPACT_SORT, CategoryService, TransactionService
 from fafycat.core.config import AppConfig
 from fafycat.core.database import TransactionORM
+from fafycat.ml.human_labels import count_human_labels
 from fafycat.ml.prediction_pipeline import get_auto_approve_threshold
 from fafycat.web.components.layout import create_page_layout
 from fafycat.web.components.transaction_table import render_table
@@ -30,11 +31,7 @@ def _get_model_status_alert():
             model_path = config.ml.model_dir / model_filename
 
             # Check training data readiness
-            reviewed_count = (
-                db_session.query(TransactionORM)
-                .filter(TransactionORM.is_reviewed, TransactionORM.category_id.is_not(None))
-                .count()
-            )
+            reviewed_count = count_human_labels(db_session)
 
             min_training_samples = 50
             training_ready = reviewed_count >= min_training_samples
@@ -150,11 +147,7 @@ def _render_training_recency(session: Session) -> str:
     """
     recency = get_training_recency(session)
     min_samples = AppConfig().ml.min_training_samples
-    reviewed_count = (
-        session.query(TransactionORM)
-        .filter(TransactionORM.is_reviewed, TransactionORM.category_id.is_not(None))
-        .count()
-    )
+    reviewed_count = count_human_labels(session)
 
     if reviewed_count >= min_samples:
         action = """

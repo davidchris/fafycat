@@ -212,3 +212,19 @@ class TestCalibration:
         top_band = get_calibration_report(db_session).bands[-1]
 
         assert (top_band.reviewed, top_band.kept) == (1, 0)
+
+
+class TestTrainingReadiness:
+    def test_auto_accepts_do_not_make_training_look_ready(self, test_client, db_session, cats):
+        groceries, restaurants = cats
+        db_session.query(TransactionORM).delete()
+        for i in range(40):
+            _label(db_session, f"rev{i:02d}", f"Trattoria Roma {i}", restaurants, ReviewActor.USER_REVIEW)
+        db_session.commit()
+        _auto_accept(db_session, {f"aut{i:02d}": f"Corner Bakery {i}" for i in range(20)}, groceries)
+
+        status = test_client.get("/api/ml/status").json()
+        import_page = test_client.get("/import").text
+
+        assert (status["training_ready"], status["reviewed_transactions"]) == (False, 40)
+        assert "Building training data" in import_page

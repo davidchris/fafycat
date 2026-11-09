@@ -13,6 +13,7 @@ only clue, see :func:`human_label_criterion`.
 """
 
 from sqlalchemy import ColumnElement, and_, exists, func, or_, select
+from sqlalchemy.orm import Session
 
 from ..core.audit_trail import ReviewActor
 from ..core.database import ReviewEventORM, TransactionORM
@@ -70,3 +71,18 @@ def human_label_criterion() -> ColumnElement[bool]:
         TransactionORM.category_id.is_not(None),
         or_(latest_actor.in_(HUMAN_LABEL_ACTORS), legacy_human),
     )
+
+
+def count_human_labels(session: Session) -> int:
+    """Count the transactions training would learn from.
+
+    Training readiness must use this count, not every reviewed transaction:
+    otherwise auto-accepts advertise a training set that training then rejects.
+
+    Args:
+        session: Database session.
+
+    Returns:
+        The number of Human Labels.
+    """
+    return session.query(TransactionORM).filter(human_label_criterion()).count()

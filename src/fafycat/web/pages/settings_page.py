@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from fafycat.api.ml_insights import get_calibration_report
 from fafycat.core.database import get_categories
+from fafycat.ml.human_labels import count_human_labels
 from fafycat.web.components.layout import create_page_layout
 
 
@@ -28,11 +29,7 @@ def _get_ml_model_status():
                 model_path = config.ml.model_dir / "categorizer.pkl"
 
             # Check training data readiness
-            reviewed_count = (
-                db_session.query(TransactionORM)
-                .filter(TransactionORM.is_reviewed, TransactionORM.category_id.is_not(None))
-                .count()
-            )
+            reviewed_count = count_human_labels(db_session)
 
             min_training_samples = 50
             training_ready = reviewed_count >= min_training_samples
