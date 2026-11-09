@@ -278,6 +278,7 @@ def test_tilde_in_env_data_dir_means_home_like_the_flag(hermetic_env, monkeypatc
     [
         ("sqlite:////abs/x.db", Path("/abs/x.db")),
         ("sqlite:///file:/abs/x.db?uri=true&mode=rw", Path("/abs/x.db")),
+        ("sqlite:///file:/abs/my%20accounts.db?uri=true", Path("/abs/my accounts.db")),
         ("sqlite://", None),
         ("sqlite:///:memory:", None),
         ("postgresql://u@localhost/fafycat", None),

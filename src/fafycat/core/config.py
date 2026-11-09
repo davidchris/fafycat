@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from platformdirs import user_data_dir
 from pydantic import BaseModel, Field
@@ -60,7 +60,7 @@ def sqlite_path(url: str) -> Path | None:
     if not parsed.drivername.startswith("sqlite") or database in (None, "", ":memory:"):
         return None
     if database.startswith("file:") and str(parsed.query.get("uri", "")).lower() == "true":
-        database = urlparse(database).path
+        database = unquote(urlparse(database).path)
         if database in ("", ":memory:"):
             return None
     return Path(database)
