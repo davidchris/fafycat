@@ -24,6 +24,7 @@ from ..core.database import CategoryORM, ModelMetadataORM, TransactionORM
 from ..core.models import MerchantMapping, PredictionDetail, TransactionInput, TransactionPrediction
 from .calibration import TemperatureScaler, fold_count
 from .categorizer import TransactionCategorizer
+from .human_labels import human_label_criterion
 from .merchant_mapper import MerchantRuleSet, derive_rules
 from .model_identity import model_fingerprint, probs_by_category
 from .naive_bayes_classifier import NaiveBayesTextClassifier
@@ -131,10 +132,12 @@ class EnsembleCategorizer:
         )
 
     def prepare_training_data(self) -> tuple[list[TransactionInput], np.ndarray]:
-        """Prepare training data from database transactions."""
-        # Get transactions with confirmed categories (same as TransactionCategorizer)
-        query = self.session.query(TransactionORM).filter(TransactionORM.category_id.isnot(None))
-        transactions = query.all()
+        """Prepare training data from the human-labelled transactions.
+
+        Auto-accepted and bulk-approved categories are left out; see
+        :mod:`fafycat.ml.human_labels`.
+        """
+        transactions = self.session.query(TransactionORM).filter(human_label_criterion()).all()
 
         if len(transactions) < self.config.min_training_samples:
             raise ValueError(

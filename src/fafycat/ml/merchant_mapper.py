@@ -1,10 +1,12 @@
 """Rule-based merchant mapping system.
 
 A Merchant Rule maps a cleaned merchant name to a category. Rules are derived
-data: rebuilt from reviewed transactions on every training run, never edited
-by hand. In the ensemble a rule is a third weighted voter beside LightGBM and
-Naive Bayes. The single-model Categorizer, the non-default fallback, still
-lets a rule decide on its own at ``RULE_OVERRIDE_CONFIDENCE``.
+data: rebuilt from human-labelled transactions (see
+:mod:`fafycat.ml.human_labels`) on every training run, never edited by hand.
+In the ensemble a rule is a third voter beside LightGBM and Naive Bayes; the
+stack reads its vote as meta features. The single-model Categorizer, the
+non-default fallback, still lets a rule decide on its own at
+``RULE_OVERRIDE_CONFIDENCE``.
 """
 
 from collections import Counter, defaultdict
@@ -18,6 +20,7 @@ from sqlalchemy.orm import Session
 from ..core.database import CategoryORM, MerchantMappingORM, TransactionORM
 from ..core.models import MerchantMapping
 from .feature_extractor import MerchantCleaner
+from .human_labels import human_label_criterion
 
 RULE_OVERRIDE_CONFIDENCE = 0.98
 """Confidence at which a rule decides alone in the single-model Categorizer.
@@ -85,8 +88,7 @@ def refresh_rule_for_pattern(session: Session, pattern: str, min_occurrences: in
         session.query(TransactionORM.category_id, func.count(TransactionORM.id), func.max(TransactionORM.date))
         .filter(
             TransactionORM.merchant_pattern == pattern,
-            TransactionORM.category_id.isnot(None),
-            TransactionORM.is_reviewed.is_(True),
+            human_label_criterion(),
         )
         .group_by(TransactionORM.category_id)
         .all()
@@ -311,10 +313,13 @@ class MerchantMapper:
         self._load_mappings()
 
     def reviewed_transactions(self) -> list[tuple[str, int, date]]:
-        """Every reviewed transaction as ``(merchant_name, category_id, date)``, ready for :func:`derive_rules`."""
+        """Every human-labelled transaction as ``(merchant_name, category_id, date)``.
+
+        Ready for :func:`derive_rules`.
+        """
         rows = (
             self.session.query(TransactionORM.name, TransactionORM.category_id, TransactionORM.date)
-            .filter(TransactionORM.category_id.isnot(None), TransactionORM.is_reviewed.is_(True))
+            .filter(human_label_criterion())
             .all()
         )
         return [(str(name), int(cast(int, category_id)), cast(date, seen)) for name, category_id, seen in rows]
