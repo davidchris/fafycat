@@ -1,5 +1,7 @@
 """Transaction table renderer shared by the review page and HTMX endpoints."""
 
+from collections import Counter
+
 from fasthtml.common import (
     A,
     Button,
@@ -20,6 +22,7 @@ from fasthtml.common import (
     to_xml,
 )
 
+from fafycat.api.services import qualified_name
 from fafycat.web.components.pagination import FILTER_HX_INCLUDE, create_full_pagination
 
 COLUMN_COUNT = 7
@@ -27,13 +30,21 @@ COLUMN_COUNT = 7
 
 
 def _category_select(tx, categories) -> Select:
-    """Category dropdown with the transaction's current category preselected."""
-    current = tx.actual_category or tx.predicted_category
+    """Category dropdown with the transaction's current category preselected.
+
+    A name shared by several types (databases made with the old default set)
+    is shown and submitted as ``name (type)``, so every option is distinct.
+    """
+    current_id = getattr(tx, "actual_category_id", None) or getattr(tx, "predicted_category_id", None)
+    current_name = tx.actual_category or tx.predicted_category
+    name_counts = Counter(cat.name.lower() for cat in categories)
     # NotStr keeps the empty value attribute — fastcore drops falsy attr values,
     # and the placeholder must submit "" rather than its label text.
     options = [Option("Select category...", value=NotStr(""))]
     for cat in categories:
-        options.append(Option(cat.name, value=cat.name, selected=cat.name == current))
+        label = qualified_name(cat) if name_counts[cat.name.lower()] > 1 else cat.name
+        selected = cat.id == current_id if current_id is not None else cat.name == current_name
+        options.append(Option(label, value=label, selected=selected))
     return Select(*options, name="actual_category", cls="form-select")
 
 

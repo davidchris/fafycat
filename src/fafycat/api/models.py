@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from fafycat.core.models import ReviewPriority
 
@@ -17,6 +17,8 @@ class TransactionResponse(BaseModel):
     account: str
     predicted_category: str | None = None
     actual_category: str | None = None
+    predicted_category_id: int | None = None
+    actual_category_id: int | None = None
     confidence: float | None = None
     is_reviewed: bool = False
     review_priority: str | None = None
@@ -67,21 +69,42 @@ class CategoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+CATEGORY_NAME_MAX_LENGTH = 50
+"""Matches ``categories.name`` (``String(50)``) and the core ``Category`` model."""
+
+
+def _normalize_category_name(name: str | None) -> str | None:
+    """Strip and lowercase, as CSV import and the core model do."""
+    return name.strip().lower() if name is not None else None
+
+
 class CategoryCreate(BaseModel):
     """Request model for creating a category."""
 
-    name: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=CATEGORY_NAME_MAX_LENGTH)
     type: str = Field(..., pattern="^(spending|income|saving)$")
     budget: float | None = Field(None, ge=0)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, v: object) -> object:
+        """Strip and lowercase the name before the length check."""
+        return _normalize_category_name(v) if isinstance(v, str) else v
 
 
 class CategoryUpdate(BaseModel):
     """Request model for updating a category."""
 
-    name: str | None = Field(None, min_length=1, max_length=100)
+    name: str | None = Field(None, min_length=1, max_length=CATEGORY_NAME_MAX_LENGTH)
     type: str | None = Field(None, pattern="^(spending|income|saving)$")
     is_active: bool | None = None
     budget: float | None = Field(None, ge=0)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, v: object) -> object:
+        """Strip and lowercase the name before the length check."""
+        return _normalize_category_name(v) if isinstance(v, str) else v
 
 
 class UploadResponse(BaseModel):

@@ -416,8 +416,10 @@ class DatabaseManager:
             ("spending", "other", 0.0),
             ("income", "salary", 0.0),
             ("income", "freelance", 0.0),
-            ("income", "investment", 0.0),
-            ("income", "other", 0.0),
+            # Names are unique across types: lookups go by name. Older databases may
+            # still hold "investment" and "other" twice; see api.services.find_category.
+            ("income", "investment_income", 0.0),
+            ("income", "other_income", 0.0),
             ("saving", "emergency_fund", 300.0),
             ("saving", "investment", 500.0),
             ("saving", "vacation", 200.0),
