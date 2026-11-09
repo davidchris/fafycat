@@ -25,9 +25,9 @@ def test_every_inactive_category_is_on_the_page_behind_a_toggle(test_client, db_
     html = test_client.get("/settings").text
 
     rows = re.findall(
-        r'<div class="flex items-center justify-between p-2 text-sm"( data-inactive-overflow hidden)?>\s*<span>(old-\d)</span>',
+        r'<div class="(hidden )?flex items-center justify-between p-2 text-sm"( data-inactive-overflow)?>\s*<span>(old-\d)</span>',
         html,
     )
-    assert [name for _, name in rows] == [f"old-{i}" for i in range(7)]
-    assert [bool(hidden) for hidden, _ in rows] == [False] * 5 + [True] * 2
+    assert [name for _, _, name in rows] == [f"old-{i}" for i in range(7)]
+    assert [(bool(hidden), bool(overflow)) for hidden, overflow, _ in rows] == [(False, False)] * 5 + [(True, True)] * 2
     assert 'onclick="toggleInactiveCategories(this)">Show 2 more</button>' in html

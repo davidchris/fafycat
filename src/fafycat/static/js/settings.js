@@ -95,7 +95,8 @@ function showCreateCategoryModal() {
 function toggleInactiveCategories(button) {
     const hidden = document.querySelectorAll('[data-inactive-overflow]');
     const expand = button.getAttribute('aria-expanded') !== 'true';
-    hidden.forEach(row => { row.hidden = !expand; });
+    // Tailwind's .hidden class, not the hidden attribute: .flex outranks [hidden].
+    hidden.forEach(row => row.classList.toggle('hidden', !expand));
     button.setAttribute('aria-expanded', String(expand));
     button.textContent = expand ? 'Show fewer' : button.dataset.collapsedLabel;
 }

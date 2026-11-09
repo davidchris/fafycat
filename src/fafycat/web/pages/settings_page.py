@@ -266,9 +266,10 @@ def render_categories_management(category_groups, inactive_categories, ml_status
         for index, category in enumerate(inactive_categories):
             safe_name_js = html.escape(json.dumps(category.name))
             # Show the first few; the rest open with the toggle below.
-            overflow = " data-inactive-overflow hidden" if index >= INACTIVE_SHOWN else ""
+            # Tailwind's hidden class, not the hidden attribute: .flex outranks [hidden].
+            hidden, overflow = ("hidden ", " data-inactive-overflow") if index >= INACTIVE_SHOWN else ("", "")
             content += f"""
-                <div class="flex items-center justify-between p-2 text-sm"{overflow}>
+                <div class="{hidden}flex items-center justify-between p-2 text-sm"{overflow}>
                     <span>{html.escape(category.name)}</span>
                     <button
                         onclick="reactivateCategory({category.id}, {safe_name_js})"

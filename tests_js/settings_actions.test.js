@@ -126,3 +126,27 @@ test('repredictAll stops with the server error', async () => {
 
     await assert.rejects(page.context.repredictAll(), /No trained ensemble ML model found/);
 });
+
+test('the inactive-category toggle hides overflow rows with the Tailwind class that beats .flex', () => {
+    const rows = [0, 1].map(() => {
+        const classes = new Set(['flex', 'hidden']);
+        return { classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) }, classes };
+    });
+    const page = loadPage(['settings.js']);
+    page.context.document.querySelectorAll = () => rows;
+    const attributes = { 'aria-expanded': 'false' };
+    const button = {
+        dataset: { collapsedLabel: 'Show 2 more' },
+        getAttribute: name => attributes[name],
+        setAttribute: (name, value) => { attributes[name] = value; },
+        textContent: 'Show 2 more',
+    };
+
+    page.context.toggleInactiveCategories(button);
+    assert.deepEqual(rows.map(row => row.classes.has('hidden')), [false, false]);
+    assert.equal(button.textContent, 'Show fewer');
+
+    page.context.toggleInactiveCategories(button);
+    assert.deepEqual(rows.map(row => row.classes.has('hidden')), [true, true]);
+    assert.equal(button.textContent, 'Show 2 more');
+});
