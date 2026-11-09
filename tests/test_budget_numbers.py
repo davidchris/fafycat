@@ -1,8 +1,8 @@
 """Exact-value tests for budget variance, category breakdown and year-over-year numbers.
 
-Sign convention under test: spending is stored negative in the database. Variance and breakdown
-report money spent as a positive number, and a variance is ``budget - spent`` (positive means
-under budget).
+Sign convention under test: spending is stored negative in the database. Budget variance reports
+money spent as a positive ``actual``; category breakdown keeps the signed ``amount``. Both compute
+a variance as ``budget - spent`` (positive means under budget).
 """
 
 import json
@@ -203,6 +203,10 @@ class TestBudgetProration:
         assert groceries["budget"] == pytest.approx(100.0 + 3 * 2700.0)
         assert groceries["actual"] == pytest.approx(1300.0)
         assert groceries["variance"] == pytest.approx(100.0 + 3 * 2700.0 - 1300.0)
+
+
+def test_budgeted_months_handles_the_last_representable_month():
+    assert services.budgeted_months(date(9999, 12, 1), date(9999, 12, 31)) == pytest.approx(1.0)
 
 
 class TestBudgetVarianceHtml:

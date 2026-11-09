@@ -1761,8 +1761,9 @@ def money_spent(amount: float) -> float:
     """Convert a signed spending amount into money spent.
 
     Sign convention: the database stores money leaving the account as a negative ``amount``,
-    so the summed amount of a spending category is negative. Budget variance and category
-    breakdown report money spent as a positive number. A net refund gives a negative value.
+    so the summed amount of a spending category is negative. Budget variance reports money spent
+    as a positive ``actual``; category breakdown keeps the signed ``amount`` and uses this
+    function only for ``budget_variance``. A net refund gives a negative value.
 
     Args:
         amount: Signed sum of transaction amounts.
@@ -1792,6 +1793,8 @@ def budgeted_months(start_date: date, end_date: date) -> float:
         days_in_month = calendar.monthrange(current.year, current.month)[1]
         month_end = date(current.year, current.month, days_in_month)
         months += ((min(end_date, month_end) - current).days + 1) / days_in_month
+        if month_end >= end_date:
+            break
         current = month_end + timedelta(days=1)
     return months
 
