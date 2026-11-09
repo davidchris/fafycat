@@ -104,6 +104,10 @@ fafycat analytics top --last-month
 
 `--type` on `breakdown` accepts exactly `income`, `saving`, or `spending` — anything else exits with code 2.
 
+Saving sign: `monthly` and `breakdown` amounts are signed from the checking account's view, so a transfer to
+savings is negative and a transfer back is positive. `savings` reports net saved instead: positive is saving,
+negative is de-saving.
+
 ### Date flags (shared across commands)
 
 All mutually exclusive with each other and with `--start`/`--end`:

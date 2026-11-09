@@ -185,11 +185,12 @@ class TestServiceAggregations:
         included = AnalyticsService.get_savings_tracking(analytics_session, year=YEAR)
         reviewed_only = AnalyticsService.get_savings_tracking(analytics_session, year=YEAR, include_unreviewed=False)
 
-        assert included["statistics"]["total_savings"] == pytest.approx(12 * (REVIEWED_SAVING + UNREVIEWED_SAVING))
-        assert reviewed_only["statistics"]["total_savings"] == pytest.approx(12 * REVIEWED_SAVING)
+        # Savings tracking reports net saved: money moved to savings (negative amounts) is positive.
+        assert included["statistics"]["total_savings"] == pytest.approx(-12 * (REVIEWED_SAVING + UNREVIEWED_SAVING))
+        assert reviewed_only["statistics"]["total_savings"] == pytest.approx(-12 * REVIEWED_SAVING)
 
         january = included["monthly_savings"][0]
-        assert january["unreviewed_amount"] == pytest.approx(UNREVIEWED_SAVING)
+        assert january["unreviewed_amount"] == pytest.approx(-UNREVIEWED_SAVING)
         assert january["unreviewed_count"] == 1
         assert reviewed_only["monthly_savings"][0]["unreviewed_count"] == 0
 
