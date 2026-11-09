@@ -49,9 +49,11 @@ def _category_select(tx, categories) -> Select:
 
 
 def _confidence_color(confidence: float | None) -> str:
-    if confidence and confidence < 0.5:
+    if confidence is None:
+        return "text-secondary"
+    if confidence < 0.5:
         return "text-spending"
-    if confidence and confidence < 0.8:
+    if confidence < 0.8:
         return "text-income"
     return "text-success"
 
@@ -59,7 +61,7 @@ def _confidence_color(confidence: float | None) -> str:
 def _row(tx, categories) -> Tr:
     """Build a transaction row with its HTMX categorization form."""
     category_name = tx.actual_category or tx.predicted_category or "Uncategorized"
-    confidence_display = f"{tx.confidence:.1%}" if tx.confidence else "N/A"
+    confidence_display = f"{tx.confidence:.1%}" if tx.confidence is not None else "N/A"
     if tx.is_reviewed:
         badge = Span(f"{category_name} ✓", cls="badge badge-success")
         status_text, status_color = "Complete", "text-success"
