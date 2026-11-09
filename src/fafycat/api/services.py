@@ -58,6 +58,7 @@ class AmbiguousCategoryError(LookupError):
     """Several categories share the name; the caller must say which type it means."""
 
     def __init__(self, ref: str, candidates: list[CategoryORM]) -> None:
+        self.candidates = candidates
         options = ", ".join(f"'{qualified_name(c)}'" for c in candidates)
         super().__init__(f"Category name '{ref}' is used by several types; use one of {options}")
 
@@ -77,37 +78,52 @@ def qualified_name(category: Any) -> str:
     return f"{category.name} ({category.type})"
 
 
+def _name_key(name: object) -> str:
+    """Comparison key for category names: stripped and case-folded in Python.
+
+    SQLite's ``lower()`` folds ASCII only, so ``Ärzte`` would not match ``ärzte`` in SQL.
+    """
+    return str(name).strip().casefold()
+
+
 def find_category(session: Session, ref: str) -> CategoryORM:
     """Resolve a category reference: its name, ignoring case, or ``name (type)``.
 
     Names are unique for new categories, but databases created with the old
     default set hold ``other`` and ``investment`` twice. Such a name resolves
-    only with the type qualifier, so a lookup never guesses.
+    to the one active category of that name, else only with the type
+    qualifier, so a lookup never guesses.
 
     Raises:
         CategoryNotFoundError: No category matches.
-        AmbiguousCategoryError: Several categories share the unqualified name.
+        AmbiguousCategoryError: Several active categories share the unqualified name.
     """
     ref = ref.strip()
-    matches = session.query(CategoryORM).filter(func.lower(CategoryORM.name) == ref.lower()).order_by(CategoryORM.id)
-    found = matches.all()
-    if len(found) == 1:
-        return found[0]
-    if found:
+    categories = session.query(CategoryORM).order_by(CategoryORM.id).all()
+    found = [c for c in categories if _name_key(c.name) == _name_key(ref)]
+    if len(found) > 1:
+        active = [c for c in found if c.is_active]
+        if len(active) == 1:
+            return active[0]
         raise AmbiguousCategoryError(ref, found)
+    if found:
+        return found[0]
     qualified = _QUALIFIED.match(ref)
     if qualified:
-        category = (
-            session.query(CategoryORM)
-            .filter(
-                func.lower(CategoryORM.name) == qualified["name"].lower(),
-                CategoryORM.type == qualified["type"],
-            )
-            .first()
-        )
-        if category is not None:
-            return category
+        for category in categories:
+            if _name_key(category.name) == _name_key(qualified["name"]) and category.type == qualified["type"]:
+                return category
     raise CategoryNotFoundError(ref)
+
+
+def _category_ids_for(session: Session, ref: str) -> list[int]:
+    """Ids a category filter matches: one for a resolvable reference, every namesake for a shared name."""
+    try:
+        return [_to_int(find_category(session, ref).id)]
+    except AmbiguousCategoryError as e:
+        return [_to_int(c.id) for c in e.candidates]
+    except CategoryNotFoundError:
+        return []
 
 
 def _apply_sort(query, sort_by: str, sort_order: str):
@@ -129,10 +145,10 @@ def _apply_sort(query, sort_by: str, sort_order: str):
 
 
 def _name_taken(session: Session, name: str, *, exclude_id: int | None = None) -> bool:
-    query = session.query(CategoryORM.id).filter(func.lower(CategoryORM.name) == name.lower())
-    if exclude_id is not None:
-        query = query.filter(CategoryORM.id != exclude_id)
-    return query.first() is not None
+    return any(
+        _name_key(other_name) == _name_key(name) and other_id != exclude_id
+        for other_id, other_name in session.query(CategoryORM.id, CategoryORM.name)
+    )
 
 
 def _pending_siblings_expr() -> ColumnElement:
@@ -265,8 +281,7 @@ class TransactionService:
 
         # Apply filters
         if category:
-            query = query.join(CategoryORM, TransactionORM.category_id == CategoryORM.id)
-            query = query.filter(func.lower(CategoryORM.name) == category.strip().lower())
+            query = query.filter(TransactionORM.category_id.in_(_category_ids_for(session, category)))
 
         if is_reviewed is not None:
             query = query.filter(TransactionORM.is_reviewed == is_reviewed)
@@ -368,20 +383,13 @@ class TransactionService:
             else:
                 # Filter by effective/final category: actual_category takes precedence over predicted_category
                 # This ensures reviewed transactions use their assigned category, unreviewed use predicted category
+                category_ids = _category_ids_for(session, category)
                 query = query.filter(
                     or_(
-                        # Case 1: Has actual category and it matches (user-assigned, takes precedence)
-                        and_(
-                            TransactionORM.category_id.is_not(None),
-                            TransactionORM.category.has(func.lower(CategoryORM.name) == category.strip().lower()),
-                        ),
-                        # Case 2: No actual category, but predicted category matches (unreviewed)
+                        TransactionORM.category_id.in_(category_ids),
                         and_(
                             TransactionORM.category_id.is_(None),
-                            TransactionORM.predicted_category_id.is_not(None),
-                            TransactionORM.predicted_category.has(
-                                func.lower(CategoryORM.name) == category.strip().lower()
-                            ),
+                            TransactionORM.predicted_category_id.in_(category_ids),
                         ),
                     )
                 )

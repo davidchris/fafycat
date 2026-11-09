@@ -44,6 +44,23 @@ class TestCreateAndRename:
         db_session.expire_all()
         assert db_session.get(CategoryORM, rent_id).name == "rent"
 
+    def test_a_name_in_the_qualified_form_is_rejected(self, test_client):
+        response = test_client.post("/api/categories/", json={"name": "other (income)", "type": "spending"})
+
+        assert response.status_code == 422
+
+    def test_a_non_ascii_name_is_unique_ignoring_case(self, test_client, db_session):
+        db_session.add(CategoryORM(name="Ärzte", type="spending"))
+        db_session.commit()
+        _txn(db_session, "t1")
+
+        duplicate = test_client.post("/api/categories/", json={"name": "ärzte", "type": "spending"})
+        assigned = test_client.put("/api/transactions/t1/category", json={"actual_category": "ärzte"})
+
+        assert duplicate.status_code == 409
+        assert assigned.status_code == 200
+        assert assigned.json()["actual_category"] == "Ärzte"
+
     @pytest.mark.parametrize(("length", "status"), [(50, 200), (51, 422)])
     def test_names_are_limited_to_the_column_length(self, test_client, length, status):
         response = test_client.post("/api/categories/", json={"name": "x" * length, "type": "spending"})
@@ -90,6 +107,26 @@ class TestLegacyDuplicateNames:
         assert response.status_code == 200, response.text
         db_session.expire_all()
         assert db_session.get(TransactionORM, "t1").category_id == others["income"]
+
+    def test_a_shared_name_means_the_only_active_one(self, test_client, db_session, others):
+        db_session.get(CategoryORM, others["income"]).is_active = False
+        db_session.commit()
+        _txn(db_session, "t1")
+
+        response = test_client.put("/api/transactions/t1/category", json={"actual_category": "other"})
+
+        assert response.status_code == 200, response.text
+        db_session.expire_all()
+        assert db_session.get(TransactionORM, "t1").category_id == others["spending"]
+
+    def test_a_qualified_filter_lists_only_that_category(self, test_client, db_session, others):
+        _txn(db_session, "income-row", predicted_category_id=others["income"])
+        _txn(db_session, "spending-row", predicted_category_id=others["spending"])
+
+        html = test_client.get("/api/transactions/table", params={"category_filter": "other (income)"}).text
+
+        assert 'id="transaction-income-row"' in html
+        assert 'id="transaction-spending-row"' not in html
 
     def test_an_ambiguous_name_is_a_400_not_a_guess(self, test_client, db_session, others):
         _txn(db_session, "t1")

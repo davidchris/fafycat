@@ -285,7 +285,7 @@ def cmd_tx_list(args: argparse.Namespace) -> None:
         category = args.category or None
         if category and category.strip().lower() != "uncategorized":
             try:
-                category = str(find_category(session, category).name)
+                find_category(session, category)
             except LookupError as exc:
                 emit_error(str(exc))
         result = TransactionService.get_transactions_with_pagination(

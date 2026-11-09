@@ -1,5 +1,6 @@
 """Pydantic models for API requests and responses."""
 
+import re
 from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -73,9 +74,22 @@ CATEGORY_NAME_MAX_LENGTH = 50
 """Matches ``categories.name`` (``String(50)``) and the core ``Category`` model."""
 
 
+_TYPE_SUFFIX = re.compile(r" \((spending|income|saving)\)$")
+
+
 def _normalize_category_name(name: str | None) -> str | None:
-    """Strip and lowercase, as CSV import and the core model do."""
-    return name.strip().lower() if name is not None else None
+    """Strip and lowercase, as CSV import and the core model do.
+
+    Raises:
+        ValueError: The name ends in `` (spending)``, `` (income)`` or `` (saving)``,
+            the form reserved for telling apart categories that share a name.
+    """
+    if name is None:
+        return None
+    name = name.strip().lower()
+    if _TYPE_SUFFIX.search(name):
+        raise ValueError("a category name may not end in a type in parentheses, such as ' (income)'")
+    return name
 
 
 class CategoryCreate(BaseModel):
