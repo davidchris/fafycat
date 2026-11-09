@@ -2,6 +2,7 @@
 
 import html
 import json
+import logging
 
 from fastapi import Request
 from sqlalchemy.orm import Session
@@ -11,79 +12,64 @@ from fafycat.core.database import get_categories
 from fafycat.ml.human_labels import count_human_labels
 from fafycat.web.components.layout import create_page_layout
 
+logger = logging.getLogger(__name__)
 
-def _get_ml_model_status():
-    """Get ML model status for settings page."""
+INACTIVE_SHOWN = 5
+"""Inactive categories listed before the "Show N more" toggle."""
+
+
+def _get_ml_model_status(db: Session) -> dict:
+    """Get ML model status for the settings page.
+
+    "Model loaded and ready" is reported only after the saved model actually
+    loaded; a missing, corrupt, or incompatible file says why it cannot predict.
+    """
+    from fafycat.api.ml import load_categorizer
+    from fafycat.core.database import TransactionORM
+
+    min_training_samples = 50
+    status = {
+        "model_loaded": False,
+        "can_predict": False,
+        "training_ready": False,
+        "reviewed_transactions": 0,
+        "min_training_samples": min_training_samples,
+        "unpredicted_transactions": 0,
+        "repredictable_transactions": 0,
+        "status": "Unable to check model status",
+    }
     try:
-        from fafycat.core.config import AppConfig
-        from fafycat.core.database import DatabaseManager, TransactionORM
-
-        config = AppConfig()
-        db_manager = DatabaseManager(config)
-
-        with db_manager.get_session() as db_session:
-            # Check for the correct model based on config (same logic as ML API)
-            if config.ml.use_ensemble:
-                model_path = config.ml.model_dir / "ensemble_categorizer.pkl"
-            else:
-                model_path = config.ml.model_dir / "categorizer.pkl"
-
-            # Check training data readiness
-            reviewed_count = count_human_labels(db_session)
-
-            min_training_samples = 50
-            training_ready = reviewed_count >= min_training_samples
-
-            # Check unpredicted transactions
-            unpredicted_count = (
-                db_session.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None)).count()
-            )
-
-            # Check unreviewed transactions that already have predictions (for re-prediction)
-            repredictable_count = (
-                db_session.query(TransactionORM)
-                .filter(
-                    TransactionORM.is_reviewed.is_(False),
-                    TransactionORM.predicted_category_id.is_not(None),
-                )
-                .count()
-            )
-
-            if not model_path.exists():
-                return {
-                    "model_loaded": False,
-                    "can_predict": False,
-                    "training_ready": training_ready,
-                    "reviewed_transactions": reviewed_count,
-                    "min_training_samples": min_training_samples,
-                    "unpredicted_transactions": unpredicted_count,
-                    "repredictable_transactions": repredictable_count,
-                    "status": "No model found - ready to train" if training_ready else "Not enough training data",
-                }
-
-            # If model exists, assume it's working (avoiding model loading here for speed)
-            return {
-                "model_loaded": True,
-                "can_predict": True,
-                "training_ready": training_ready,
-                "reviewed_transactions": reviewed_count,
-                "min_training_samples": min_training_samples,
-                "unpredicted_transactions": unpredicted_count,
-                "repredictable_transactions": repredictable_count,
-                "status": "Model loaded and ready",
-            }
-
+        reviewed_count = count_human_labels(db)
+        status.update(
+            training_ready=reviewed_count >= min_training_samples,
+            reviewed_transactions=reviewed_count,
+            unpredicted_transactions=db.query(TransactionORM)
+            .filter(TransactionORM.predicted_category_id.is_(None))
+            .count(),
+            repredictable_transactions=db.query(TransactionORM)
+            .filter(TransactionORM.is_reviewed.is_(False), TransactionORM.predicted_category_id.is_not(None))
+            .count(),
+        )
     except Exception:
-        return {
-            "model_loaded": False,
-            "can_predict": False,
-            "training_ready": False,
-            "reviewed_transactions": 0,
-            "min_training_samples": 50,
-            "unpredicted_transactions": 0,
-            "repredictable_transactions": 0,
-            "status": "Unable to check model status",
-        }
+        logger.exception("Could not count transactions for the model status")
+        return status
+
+    try:
+        categorizer = load_categorizer(db)
+    except FileNotFoundError:
+        status["status"] = "No model found - ready to train" if status["training_ready"] else "Not enough training data"
+    except Exception as e:
+        logger.warning("Saved model failed to load: %s", e)
+        status.update(status=f"Model failed to load: {e}", load_error=str(e))
+    else:
+        classes = getattr(categorizer, "classes_", None)
+        status.update(
+            model_loaded=True,
+            can_predict=True,
+            status="Model loaded and ready",
+            classes_count=len(classes) if classes is not None else 0,
+        )
+    return status
 
 
 def render_settings_page(request: Request, db: Session):
@@ -105,7 +91,7 @@ def render_settings_page(request: Request, db: Session):
     has_categories = len(active_categories) > 0
 
     # Get ML model status
-    ml_status = _get_ml_model_status()
+    ml_status = _get_ml_model_status(db)
     calibration = get_calibration_report(db)
 
     if not has_categories:
@@ -164,272 +150,8 @@ def render_empty_categories_state(ml_status, calibration=None):
         </div>
     </div>
 
-    <script>
-        window._autoApproveThreshold = 0.90;
-        fetch('/api/ml/settings').then(r => r.json()).then(d => {{ window._autoApproveThreshold = parseFloat(d.auto_approve_threshold); }}).catch(() => {{}});
-
-        function showCreateCategoryModal() {{
-            alert('Create category functionality will be implemented here');
-        }}
-
-        // Training job polling state
-        let trainingJobId = null;
-        let pollInterval = 2000;
-        let pollCount = 0;
-
-        function trainModel() {{
-            const trainButton = document.getElementById('trainButton');
-            if (trainButton) {{
-                trainButton.disabled = true;
-                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Starting...';
-            }}
-
-            // Start training job
-            fetch('/api/ml/retrain', {{
-                method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }}
-            }})
-            .then(response => {{
-                if (response.status === 409) {{
-                    return response.json().then(data => {{
-                        // Training already in progress - start polling existing job
-                        return {{ job_id: data.detail.job_id, status: 'running' }};
-                    }});
-                }}
-                return response.json();
-            }})
-            .then(data => {{
-                if (data.job_id) {{
-                    trainingJobId = data.job_id;
-                    showTrainingProgress();
-                    pollTrainingStatus(data.job_id);
-                }} else {{
-                    throw new Error(data.detail || 'Failed to start training');
-                }}
-            }})
-            .catch(error => {{
-                alert('Training failed: ' + error.message);
-                resetTrainButton();
-            }});
-        }}
-
-        function showTrainingProgress() {{
-            // Create progress container if it doesn't exist
-            let container = document.getElementById('training-progress');
-            if (!container) {{
-                container = document.createElement('div');
-                container.id = 'training-progress';
-                const trainButton = document.getElementById('trainButton');
-                if (trainButton && trainButton.parentNode) {{
-                    trainButton.parentNode.insertBefore(container, trainButton.nextSibling);
-                }}
-            }}
-            container.innerHTML = `
-                <div class="alert alert-info mt-4">
-                    <div class="flex items-center justify-between mb-2">
-                        <span id="training-phase" class="text-sm font-medium">
-                            Preparing...
-                        </span>
-                        <span id="training-progress-pct" class="text-sm">0%</span>
-                    </div>
-                    <div class="w-full rounded-full h-2" style="background: var(--border-default)">
-                        <div id="training-progress-bar"
-                             class="h-2 rounded-full transition-all duration-300"
-                             style="width: 0%; background: var(--color-saving)"></div>
-                    </div>
-                </div>
-            `;
-        }}
-
-        function pollTrainingStatus(jobId) {{
-            fetch(`/api/ml/training-status/${{jobId}}`)
-            .then(response => response.json())
-            .then(data => {{
-                updateTrainingProgress(data);
-
-                if (data.status === 'completed') {{
-                    handleTrainingComplete(data.result);
-                }} else if (data.status === 'failed') {{
-                    handleTrainingFailed(data.error);
-                }} else {{
-                    // Continue polling
-                    pollCount++;
-                    // Adaptive polling: slow down after 30 seconds
-                    if (pollCount > 15) {{
-                        pollInterval = 3000;
-                    }}
-                    setTimeout(() => pollTrainingStatus(jobId), pollInterval);
-                }}
-            }})
-            .catch(error => {{
-                console.error('Error polling status:', error);
-                // Retry on error
-                setTimeout(() => pollTrainingStatus(jobId), pollInterval);
-            }});
-        }}
-
-        function updateTrainingProgress(data) {{
-            const phaseEl = document.getElementById('training-phase');
-            const pctEl = document.getElementById('training-progress-pct');
-            const barEl = document.getElementById('training-progress-bar');
-
-            if (phaseEl) phaseEl.textContent = data.phase_description;
-            if (pctEl) pctEl.textContent = `${{data.progress}}%`;
-            if (barEl) barEl.style.width = `${{data.progress}}%`;
-        }}
-
-        function formatAutoApprove(result) {{
-            if (result.auto_rate === undefined) return '';
-            const pct = (value) => `${{(value * 100).toFixed(1)}}%`;
-            return `\\n- Auto-approve at ${{pct(result.auto_threshold)}}: ${{pct(result.auto_rate)}} of rows, ${{pct(result.auto_error_rate)}} of those wrong (out-of-fold)`;
-        }}
-
-        function formatPredictions(result) {{
-            if (result.prediction_error) {{
-                return `\\n\\nAuto-prediction failed: ${{result.prediction_error}}\\nYou can predict manually from this page.`;
-            }}
-            if (!result.predictions_made) return '\\n\\nAll transactions already have predictions.';
-            const kept = result.already_reviewed ? `\\n- ${{result.already_reviewed}} already reviewed (kept their category)` : '';
-            return `\\n\\nPredicted ${{result.predictions_made}} transactions without a prediction:\\n- ${{result.auto_accepted}} auto-accepted\\n- ${{result.needs_review}} need your review${{kept}}`;
-        }}
-
-        function handleTrainingComplete(result) {{
-            const accuracy = (result.accuracy * 100).toFixed(1);
-            const samples = result.training_samples;
-            const autoApprove = formatAutoApprove(result);
-            alert(`Model training completed!\\n\\nAccuracy: ${{accuracy}}%\\nTraining samples: ${{samples}}${{autoApprove}}${{formatPredictions(result)}}`);
-            location.reload();
-        }}
-
-        function handleTrainingFailed(error) {{
-            alert('Training failed: ' + error);
-            resetTrainButton();
-            hideTrainingProgress();
-        }}
-
-        function resetTrainButton() {{
-            const trainButton = document.getElementById('trainButton');
-            if (trainButton) {{
-                trainButton.disabled = false;
-                trainButton.innerHTML = '<svg class="mr-2 h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" /></svg>Train ML Model Now';
-            }}
-            pollCount = 0;
-            pollInterval = 2000;
-        }}
-
-        function hideTrainingProgress() {{
-            const container = document.getElementById('training-progress');
-            if (container) {{
-                container.innerHTML = '';
-            }}
-        }}
-
-        function retrainModel() {{
-            if (confirm('Retrain the ML model with current data? This will replace the existing model and automatically predict unpredicted transactions.')) {{
-                trainModel();
-            }}
-        }}
-
-        function confirmAndPredictUnpredicted(count) {{
-            const pct = (window._autoApproveThreshold * 100).toFixed(0);
-            const confirmMessage = `Run ML predictions on ${{count}} transactions?\\n\\n` +
-                `This will:\\n` +
-                `- Apply ML predictions to all transactions without predictions\\n` +
-                `- Auto-accept high-confidence predictions (${{pct}}%+)\\n` +
-                `- Add uncertain predictions to your Review Queue\\n` +
-                `- You may need to review some transactions manually\\n\\n` +
-                `Use this when you've imported transactions before training a model, ` +
-                `or after retraining to apply the updated model.\\n\\n` +
-                `Continue?`;
-
-            if (confirm(confirmMessage)) {{
-                predictUnpredicted();
-            }}
-        }}
-
-        function confirmAndRepredict(count) {{
-            const pct = (window._autoApproveThreshold * 100).toFixed(0);
-            const confirmMessage = `Re-predict ${{count}} unreviewed transactions?\\n\\n` +
-                `This will:\\n` +
-                `- Re-run predictions using the current model on transactions you haven't reviewed yet\\n` +
-                `- Useful after retraining to apply the improved model\\n` +
-                `- Auto-accept high-confidence predictions (${{pct}}%+)\\n` +
-                `- Add uncertain predictions to your Review Queue\\n\\n` +
-                `Continue?`;
-
-            if (confirm(confirmMessage)) {{
-                repredictUnreviewed();
-            }}
-        }}
-
-        function repredictUnreviewed() {{
-            const button = this;
-            const originalText = button.innerHTML;
-            button.disabled = true;
-            button.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Re-predicting...';
-
-            fetch('/api/ml/predict/batch-repredict', {{
-                method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }}
-            }})
-            .then(response => response.json())
-            .then(data => {{
-                if (data.status === 'success') {{
-                    const autoAccepted = data.auto_accepted || 0;
-                    const needsReview = data.needs_review || 0;
-
-                    let message = `Re-predicted ${{data.predictions_made}} transactions!\\n\\n`;
-                    message += `- ${{autoAccepted}} auto-accepted (at or above the auto-approve threshold)\\n`;
-                    message += `- ${{needsReview}} need your review\\n\\n`;
-                    message += `Open the Review page to work through them, lowest confidence first.`;
-
-                    alert(message);
-                    location.reload();
-                }} else {{
-                    throw new Error(data.detail || 'Re-prediction failed');
-                }}
-            }})
-            .catch(error => {{
-                alert('Re-prediction failed: ' + error.message);
-                button.disabled = false;
-                button.innerHTML = originalText;
-            }});
-        }}
-
-        function predictUnpredicted() {{
-            const button = this;
-            const originalText = button.innerHTML;
-            button.disabled = true;
-            button.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Predicting...';
-
-            fetch('/api/ml/predict/batch-unpredicted', {{
-                method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }}
-            }})
-            .then(response => response.json())
-            .then(data => {{
-                if (data.status === 'success') {{
-                    const autoAccepted = data.auto_accepted || 0;
-                    const needsReview = data.needs_review || 0;
-
-                    let message = `Predicted ${{data.predictions_made}} transactions!\\n\\n`;
-                    message += `- ${{autoAccepted}} auto-accepted (at or above the auto-approve threshold)\\n`;
-                    message += `- ${{needsReview}} need your review\\n\\n`;
-                    message += `Open the Review page to work through them, lowest confidence first.`;
-
-                    alert(message);
-                    location.reload();
-                }} else {{
-                    throw new Error(data.detail || 'Prediction failed');
-                }}
-            }})
-            .catch(error => {{
-                alert('Prediction failed: ' + error.message);
-                button.disabled = false;
-                button.innerHTML = originalText;
-            }});
-        }}
-    </script>
+    <script src="/static/js/repredict.js"></script>
+    <script src="/static/js/settings.js"></script>
     """
 
 
@@ -541,10 +263,12 @@ def render_categories_management(category_groups, inactive_categories, ml_status
             <div class="space-y-2">
         """
 
-        for category in inactive_categories[:5]:  # Show max 5 inactive
+        for index, category in enumerate(inactive_categories):
             safe_name_js = html.escape(json.dumps(category.name))
+            # Show the first few; the rest open with the toggle below.
+            overflow = " data-inactive-overflow hidden" if index >= INACTIVE_SHOWN else ""
             content += f"""
-                <div class="flex items-center justify-between p-2 text-sm">
+                <div class="flex items-center justify-between p-2 text-sm"{overflow}>
                     <span>{html.escape(category.name)}</span>
                     <button
                         onclick="reactivateCategory({category.id}, {safe_name_js})"
@@ -555,8 +279,12 @@ def render_categories_management(category_groups, inactive_categories, ml_status
                 </div>
             """
 
-        if len(inactive_categories) > 5:
-            content += f"<p class='text-sm'>... and {len(inactive_categories) - 5} more</p>"
+        if len(inactive_categories) > INACTIVE_SHOWN:
+            label = f"Show {len(inactive_categories) - INACTIVE_SHOWN} more"
+            content += f"""
+                <button type="button" class="btn-ghost text-sm" aria-expanded="false"
+                        data-collapsed-label="{label}" onclick="toggleInactiveCategories(this)">{label}</button>
+            """
 
         content += """
             </div>
@@ -577,332 +305,8 @@ def render_categories_management(category_groups, inactive_categories, ml_status
         </div>
     </div>
 
-    <script>
-        if (!window._autoApproveThreshold) {
-            window._autoApproveThreshold = 0.90;
-            fetch('/api/ml/settings').then(r => r.json()).then(d => { window._autoApproveThreshold = parseFloat(d.auto_approve_threshold); }).catch(() => {});
-        }
-
-        function editBudget(categoryId, categoryName, currentBudget) {
-            const newBudget = prompt(`Set monthly budget for "${categoryName}":`, currentBudget);
-            if (newBudget !== null && !isNaN(newBudget)) {
-                fetch(`/api/categories/${categoryId}/budget?budget=${parseFloat(newBudget)}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' }
-                })
-                .then(response => response.json())
-                .then(() => location.reload())
-                .catch(error => alert('Error updating budget: ' + error));
-            }
-        }
-
-        function editCategoryType(categoryId, categoryName, currentType) {
-            const newType = prompt(`Change type for "${categoryName}" (spending/income/saving):`, currentType);
-            if (newType && ['spending', 'income', 'saving'].includes(newType)) {
-                fetch(`/api/categories/${categoryId}/type?type=${newType}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' }
-                })
-                .then(response => response.json())
-                .then(() => location.reload())
-                .catch(error => alert('Error updating category type: ' + error));
-            }
-        }
-
-        function deactivateCategory(categoryId, categoryName) {
-            if (confirm(`Deactivate category "${categoryName}"? It will be hidden but historical data preserved.`)) {
-                fetch(`/api/categories/${categoryId}`, { method: 'DELETE' })
-                .then(() => location.reload())
-                .catch(error => alert('Error deactivating category: ' + error));
-            }
-        }
-
-        function reactivateCategory(categoryId, categoryName) {
-            if (confirm(`Reactivate category "${categoryName}"?`)) {
-                fetch(`/api/categories/${categoryId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ is_active: true })
-                })
-                .then(() => location.reload())
-                .catch(error => alert('Error reactivating category: ' + error));
-            }
-        }
-
-        function showCreateCategoryModal() {
-            const name = prompt('Category name:');
-            if (name) {
-                const type = prompt('Category type (spending/income/saving):', 'spending');
-                if (type && ['spending', 'income', 'saving'].includes(type)) {
-                    fetch('/api/categories/', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: name, type: type, budget: 0.0 })
-                    })
-                    .then(() => location.reload())
-                    .catch(error => alert('Error creating category: ' + error));
-                }
-            }
-        }
-
-        // Training job polling state
-        let trainingJobId = null;
-        let pollInterval = 2000;
-        let pollCount = 0;
-
-        function trainModel() {
-            const trainButton = document.getElementById('trainButton');
-            if (trainButton) {
-                trainButton.disabled = true;
-                trainButton.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Starting...';
-            }
-
-            // Start training job
-            fetch('/api/ml/retrain', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(response => {
-                if (response.status === 409) {
-                    return response.json().then(data => {
-                        // Training already in progress - start polling existing job
-                        return { job_id: data.detail.job_id, status: 'running' };
-                    });
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.job_id) {
-                    trainingJobId = data.job_id;
-                    showTrainingProgress();
-                    pollTrainingStatus(data.job_id);
-                } else {
-                    throw new Error(data.detail || 'Failed to start training');
-                }
-            })
-            .catch(error => {
-                alert('Training failed: ' + error.message);
-                resetTrainButton();
-            });
-        }
-
-        function showTrainingProgress() {
-            // Create progress container if it doesn't exist
-            let container = document.getElementById('training-progress');
-            if (!container) {
-                container = document.createElement('div');
-                container.id = 'training-progress';
-                const trainButton = document.getElementById('trainButton');
-                if (trainButton && trainButton.parentNode) {
-                    trainButton.parentNode.insertBefore(container, trainButton.nextSibling);
-                }
-            }
-            container.innerHTML = `
-                <div class="alert alert-info mt-4">
-                    <div class="flex items-center justify-between mb-2">
-                        <span id="training-phase" class="text-sm font-medium">
-                            Preparing...
-                        </span>
-                        <span id="training-progress-pct" class="text-sm">0%</span>
-                    </div>
-                    <div class="w-full rounded-full h-2" style="background: var(--border-default)">
-                        <div id="training-progress-bar"
-                             class="h-2 rounded-full transition-all duration-300"
-                             style="width: 0%; background: var(--color-saving)"></div>
-                    </div>
-                </div>
-            `;
-        }
-
-        function pollTrainingStatus(jobId) {
-            fetch(`/api/ml/training-status/${jobId}`)
-            .then(response => response.json())
-            .then(data => {
-                updateTrainingProgress(data);
-
-                if (data.status === 'completed') {
-                    handleTrainingComplete(data.result);
-                } else if (data.status === 'failed') {
-                    handleTrainingFailed(data.error);
-                } else {
-                    // Continue polling
-                    pollCount++;
-                    // Adaptive polling: slow down after 30 seconds
-                    if (pollCount > 15) {
-                        pollInterval = 3000;
-                    }
-                    setTimeout(() => pollTrainingStatus(jobId), pollInterval);
-                }
-            })
-            .catch(error => {
-                console.error('Error polling status:', error);
-                // Retry on error
-                setTimeout(() => pollTrainingStatus(jobId), pollInterval);
-            });
-        }
-
-        function updateTrainingProgress(data) {
-            const phaseEl = document.getElementById('training-phase');
-            const pctEl = document.getElementById('training-progress-pct');
-            const barEl = document.getElementById('training-progress-bar');
-
-            if (phaseEl) phaseEl.textContent = data.phase_description;
-            if (pctEl) pctEl.textContent = `${data.progress}%`;
-            if (barEl) barEl.style.width = `${data.progress}%`;
-        }
-
-        function formatAutoApprove(result) {
-            if (result.auto_rate === undefined) return '';
-            const pct = (value) => `${(value * 100).toFixed(1)}%`;
-            return `\\n- Auto-approve at ${pct(result.auto_threshold)}: ${pct(result.auto_rate)} of rows, ${pct(result.auto_error_rate)} of those wrong (out-of-fold)`;
-        }
-
-        function formatPredictions(result) {
-            if (result.prediction_error) {
-                return `\\n\\nAuto-prediction failed: ${result.prediction_error}\\nYou can predict manually from this page.`;
-            }
-            if (!result.predictions_made) return '\\n\\nAll transactions already have predictions.';
-            const kept = result.already_reviewed ? `\\n- ${result.already_reviewed} already reviewed (kept their category)` : '';
-            return `\\n\\nPredicted ${result.predictions_made} transactions without a prediction:\\n- ${result.auto_accepted} auto-accepted\\n- ${result.needs_review} need your review${kept}`;
-        }
-
-        function handleTrainingComplete(result) {
-            const accuracy = (result.accuracy * 100).toFixed(1);
-            const samples = result.training_samples;
-            const autoApprove = formatAutoApprove(result);
-            alert(`Model training completed!\\n\\nAccuracy: ${accuracy}%\\nTraining samples: ${samples}${autoApprove}${formatPredictions(result)}`);
-            location.reload();
-        }
-
-        function handleTrainingFailed(error) {
-            alert('Training failed: ' + error);
-            resetTrainButton();
-            hideTrainingProgress();
-        }
-
-        function resetTrainButton() {
-            const trainButton = document.getElementById('trainButton');
-            if (trainButton) {
-                trainButton.disabled = false;
-                trainButton.innerHTML = '<svg class="mr-2 h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" /></svg>Train ML Model Now';
-            }
-            pollCount = 0;
-            pollInterval = 2000;
-        }
-
-        function hideTrainingProgress() {
-            const container = document.getElementById('training-progress');
-            if (container) {
-                container.innerHTML = '';
-            }
-        }
-
-        function retrainModel() {
-            if (confirm('Retrain the ML model with current data? This will replace the existing model.')) {
-                trainModel();
-            }
-        }
-
-        function confirmAndPredictUnpredicted(count) {
-            const pct = (window._autoApproveThreshold * 100).toFixed(0);
-            const confirmMessage = `Run ML predictions on ${count} transactions?\\n\\n` +
-                `This will:\\n` +
-                `- Apply ML predictions to all transactions without predictions\\n` +
-                `- Auto-accept high-confidence predictions (${pct}%+)\\n` +
-                `- Add uncertain predictions to your Review Queue\\n` +
-                `- You may need to review some transactions manually\\n\\n` +
-                `Use this when you've imported transactions before training a model, ` +
-                `or after retraining to apply the updated model.\\n\\n` +
-                `Continue?`;
-
-            if (confirm(confirmMessage)) {
-                predictUnpredicted();
-            }
-        }
-
-        function confirmAndRepredict(count) {
-            const pct = (window._autoApproveThreshold * 100).toFixed(0);
-            const confirmMessage = `Re-predict ${count} unreviewed transactions?\\n\\n` +
-                `This will:\\n` +
-                `- Re-run predictions using the current model on transactions you haven't reviewed yet\\n` +
-                `- Useful after retraining to apply the improved model\\n` +
-                `- Auto-accept high-confidence predictions (${pct}%+)\\n` +
-                `- Add uncertain predictions to your Review Queue\\n\\n` +
-                `Continue?`;
-
-            if (confirm(confirmMessage)) {
-                repredictUnreviewed();
-            }
-        }
-
-        function repredictUnreviewed() {
-            const button = this;
-            const originalText = button.innerHTML;
-            button.disabled = true;
-            button.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Re-predicting...';
-
-            fetch('/api/ml/predict/batch-repredict', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    const autoAccepted = data.auto_accepted || 0;
-                    const needsReview = data.needs_review || 0;
-
-                    let message = `Re-predicted ${data.predictions_made} transactions!\\n\\n`;
-                    message += `- ${autoAccepted} auto-accepted (at or above the auto-approve threshold)\\n`;
-                    message += `- ${needsReview} need your review\\n\\n`;
-                    message += `Open the Review page to work through them, lowest confidence first.`;
-
-                    alert(message);
-                    location.reload();
-                } else {
-                    throw new Error(data.detail || 'Re-prediction failed');
-                }
-            })
-            .catch(error => {
-                alert('Re-prediction failed: ' + error.message);
-                button.disabled = false;
-                button.innerHTML = originalText;
-            });
-        }
-
-        function predictUnpredicted() {
-            const button = this;
-            const originalText = button.innerHTML;
-            button.disabled = true;
-            button.innerHTML = '<svg class="animate-spin mr-2 h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Predicting...';
-
-            fetch('/api/ml/predict/batch-unpredicted', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    const autoAccepted = data.auto_accepted || 0;
-                    const needsReview = data.needs_review || 0;
-
-                    let message = `Predicted ${data.predictions_made} transactions!\\n\\n`;
-                    message += `- ${autoAccepted} auto-accepted (at or above the auto-approve threshold)\\n`;
-                    message += `- ${needsReview} need your review\\n\\n`;
-                    message += `Open the Review page to work through them, lowest confidence first.`;
-
-                    alert(message);
-                    location.reload();
-                } else {
-                    throw new Error(data.detail || 'Prediction failed');
-                }
-            })
-            .catch(error => {
-                alert('Prediction failed: ' + error.message);
-                button.disabled = false;
-                button.innerHTML = originalText;
-            });
-        }
-    </script>
+    <script src="/static/js/repredict.js"></script>
+    <script src="/static/js/settings.js"></script>
     """
 
     return content
@@ -1563,6 +967,10 @@ def render_ml_training_section(ml_status, calibration=None):
     min_required = ml_status.get("min_training_samples", 50)
     unpredicted_count = ml_status.get("unpredicted_transactions", 0)
     repredictable_count = ml_status.get("repredictable_transactions", 0)
+    load_error = ml_status.get("load_error")
+    load_error_html = (
+        f'<p class="font-medium">The saved model cannot be used: {html.escape(load_error)}</p>' if load_error else ""
+    )
 
     # Determine alert type and content based on status
     if model_loaded and can_predict:
@@ -1574,7 +982,7 @@ def render_ml_training_section(ml_status, calibration=None):
         if unpredicted_count > 0:
             predict_button = f"""
                         <button
-                            onclick="confirmAndPredictUnpredicted({unpredicted_count})"
+                            onclick="confirmAndPredictUnpredicted({unpredicted_count}, this)"
                             class="btn btn-sm btn-primary"
                             title="Run ML predictions on transactions without predictions"
                         >
@@ -1586,7 +994,7 @@ def render_ml_training_section(ml_status, calibration=None):
         if repredictable_count > 0:
             repredict_button = f"""
                         <button
-                            onclick="confirmAndRepredict({repredictable_count})"
+                            onclick="confirmAndRepredict({repredictable_count}, this)"
                             class="btn btn-sm btn-secondary"
                             title="Re-run predictions on unreviewed transactions with the current model"
                         >
@@ -1627,7 +1035,8 @@ def render_ml_training_section(ml_status, calibration=None):
                 <div class="ml-3 flex-1">
                     <h3 class="text-lg font-semibold">ML Model Training</h3>
                     <div class="mt-2 text-sm">
-                        <p class="font-medium">Ready to train your first ML model!</p>
+                        {load_error_html}
+                        <p class="font-medium">{"Retrain to replace it." if load_error else "Ready to train your first ML model!"}</p>
                         <p class="mt-1">You have {reviewed_count} reviewed transactions (requires {min_required}+)</p>
                         <p class="mt-1 text-xs">Training will analyze your categorization patterns to predict future transactions.</p>
                     </div>
@@ -1655,6 +1064,7 @@ def render_ml_training_section(ml_status, calibration=None):
                 <div class="ml-3 flex-1">
                     <h3 class="text-lg font-semibold">ML Model Training</h3>
                     <div class="mt-2 text-sm">
+                        {load_error_html}
                         <p class="font-medium">Need more training data</p>
                         <p class="mt-1">You have {reviewed_count} reviewed transactions, need at least {min_required}</p>
                         <p class="mt-1 text-xs">Import and manually categorize more transactions to enable ML training.</p>

@@ -123,8 +123,9 @@ class TestAutoPredictPostTraining:
         html = response.text
         # Check that the settings page contains ML training functionality
         assert "ML Model Training" in html or "Train ML Model" in html
-        # Check that the page includes the necessary API endpoints for training
-        assert "/api/ml/retrain" in html
+        # Check that the page loads the script that calls the training endpoint
+        assert '<script src="/static/js/settings.js">' in html
+        assert "/api/ml/retrain" in test_client.get("/static/js/settings.js").text
         # Check that the page includes prediction functionality
         assert "predict" in html.lower()
 
@@ -140,12 +141,11 @@ class TestAutoPredictPostTraining:
 
         html = response.text
 
-        # Check that the page includes ML training workflow elements
-        assert "function trainModel()" in html or "trainModel" in html
-        # Check that the page includes prediction functionality
-        assert "/api/ml/retrain" in html
-        # Check that the page includes necessary JavaScript for workflows
-        assert "fetch(" in html and "/api/ml/" in html
+        # Check that the page loads the JavaScript for the workflows
+        assert '<script src="/static/js/settings.js">' in html
+        js = test_client.get("/static/js/settings.js").text
+        assert "function trainModel()" in js
+        assert "/api/ml/retrain" in js
 
     def test_error_handling_in_auto_prediction(self, test_client, db_session):
         """Test that auto-prediction errors are handled gracefully."""
@@ -159,10 +159,11 @@ class TestAutoPredictPostTraining:
 
         html = response.text
 
-        # Check that the page includes error handling for training/prediction
-        assert "catch(" in html or "error" in html.lower()
+        # Check that the page's script handles training/prediction errors
+        js = test_client.get("/static/js/settings.js").text
+        assert "catch(" in js
         # Check that the page includes ML functionality
-        assert "/api/ml/" in html
+        assert "/api/ml/" in js
         # Check that training functionality is present
         assert "train" in html.lower()
 

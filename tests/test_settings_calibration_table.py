@@ -1,15 +1,16 @@
 """Tests for the calibration report rendered beside the auto-approve threshold."""
 
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 from fafycat.core.database import AppSettingsORM, CategoryORM, TransactionORM
 
 
 @pytest.fixture
-def model_on_disk(tmp_data_dir):
-    """A stand-in model file so the settings page takes its 'model loaded' branch."""
-    (tmp_data_dir / "models" / "ensemble_categorizer.pkl").write_bytes(b"not a real model")
+def model_on_disk(tmp_data_dir, monkeypatch):
+    """A stand-in loaded model so the settings page takes its 'model loaded' branch."""
+    monkeypatch.setattr("fafycat.api.ml.load_categorizer", lambda db: SimpleNamespace(classes_=[1, 2]))
     return tmp_data_dir
 
 

@@ -1,9 +1,10 @@
 """API routes for ML prediction operations."""
 
 import asyncio
+import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_session
@@ -39,10 +40,15 @@ from fafycat.ml.prediction_pipeline import (
     repredict_unreviewed,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/ml", tags=["ml"])
 
+Categorizer = TransactionCategorizer | EnsembleCategorizer
+"""Either Categorizer the config can select; both expose ``predict_with_confidence``."""
+
 # Global categorizer instance (lazy-loaded)
-_categorizer: TransactionCategorizer | EnsembleCategorizer | None = None
+_categorizer: Categorizer | None = None
 _config: AppConfig | None = None
 
 
@@ -57,7 +63,7 @@ def reset_singletons() -> None:
     _config = None
 
 
-def load_categorizer(db: Session) -> TransactionCategorizer | EnsembleCategorizer:
+def load_categorizer(db: Session) -> Categorizer:
     """Return the cached Categorizer, loading the saved model on first use.
 
     Raises:
@@ -91,7 +97,7 @@ def load_categorizer(db: Session) -> TransactionCategorizer | EnsembleCategorize
     return _categorizer
 
 
-def get_categorizer(db: Session = Depends(get_db_session)) -> TransactionCategorizer | EnsembleCategorizer:
+def get_categorizer(db: Session = Depends(get_db_session)) -> Categorizer:
     """FastAPI dependency: the loaded Categorizer, or a 503 that says why there is none."""
     try:
         return load_categorizer(db)
@@ -148,106 +154,92 @@ async def update_ml_settings(payload: dict, db: Session = Depends(get_db_session
     }
 
 
+def _to_input(request: TransactionPredictRequest) -> TransactionInput:
+    return TransactionInput(
+        date=request.date,
+        value_date=request.value_date or request.date,
+        name=request.name,
+        purpose=request.purpose,
+        amount=request.amount,
+        currency=request.currency,
+    )
+
+
+def _confidence_level(categorizer: Categorizer, confidence: float) -> str:
+    """Map a confidence score to High, Medium, or Low with the configured thresholds."""
+    thresholds = categorizer.config.confidence_thresholds
+    if confidence >= thresholds["high"]:
+        return "High"
+    if confidence >= thresholds["medium"]:
+        return "Medium"
+    return "Low"
+
+
+def _category_names(db: Session, category_ids: list[int]) -> dict[int, str]:
+    rows = db.query(CategoryORM.id, CategoryORM.name).filter(CategoryORM.id.in_(set(category_ids))).all()
+    return {int(row.id): str(row.name) for row in rows}
+
+
+def _predict(
+    db: Session,
+    categorizer: Categorizer,
+    requests: list[TransactionPredictRequest],
+    *,
+    with_suggestions: bool,
+) -> list[TransactionPredictResponse]:
+    """Predict the requests and shape them into responses.
+
+    Raises:
+        HTTPException: 500 when the Categorizer fails; the cause is logged, not returned.
+    """
+    try:
+        predictions = categorizer.predict_with_confidence([_to_input(r) for r in requests])
+        names = _category_names(db, [p.predicted_category_id for p in predictions])
+        mapper = (
+            categorizer.lgbm_component.merchant_mapper
+            if isinstance(categorizer, EnsembleCategorizer)
+            else categorizer.merchant_mapper
+        )
+        return [
+            TransactionPredictResponse(
+                predicted_category_id=prediction.predicted_category_id,
+                predicted_category_name=names.get(prediction.predicted_category_id, "Unknown"),
+                confidence_score=prediction.confidence_score,
+                feature_contributions=prediction.feature_contributions,
+                confidence_level=_confidence_level(categorizer, prediction.confidence_score),
+                merchant_suggestions=mapper.get_mapping_suggestions(request.name) if with_suggestions else None,
+            )
+            for request, prediction in zip(requests, predictions, strict=True)
+        ]
+    except Exception as e:
+        logger.exception("Prediction failed")
+        raise HTTPException(status_code=500, detail="Prediction failed; see the server log for details") from e
+
+
 @router.post("/predict", response_model=TransactionPredictResponse)
 async def predict_transaction_category(
     request: TransactionPredictRequest,
-    categorizer: TransactionCategorizer = Depends(get_categorizer),
+    categorizer: Categorizer = Depends(get_categorizer),
     db: Session = Depends(get_db_session),
 ) -> TransactionPredictResponse:
-    """Predict category for a single transaction."""
-    try:
-        # Convert to TransactionInput
-        txn_input = TransactionInput(
-            date=request.date,
-            value_date=request.value_date or request.date,
-            name=request.name,
-            purpose=request.purpose,
-            amount=request.amount,
-            currency=request.currency,
-        )
-
-        # Get prediction with detailed explanation
-        explanation = categorizer.get_prediction_explanation(txn_input)
-
-        prediction = explanation["prediction"]
-        category_name = explanation["category_name"]
-        confidence_level = explanation["confidence_level"]
-        merchant_suggestions = explanation.get("merchant_suggestions", [])
-
-        return TransactionPredictResponse(
-            predicted_category_id=prediction.predicted_category_id,
-            predicted_category_name=category_name,
-            confidence_score=prediction.confidence_score,
-            feature_contributions=prediction.feature_contributions,
-            confidence_level=confidence_level,
-            merchant_suggestions=merchant_suggestions,
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}") from e
+    """Predict category for a single transaction, with merchant suggestions."""
+    return _predict(db, categorizer, [request], with_suggestions=True)[0]
 
 
 @router.post("/predict/bulk", response_model=BulkPredictResponse)
 async def predict_transactions_bulk(
     request: BulkPredictRequest,
-    categorizer: TransactionCategorizer = Depends(get_categorizer),
+    categorizer: Categorizer = Depends(get_categorizer),
     db: Session = Depends(get_db_session),
 ) -> BulkPredictResponse:
     """Predict categories for multiple transactions in batch."""
     start_time = time.time()
-
-    try:
-        # Convert to TransactionInput list
-        txn_inputs = []
-        for req in request.transactions:
-            txn_input = TransactionInput(
-                date=req.date,
-                value_date=req.value_date or req.date,
-                name=req.name,
-                purpose=req.purpose,
-                amount=req.amount,
-                currency=req.currency,
-            )
-            txn_inputs.append(txn_input)
-
-        # Get batch predictions
-        predictions = categorizer.predict_with_confidence(txn_inputs)
-
-        # Convert to response format
-        response_predictions = []
-        for prediction in predictions:
-            # Get category name
-            try:
-                category = db.query(CategoryORM).filter(CategoryORM.id == prediction.predicted_category_id).first()
-                category_name = str(category.name) if category else "Unknown"
-            except Exception:
-                # Handle case where categories table doesn't exist (e.g., in tests)
-                category_name = "Unknown"
-
-            # Get confidence level
-            confidence_level = categorizer._get_confidence_level(prediction.confidence_score)
-
-            response_predictions.append(
-                TransactionPredictResponse(
-                    predicted_category_id=prediction.predicted_category_id,
-                    predicted_category_name=category_name,
-                    confidence_score=prediction.confidence_score,
-                    feature_contributions=prediction.feature_contributions,
-                    confidence_level=confidence_level,
-                    merchant_suggestions=None,  # Skip for bulk to improve performance
-                )
-            )
-
-        processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-
-        return BulkPredictResponse(
-            predictions=response_predictions,
-            total_processed=len(request.transactions),
-            processing_time_ms=processing_time,
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Bulk prediction failed: {str(e)}") from e
+    predictions = _predict(db, categorizer, request.transactions, with_suggestions=False)
+    return BulkPredictResponse(
+        predictions=predictions,
+        total_processed=len(request.transactions),
+        processing_time_ms=(time.time() - start_time) * 1000,
+    )
 
 
 @router.get("/status")
@@ -338,7 +330,7 @@ RETRAIN_PREDICT_BATCH_SIZE = 1000
 """Transactions predicted per batch after a retrain."""
 
 
-def _predict_pending(db: Session, categorizer: TransactionCategorizer | EnsembleCategorizer) -> dict:
+def _predict_pending(db: Session, categorizer: Categorizer) -> dict:
     """Predict every transaction that has no Prediction yet with a freshly trained Categorizer.
 
     Rows that already carry a Prediction are left for an explicit re-predict.
@@ -513,39 +505,50 @@ def _batch_prediction_response(
 
 @router.post("/predict/batch-unpredicted")
 async def predict_unpredicted_transactions(
-    categorizer: TransactionCategorizer = Depends(get_categorizer),
+    categorizer: Categorizer = Depends(get_categorizer),
     db: Session = Depends(get_db_session),
-    limit: int = 1000,
+    limit: int = Query(1000, ge=1, le=10000),
 ) -> dict:
     """Run ML predictions on transactions that don't have predictions yet."""
     try:
         summary, remaining = predict_unpredicted(db, categorizer, limit=limit)
-        return _batch_prediction_response(
-            summary,
-            remaining,
-            empty_message="No transactions need prediction",
-            done_message=f"Made predictions for {summary.total} transactions",
-            remaining_key="remaining_unpredicted",
-        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}") from e
+        logger.exception("Batch prediction failed")
+        raise HTTPException(status_code=500, detail="Batch prediction failed; see the server log for details") from e
+    return _batch_prediction_response(
+        summary,
+        remaining,
+        empty_message="No transactions need prediction",
+        done_message=f"Made predictions for {summary.total} transactions",
+        remaining_key="remaining_unpredicted",
+    )
 
 
 @router.post("/predict/batch-repredict")
 async def repredict_unreviewed_transactions(
-    categorizer: TransactionCategorizer = Depends(get_categorizer),
+    categorizer: Categorizer = Depends(get_categorizer),
     db: Session = Depends(get_db_session),
-    limit: int = 1000,
+    limit: int = Query(1000, ge=1, le=10000),
+    after: str | None = Query(None, description="next_cursor from the previous page"),
 ) -> dict:
-    """Re-run ML predictions on unreviewed transactions that already have predictions."""
+    """Re-predict one page of unreviewed transactions that already have predictions.
+
+    Rows below the Auto-approve Threshold stay unreviewed, so call again with
+    ``after=next_cursor`` until ``next_cursor`` is null.
+    """
     try:
-        summary, remaining = repredict_unreviewed(db, categorizer, limit=limit)
-        return _batch_prediction_response(
+        summary, remaining, next_cursor = repredict_unreviewed(db, categorizer, limit=limit, after=after)
+    except Exception as e:
+        logger.exception("Batch re-prediction failed")
+        raise HTTPException(status_code=500, detail="Batch re-prediction failed; see the server log for details") from e
+    return {
+        **_batch_prediction_response(
             summary,
             remaining,
             empty_message="No unreviewed transactions need re-prediction",
             done_message=f"Re-predicted {summary.total} transactions",
             remaining_key="remaining_unreviewed",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Batch re-prediction failed: {str(e)}") from e
+        ),
+        "remaining_unreviewed": remaining,
+        "next_cursor": next_cursor,
+    }

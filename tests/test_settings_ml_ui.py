@@ -94,13 +94,14 @@ class TestSettingsMLTraining:
         response = test_client.get("/settings")
         assert response.status_code == 200
 
-        html = response.text
+        assert '<script src="/static/js/settings.js">' in response.text
+        js = test_client.get("/static/js/settings.js").text
         # Check that all necessary JavaScript functions are present
-        assert "function trainModel()" in html
-        assert "function retrainModel()" in html
-        assert "function predictUnpredicted()" in html
-        assert "/api/ml/retrain" in html
-        assert "/api/ml/predict/batch-unpredicted" in html
+        assert "function trainModel()" in js
+        assert "function retrainModel()" in js
+        assert "function predictUnpredicted(button)" in js
+        assert "/api/ml/retrain" in js
+        assert "/api/ml/predict/batch-unpredicted" in js
 
     def test_settings_empty_state_with_ml_status(self, test_client, db_session):
         """Test settings page empty state includes ML status."""
@@ -120,5 +121,5 @@ class TestSettingsMLTraining:
         assert "FafyCat" in html
         # Should include ML or training functionality
         assert "train" in html.lower() or "ml" in html.lower()
-        # Should have functional JavaScript
-        assert "function" in html
+        # Should load the settings actions, including "Create Your First Category"
+        assert '<script src="/static/js/settings.js">' in html
