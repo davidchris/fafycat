@@ -1,0 +1,7 @@
+"Auftragskonto";"Buchungstag";"Valutadatum";"Buchungstext";"Verwendungszweck";"Glaeubiger ID";"Mandatsreferenz";"Kundenreferenz (End-to-End)";"Sammlerreferenz";"Lastschrift Ursprungsbetrag";"Auslagenersatz Ruecklastschrift";"Beguenstigter/Zahlungspflichtiger";"Kontonummer/IBAN";"BIC (SWIFT-Code)";"Betrag";"Waehrung";"Info"
+"DE00000000000000000001";"28.02.25";"28.02.25";"GUTSCHR. UEBERWEISUNG";"Gehalt Februar 2025";"";"";"";"";"";"";"Beispiel GmbH";"DE00000000000000000099";"TESTDEFFXXX";"3.250,00";"EUR";"Umsatz gebucht"
+"DE00000000000000000001";"03.03.25";"03.03.25";"KARTENZAHLUNG";"Einkauf Filiale 12";"";"";"";"";"";"";"Bäckerei Müller";"DE00000000000000000099";"TESTDEFFXXX";"-4,80";"EUR";"Umsatz gebucht"
+"DE00000000000000000001";"03.03.25";"03.03.25";"KARTENZAHLUNG";"Einzelfahrschein AB";"";"";"";"";"";"";"Verkehrsbetriebe Musterstadt";"DE00000000000000000099";"TESTDEFFXXX";"-3,50";"EUR";"Umsatz gebucht"
+"DE00000000000000000001";"03.03.25";"03.03.25";"KARTENZAHLUNG";"Einzelfahrschein AB";"";"";"";"";"";"";"Verkehrsbetriebe Musterstadt";"DE00000000000000000099";"TESTDEFFXXX";"-3,50";"EUR";"Umsatz gebucht"
+"DE00000000000000000001";"04.03.25";"04.03.25";"FOLGELASTSCHRIFT";"Miete März";"";"";"";"";"";"";"Hausverwaltung Schröder";"DE00000000000000000099";"TESTDEFFXXX";"-1.150,00";"EUR";"Umsatz gebucht"
+"DE00000000000000000001";"31.03.25";"31.03.25";"ENTGELTABSCHLUSS";"";"";"";"";"";"";"";"";"DE00000000000000000099";"TESTDEFFXXX";"-6,95";"EUR";"Umsatz gebucht"

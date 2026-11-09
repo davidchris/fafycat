@@ -112,6 +112,15 @@ class TestFuzzySettlementDedup:
         assert survivor.date == date(2026, 4, 1)
         assert survivor.name == "Muster Markt Berlin"
 
+    def test_upgrade_also_rewrites_merchant_pattern(self, session):
+        """Siblings and Merchant Rules key on merchant_pattern; it must follow the new name (B22)."""
+        processor = CSVProcessor(session)
+        processor.save_transactions([_settlement_row()])
+        processor.save_transactions([_direct_row()])
+
+        survivor = session.query(TransactionORM).one()
+        assert survivor.merchant_pattern == "MUSTER MARKT"
+
     def test_reimport_direct_row_after_upgrade_is_duplicate(self, session):
         """After a field upgrade the stored id still hashes the settlement fields."""
         processor = CSVProcessor(session)

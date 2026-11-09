@@ -133,18 +133,15 @@ uv run python scripts/reset_and_import.py --labeled-data-path /path/to/your/data
 
 ## 📊 Supported CSV Formats
 
-FafyCat automatically detects and handles various banking export formats:
+FafyCat reads a CSV by its column headers and detects the file layout:
 
-- **Date**: Various formats (DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD)
-- **Amount**: Positive/negative or separate debit/credit columns
-- **Description**: Transaction details and merchant names
-- **Category**: If present, used for training
+- **Layout**: comma, semicolon or tab separated; UTF-8 (with or without BOM) or Windows-1252/Latin-1; account details above the header row are skipped
+- **Date**: `YYYY-MM-DD`, `DD.MM.YYYY`, `DD.MM.YY`, and `DD/MM/YYYY` or `MM/DD/YYYY`. The day/month order of slash dates is read from the file; when no date shows it, the import stops and asks for the order (`--date-order dmy|mdy` on the CLI, a select on the Import page)
+- **Amount**: one signed column (negative for expenses), with a decimal comma (`1.234,56`) or a decimal point (`1,234.56`). Separate debit/credit columns are not supported
+- **Description**: payee or merchant name and purpose (e.g. `Verwendungszweck`)
+- **Category**: optional. A label that names an existing category imports the row as reviewed; other rows go to review
 
-Common bank formats supported:
-- German banks (Sparkasse, DKB, etc.)
-- US banks (Chase, Bank of America, etc.)
-- UK banks (Barclays, HSBC, etc.)
-- Generic CSV exports
+Tested with synthetic files shaped like Sparkasse (CSV-CAMT V2) and DKB (2023 layout) exports; see `tests/fixtures/bank_exports/`. Other exports work when their headers match the names FafyCat knows (`src/fafycat/data/csv_processor.py`).
 
 ## 🎯 How It Works
 

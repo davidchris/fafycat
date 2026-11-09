@@ -103,7 +103,7 @@ class TestCSVProcessor:
             writer = csv.writer(f)
             writer.writerow(["date", "name", "purpose", "amount", "currency"])
             writer.writerow(["2024-01-15", "EDEKA Markt", "Lastschrift", "-45.67", "EUR"])
-            writer.writerow(["2024-01-15", "EDEKA Markt", "Lastschrift", "-45.67", "EUR"])  # Duplicate
+            writer.writerow(["2024-01-15", "EDEKA Markt", "Lastschrift", "-45.67", "EUR"])  # Same-day twin
             writer.writerow(["2024-01-16", "McDonald's", "Kartenzahlung", "-12.50", "EUR"])
 
             temp_path = Path(f.name)
@@ -112,34 +112,17 @@ class TestCSVProcessor:
             with db_manager.get_session() as session:
                 processor = CSVProcessor(session)
 
-                # First import
+                # First import: identical rows in one file are separate purchases
                 transactions, _ = processor.import_csv(temp_path)
+                new_count1, duplicate_count1 = processor.save_transactions(transactions)
 
-                # Manually filter duplicates since CSV contains duplicates
-                seen_ids = set()
-                unique_transactions = []
-                duplicates_in_csv = 0
+                assert (new_count1, duplicate_count1) == (3, 0)
 
-                for txn in transactions:
-                    txn_id = txn.generate_id()
-                    if txn_id in seen_ids:
-                        duplicates_in_csv += 1
-                    else:
-                        seen_ids.add(txn_id)
-                        unique_transactions.append(txn)
-
-                new_count1, duplicate_count1 = processor.save_transactions(unique_transactions)
-
-                assert new_count1 == 2  # Only unique transactions
-                assert duplicate_count1 == 0  # No duplicates in database yet
-                assert duplicates_in_csv == 1  # One duplicate in CSV
-
-                # Second import (all should be duplicates)
+                # Second import: every row is already stored
                 transactions, _ = processor.import_csv(temp_path)
                 new_count2, duplicate_count2 = processor.save_transactions(transactions)
 
-                assert new_count2 == 0
-                assert duplicate_count2 == 3  # All transactions are duplicates (includes original duplicate in CSV)
+                assert (new_count2, duplicate_count2) == (0, 3)
 
         finally:
             temp_path.unlink()

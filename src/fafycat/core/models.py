@@ -71,10 +71,25 @@ class TransactionInput(BaseModel):
     bank: str | None = None
     amount: float
     currency: str = "EUR"
+    occurrence: int = Field(0, ge=0)
+    """How many rows with the same content came before this one in the same file."""
+
+    def content_key(self) -> str:
+        """The fields that make two rows the same transaction: date, amount, name, purpose."""
+        return f"{self.date}|{self.amount}|{self.name}|{self.purpose}"
 
     def generate_id(self) -> str:
-        """Generate deterministic ID for deduplication."""
-        key = f"{self.date}|{self.amount}|{self.name}|{self.purpose}"
+        """Generate a deterministic ID for deduplication.
+
+        The first row with given content (``occurrence`` 0) hashes the content
+        alone, as ids always have. The n-th identical row in the same file hashes
+        the content with an ``occurrence:n`` prefix, so identical same-day
+        purchases each get a row and a re-import of the file still matches them.
+        The prefix cannot collide with a plain key, which starts with the date.
+        """
+        key = self.content_key()
+        if self.occurrence:
+            key = f"occurrence:{self.occurrence}|{key}"
         return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 

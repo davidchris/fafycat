@@ -150,6 +150,15 @@ def render_import_page(request: Request):
                                onchange="updateUploadButton()">
                     </div>
 
+                    <div>
+                        <label class="form-label" for="dateOrder">Dates like 03/04/2025 are:</label>
+                        <select name="date_order" id="dateOrder" class="form-input">
+                            <option value="" selected>Detect from the file</option>
+                            <option value="dmy">Day first (3 April 2025)</option>
+                            <option value="mdy">Month first (March 4, 2025)</option>
+                        </select>
+                    </div>
+
                     <button type="submit"
                             id="uploadButton"
                             disabled
@@ -182,10 +191,20 @@ def render_import_page(request: Request):
         <div class="card">
             <h2 class="text-lg font-semibold mb-4">Import Instructions</h2>
             <ul class="list-disc list-inside space-y-2">
-                <li>CSV should contain columns: Date, Description, Amount, Account</li>
-                <li>Date format should be YYYY-MM-DD or MM/DD/YYYY</li>
-                <li>Amount should be numeric (negative for expenses, positive for income)</li>
-                <li>Duplicate transactions will be automatically skipped</li>
+                <li>Required columns: a date (Date, Datum, Buchungstag), an amount (Amount, Betrag) and a
+                    description or payee (Description, Name, Empfänger, Verwendungszweck). Optional: Purpose,
+                    Value date, Currency, Category.</li>
+                <li>Exports from German banks such as Sparkasse and DKB work as downloaded: comma, semicolon or
+                    tab separated, UTF-8 or Windows-1252, decimal comma (1.234,56) or decimal point.</li>
+                <li>Dates: YYYY-MM-DD, DD.MM.YYYY, DD.MM.YY, or DD/MM/YYYY and MM/DD/YYYY. For slash dates the
+                    order is read from the file (a day above 12 shows it). If every date could be read both ways,
+                    choose the order above.</li>
+                <li>One amount column: negative for expenses, positive for income.</li>
+                <li>A Category column marks rows as reviewed when it names an existing category; other rows go
+                    to review.</li>
+                <li>Rows already imported are skipped. Identical rows in one file (two equal tickets on one day)
+                    are all kept.</li>
+                <li>If any row has an error, nothing is imported and every bad line is listed.</li>
             </ul>
         </div>
     </div>
