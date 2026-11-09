@@ -4,17 +4,22 @@ import io
 from html.parser import HTMLParser
 
 CSV = "Date,Description,Amount\n2024-01-01,Test Transaction,-10.50\n"
+# Both result blocks offer a button that empties the swap target so the form can be reused.
+CLEAR_RESULTS = "document.getElementById('uploadResults').innerHTML = ''"
 
 
 class _Page(HTMLParser):
-    """Collects elements by id and the text of each ``<p>`` so tests can assert on structure."""
+    """Collects elements by id, the text of each ``<p>`` and ``<button>``, and inline scripts."""
 
     def __init__(self, html: str) -> None:
         super().__init__()
         self.by_id: dict[str, dict[str, str | None]] = {}
         self.tags: list[tuple[str, dict[str, str | None]]] = []
         self.paragraphs: list[str] = []
-        self._in_p = False
+        self.buttons: list[tuple[str, str | None]] = []  # (label, onclick)
+        self.scripts: list[str] = []
+        self._open: str | None = None
+        self._attrs: dict[str, str | None] = {}
         self._text: list[str] = []
         self.feed(html)
 
@@ -23,17 +28,24 @@ class _Page(HTMLParser):
         self.tags.append((tag, attributes))
         if "id" in attributes:
             self.by_id[attributes["id"]] = {"tag": tag, **attributes}
-        if tag == "p":
-            self._in_p, self._text = True, []
+        if tag in ("p", "button", "script"):
+            self._open, self._attrs, self._text = tag, attributes, []
 
     def handle_data(self, data):
-        if self._in_p:
+        if self._open:
             self._text.append(data)
 
     def handle_endtag(self, tag):
-        if tag == "p" and self._in_p:
-            self.paragraphs.append("".join(self._text).strip())
-            self._in_p = False
+        if tag != self._open:
+            return
+        text = "".join(self._text).strip()
+        if tag == "p":
+            self.paragraphs.append(text)
+        elif tag == "button":
+            self.buttons.append((text, self._attrs.get("onclick")))
+        elif "src" not in self._attrs:
+            self.scripts.append(text)
+        self._open = None
 
     def with_class(self, name: str) -> list[dict[str, str | None]]:
         return [attrs for _, attrs in self.tags if name in (attrs.get("class") or "").split()]
@@ -60,6 +72,7 @@ class TestUploadResults:
         assert "New transactions: 1" in page.paragraphs
         assert "Duplicates skipped: 0" in page.paragraphs
         assert "/review" in page.links()
+        assert page.buttons == [("Upload Another File", CLEAR_RESULTS)]
 
     def test_reuploading_the_same_file_counts_duplicates_not_new_rows(self, test_client):
         _upload(test_client, "test.csv", CSV.encode())
@@ -75,6 +88,7 @@ class TestUploadResults:
         assert len(page.with_class("alert-error")) == 1
         assert not page.with_class("alert-success")
         assert "Only CSV files are allowed" in page.paragraphs
+        assert page.buttons == [("Try Again", CLEAR_RESULTS)]
 
 
 class TestImportPageForm:
@@ -102,3 +116,16 @@ class TestImportPageForm:
         assert file_input["accept"] == ".csv"
         # No file chosen yet, so submitting must not be possible.
         assert "disabled" in page.by_id["uploadButton"]
+
+    def test_inline_script_enables_the_button_on_file_choice_and_resets_the_form_after_success(self, test_client):
+        page = _Page(test_client.get("/import").text)
+        script = "\n".join(page.scripts)
+
+        # The file input calls a handler; the page must define it and the handler must flip the button.
+        handler = (page.by_id["fileInput"]["onchange"] or "").removesuffix("()")
+        assert handler == "updateUploadButton"
+        assert f"function {handler}(" in script
+        assert "uploadButton.disabled = false" in script
+        # After a successful upload of this form, the form is reset.
+        assert "htmx:afterRequest" in script
+        assert "getElementById('uploadForm').reset()" in script

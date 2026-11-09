@@ -11,8 +11,8 @@
 - **Format**: `ruff format`
 - **Type Check**: `ty check`. Most rules are set to `warn` in `pyproject.toml`, so existing
   warnings do not fail the check; do not add new ones. `scripts/` and `simulations/` are
-  type-checked with `unresolved-import` ignored: they may import optional deps (matplotlib,
-  optuna, mlx_lm, ...) that are not in the default `.venv`. `pyproject.toml` defines only the
+  type-checked with `unresolved-import` ignored: they may import optional deps (optuna,
+  mlx_lm, ...) that are not in the default `.venv`. `pyproject.toml` defines only the
   `dev` dependency group, so install such a dep ad hoc with `uv pip install <dep>` before running
   the script (do not use `uv sync --group <name>`, no such group exists).
 - **Run Tests**: `uv run pytest` (Python, in `tests/`) and `node --test tests_js/*.test.js` (JavaScript)

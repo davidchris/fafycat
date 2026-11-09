@@ -1,5 +1,7 @@
 """Contract tests for the ML endpoints that need no trained model."""
 
+import threading
+
 import pytest
 
 import fafycat.api.ml as ml_api
@@ -25,12 +27,14 @@ def test_ml_status_endpoint_exists(test_client):
 
 
 def test_retrain_starts_a_background_job(test_client, monkeypatch, no_running_job):
-    """POST /retrain creates a job, hands it to the executor, and reports it as started."""
-    started = []
+    """POST /retrain creates a job, runs training on the executor, and reports it as started."""
+    ran = threading.Event()
+    seen_jobs = []
 
     def fake_training() -> None:
-        started.append(get_current_job())
+        seen_jobs.append(get_current_job())
         complete_job({})
+        ran.set()
 
     monkeypatch.setattr(ml_api, "_run_training_sync", fake_training)
 
@@ -40,9 +44,8 @@ def test_retrain_starts_a_background_job(test_client, monkeypatch, no_running_jo
     body = response.json()
     assert body["status"] == "pending"
     assert body["message"] == "Training job started"
-    job = get_current_job()
-    assert job is not None
-    assert body["job_id"] == job.job_id
+    assert ran.wait(timeout=5), "the endpoint never handed training to the executor"
+    assert [job.job_id for job in seen_jobs] == [body["job_id"]]
 
 
 def test_retrain_rejects_a_second_job_while_one_runs(test_client, no_running_job):
