@@ -1029,7 +1029,7 @@ def render_budget_variance_section():
                     const overspent = Math.abs(category.variance);
                     html += `
                         <div class="flex justify-between items-center text-sm">
-                            <span>${category.category_name}</span>
+                            <span>${escapeHtml(category.category_name)}</span>
                             <span class="font-medium">&euro;${overspent.toFixed(0)} over</span>
                         </div>
                     `;

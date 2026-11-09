@@ -155,6 +155,10 @@ def cmd_serve(args: argparse.Namespace) -> None:
     port = args.port or (8001 if args.dev else 8000)
     host = args.host or "127.0.0.1"
 
+    from fafycat.core.security import prepare_bind_host
+
+    prepare_bind_host(host)
+
     if args.dev:
         _setup_dev_database(config)
 

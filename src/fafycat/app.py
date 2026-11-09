@@ -13,8 +13,15 @@ from fastapi.staticfiles import StaticFiles
 from fafycat import __version__
 from fafycat.core.config import AppConfig
 from fafycat.core.database import DatabaseManager
+from fafycat.core.security import BrowserSecurityMiddleware, allowed_hosts_from_env
+
+logger = logging.getLogger(__name__)
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
+
+_SLOW_REQUEST_SECONDS = 1.0
+# Import, training and batch prediction take seconds by design; they are logged at INFO, not WARNING.
+_LONG_RUNNING_PATHS = ("/api/upload", "/upload-csv", "/api/ml/retrain", "/api/ml/predict/batch")
 
 
 class _TrainingStatusAccessLogFilter(logging.Filter):
@@ -51,21 +58,20 @@ def create_app() -> FastAPI:
     app.state.config = config
     app.state.db_manager = db_manager
 
-    # Add performance monitoring middleware
     @app.middleware("http")
     async def add_process_time_header(request: Request, call_next: Callable) -> Response:
-        start_time = time.time()
+        start_time = time.perf_counter()
         response = await call_next(request)
-        process_time = time.time() - start_time
-        response.headers["X-Process-Time"] = str(process_time)
-
-        # Log slow requests
-        if process_time > 0.1:  # Log requests taking more than 100ms
-            logging.warning("SLOW REQUEST: %s %s took %.3fs", request.method, request.url.path, process_time)
-        elif process_time > 0.05:  # Log requests taking more than 50ms
-            logging.info("Request %s %s took %.3fs", request.method, request.url.path, process_time)
-
+        process_time = time.perf_counter() - start_time
+        response.headers["X-Process-Time"] = f"{process_time:.4f}"
+        if process_time > _SLOW_REQUEST_SECONDS:
+            path = request.url.path
+            level = logging.INFO if path.startswith(_LONG_RUNNING_PATHS) else logging.WARNING
+            logger.log(level, "Slow request: %s %s took %.2fs", request.method, path, process_time)
         return response
+
+    # Added last so it runs first: nothing else sees a foreign Host or a cross-origin write.
+    app.add_middleware(BrowserSecurityMiddleware, allowed_hosts=allowed_hosts_from_env())
 
     # Mount static files
     app.mount("/static", StaticFiles(directory=_PACKAGE_DIR / "static"), name="static")
@@ -99,4 +105,4 @@ def create_app() -> FastAPI:
 # schema upgrades, which must not happen as an import side effect (pytest
 # collection, tooling). uvicorn gets the factory instead.
 if __name__ == "__main__":
-    uvicorn.run("fafycat.app:create_app", factory=True, host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("fafycat.app:create_app", factory=True, host="127.0.0.1", port=8000, log_level="info")
