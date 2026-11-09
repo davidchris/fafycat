@@ -58,7 +58,7 @@ def _is_loopback(host: str) -> bool:
 
 
 def prepare_bind_host(host: str) -> None:
-    """Allow the ``serve --host`` address and warn when it leaves the machine.
+    """Allow the ``serve --host`` address and warn when it is not a loopback address.
 
     The address is added to ``FAFYCAT_ALLOWED_HOSTS`` in the environment, so the app factory sees
     it in the uvicorn worker (and in the reloader's child process).
@@ -66,11 +66,11 @@ def prepare_bind_host(host: str) -> None:
     Args:
         host: The address uvicorn will bind to.
     """
-    if _is_loopback(host):
-        return
     if _normalize_host(host) not in _WILDCARD_BIND_HOSTS:
         current = os.environ.get(ALLOWED_HOSTS_ENV, "")
         os.environ[ALLOWED_HOSTS_ENV] = f"{current},{host}" if current else host
+    if _is_loopback(host):
+        return
     sys.stderr.write(
         f"⚠️  WARNING: binding to {host}. FafyCat has NO authentication: anyone who can reach this "
         "address can read and change all your financial data.\n"
@@ -79,8 +79,11 @@ def prepare_bind_host(host: str) -> None:
     )
 
 
-def _split_netloc(netloc: str, scheme: str) -> tuple[str, int] | None:
-    """Return ``(host, port)`` for a ``host[:port]`` string, or None if it is malformed."""
+def _origin_tuple(scheme: str, netloc: str) -> tuple[str, str, int] | None:
+    """Return the browser origin ``(scheme, host, port)`` of ``host[:port]``, or None if malformed.
+
+    The host is lower-cased but otherwise kept as sent: ``localhost.`` is a different origin.
+    """
     try:
         parts = urlsplit(f"//{netloc}")
         host, port = parts.hostname, parts.port
@@ -88,18 +91,18 @@ def _split_netloc(netloc: str, scheme: str) -> tuple[str, int] | None:
         return None
     if not host:
         return None
-    return _normalize_host(host), port or _DEFAULT_PORTS.get(scheme, 80)
+    return scheme, host, port if port is not None else _DEFAULT_PORTS.get(scheme, 80)
 
 
-def _origin_of(url: str) -> tuple[str, int] | None:
-    """Return ``(host, port)`` of an Origin or Referer value, or None for ``null`` or garbage."""
+def _origin_of(url: str) -> tuple[str, str, int] | None:
+    """Return the origin of an Origin or Referer value, or None for ``null`` or garbage."""
     try:
         parts = urlsplit(url)
     except ValueError:
         return None
     if parts.scheme not in _DEFAULT_PORTS:
         return None
-    return _split_netloc(parts.netloc, parts.scheme)
+    return _origin_tuple(parts.scheme, parts.netloc)
 
 
 def _header(scope: Scope, name: bytes) -> str | None:
@@ -136,9 +139,8 @@ class BrowserSecurityMiddleware:
         await JSONResponse({"detail": detail}, status_code=status)(scope, receive, send)
 
     def _check(self, scope: Scope) -> tuple[int, str] | None:
-        scheme = scope.get("scheme", "http")
-        host = _split_netloc(_header(scope, b"host") or "", scheme)
-        if host is None or host[0] not in self.allowed_hosts:
+        own_origin = _origin_tuple(scope.get("scheme", "http"), _header(scope, b"host") or "")
+        if own_origin is None or _normalize_host(own_origin[1]) not in self.allowed_hosts:
             return 400, f"Invalid Host header. Add the host name to {ALLOWED_HOSTS_ENV} to allow it."
 
         if scope["method"] in _SAFE_METHODS:
@@ -151,7 +153,7 @@ class BrowserSecurityMiddleware:
         source = _header(scope, b"origin") or _header(scope, b"referer")
         if source is None:
             return None
-        if _origin_of(source) != host:
+        if _origin_of(source) != own_origin:
             return 403, "Cross-origin request rejected."
         return None
 

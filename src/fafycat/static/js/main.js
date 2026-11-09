@@ -1,10 +1,10 @@
 // Main JavaScript for FafyCat — Bauhaus Dark Mode
 
 // Global HTML escaping utility
+// Safe for element text and for quoted attribute values (escapes both quote characters).
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return String(text ?? '').replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
 }
 window.escapeHtml = escapeHtml;
 

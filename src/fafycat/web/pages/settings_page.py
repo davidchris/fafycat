@@ -1195,9 +1195,8 @@ def render_yearly_budget_management(current_year):
         // Local fallback in case main.js hasn't defined it yet
         if (typeof escapeHtml === 'undefined') {{
             function escapeHtml(text) {{
-                const div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
+                const map = {{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }};
+                return String(text ?? '').replace(/[&<>"']/g, ch => map[ch]);
             }}
         }}
 

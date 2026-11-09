@@ -73,8 +73,10 @@ class TestCrossOriginWrites:
             {"Referer": f"{EVIL_ORIGIN}/attack.html"},  # no Origin: fall back to Referer
             {"Origin": "null"},  # sandboxed iframe, data: URL, or no-referrer policy
             {"Origin": "http://testserver:3000"},  # another local app on a different port
+            {"Origin": "https://testserver:80"},  # same host and port, other scheme
+            {"Origin": "http://testserver."},  # trailing-dot host: a different origin
         ],
-        ids=["evil-referer", "null-origin", "other-port"],
+        ids=["evil-referer", "null-origin", "other-port", "other-scheme", "trailing-dot"],
     )
     def test_other_cross_origin_signals_are_rejected(self, test_client, headers):
         resp = test_client.post("/api/transactions/bulk-approve", headers=headers)
@@ -212,13 +214,17 @@ class TestServeBind:
         assert client.get("/api/transactions", headers={"Host": "192.168.1.20:8000"}).status_code == 200
         assert client.get("/api/transactions", headers={"Host": "evil.example"}).status_code == 400
 
-    def test_serve_on_loopback_does_not_warn(self, tmp_data_dir, monkeypatch, capsys):
+    def test_serve_on_other_loopback_address_allows_it_without_warning(self, tmp_data_dir, monkeypatch, capsys):
         monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
-        monkeypatch.setattr(sys, "argv", ["fafycat", "serve", "--data-dir", str(tmp_data_dir)])
+        monkeypatch.delenv("FAFYCAT_ALLOWED_HOSTS", raising=False)
+        monkeypatch.setattr(sys, "argv", ["fafycat", "serve", "--host", "127.0.0.2", "--data-dir", str(tmp_data_dir)])
 
         cli.main()
 
         assert "WARNING" not in capsys.readouterr().err
+        reset_singletons()
+        client = TestClient(create_app())
+        assert client.get("/api/transactions/", headers={"Host": "127.0.0.2:8000"}).status_code == 200
 
 
 def test_slow_request_log_level_depends_on_endpoint(test_client, monkeypatch, caplog):
