@@ -6,7 +6,6 @@ import io
 import re
 import uuid
 from collections import Counter
-from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -121,13 +120,24 @@ def _normalize_header(header: str) -> str:
 
 
 def _read_records(text: str, delimiter: str, limit: int | None = None) -> list[tuple[int, list[str]]]:
-    """Parse CSV text into ``(line number, cells)`` records."""
-    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
+    """Parse CSV text into ``(line number, cells)`` records.
+
+    Strict mode raises ``csv.Error`` on broken quoting (e.g. an unclosed quote)
+    instead of folding the following lines into one cell.
+
+    With ``limit`` (the header search) a parse error ends the read and returns
+    the records before it; the full read later reports the error.
+    """
+    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, strict=True)
     records: list[tuple[int, list[str]]] = []
-    for cells in reader:
-        records.append((reader.line_num, cells))
-        if limit is not None and len(records) >= limit:
-            break
+    try:
+        for cells in reader:
+            records.append((reader.line_num, cells))
+            if limit is not None and len(records) >= limit:
+                break
+    except csv.Error:
+        if limit is None:
+            raise
     return records
 
 
@@ -293,10 +303,7 @@ class CSVProcessor:
         """Find the delimiter and the first record that holds the required headers."""
         best: tuple[str, int, dict[str, str]] | None = None
         for delimiter in _DELIMITERS:
-            try:
-                records = _read_records(text, delimiter, limit=_HEADER_SEARCH_RECORDS)
-            except csv.Error:
-                continue
+            records = _read_records(text, delimiter, limit=_HEADER_SEARCH_RECORDS)
             for index, (_, cells) in enumerate(records):
                 mapping = self._detect_column_mapping(cells)
                 if mapping is not None:
@@ -322,6 +329,14 @@ class CSVProcessor:
             index = columns.get(field)
             return cells[index].strip() if index is not None and index < len(cells) else ""
 
+        def counterparty(cells: list[str], amount: float) -> str:
+            """The name column; else payee (money out) or payer (money in); else the description."""
+            if "name" in columns:
+                return cell(cells, "name")
+            if "payee" in columns and "payer" in columns:
+                return cell(cells, "payee") if amount < 0 else cell(cells, "payer")
+            return cell(cells, "description")
+
         order = _resolve_date_order([cell(c, f) for _, c in rows for f in ("date", "value_date")], date_order)
         decimal = _resolve_decimal_separator([cell(c, "amount") for _, c in rows], delimiter)
 
@@ -329,6 +344,8 @@ class CSVProcessor:
         errors: list[str] = []
         for line, cells in rows:
             try:
+                if any(extra.strip() for extra in cells[len(header) :]):
+                    raise ValueError(f"expected {len(header)} cells, found {len(cells)}")
                 txn_date = self._parse_date(cell(cells, "date"), order)
                 amount = _parse_amount(cell(cells, "amount"), decimal)
                 raw_value_date = cell(cells, "value_date")
@@ -337,7 +354,7 @@ class CSVProcessor:
                         date=txn_date,
                         value_date=self._parse_date(raw_value_date, order) if raw_value_date else None,
                         category=cell(cells, "category") or None,
-                        name=self._counterparty(cells, cell, amount),
+                        name=counterparty(cells, amount),
                         purpose=cell(cells, "purpose"),
                         account=cell(cells, "account") or None,
                         amount=amount,
@@ -349,13 +366,6 @@ class CSVProcessor:
 
         number_identical_rows(transactions)
         return transactions, errors
-
-    @staticmethod
-    def _counterparty(cells: list[str], cell: Callable[[list[str], str], str], amount: float) -> str:
-        """Name of the other party: the name column, else payee/payer by sign, else the description."""
-        if cell(cells, "name") or not (cell(cells, "payee") or cell(cells, "payer")):
-            return cell(cells, "name") or cell(cells, "description")
-        return cell(cells, "payee") if amount < 0 else cell(cells, "payer")
 
     def _detect_column_mapping(self, columns: list[str]) -> dict[str, str] | None:
         """Map fields to CSV headers; None when a required field has no column."""
@@ -483,10 +493,15 @@ class CSVProcessor:
         hashed that into the id.
         """
         ids = [txn_id]
-        if txn.occurrence == 0 and not (txn.name and txn.purpose):
-            ids.append(
-                txn.model_copy(update={"name": txn.name or "nan", "purpose": txn.purpose or "nan"}).generate_id()
-            )
+        if txn.occurrence == 0:
+            names = {txn.name, txn.name or "nan"}
+            purposes = {txn.purpose, txn.purpose or "nan"}
+            ids += [
+                txn.model_copy(update={"name": name, "purpose": purpose}).generate_id()
+                for name in names
+                for purpose in purposes
+                if (name, purpose) != (txn.name, txn.purpose)
+            ]
         return self.session.query(TransactionORM).filter(TransactionORM.id.in_(ids)).first()
 
     def _resolve_category(self, txn: TransactionInput) -> CategoryORM | None:

@@ -121,6 +121,25 @@ class TestFuzzySettlementDedup:
         survivor = session.query(TransactionORM).one()
         assert survivor.merchant_pattern == "MUSTER MARKT"
 
+    def test_identical_settlements_match_one_direct_row_each(self, session):
+        """Two identical settlement lines are two purchases; one stored direct row absorbs only one."""
+        processor = CSVProcessor(session)
+        processor.save_transactions([_direct_row()])
+
+        new, dup = processor.save_transactions([_settlement_row(), _settlement_row()])
+
+        assert (new, dup) == (1, 1)
+
+    def test_identical_direct_twins_upgrade_both_stored_settlements(self, session):
+        processor = CSVProcessor(session)
+        processor.save_transactions([_settlement_row(), _settlement_row()])
+
+        new, dup = processor.save_transactions([_direct_row(), _direct_row()])
+
+        assert (new, dup) == (0, 2)
+        assert [row.name for row in session.query(TransactionORM)] == ["Muster Markt Berlin"] * 2
+        assert processor.save_transactions([_direct_row(), _direct_row()]) == (0, 2)
+
     def test_reimport_direct_row_after_upgrade_is_duplicate(self, session):
         """After a field upgrade the stored id still hashes the settlement fields."""
         processor = CSVProcessor(session)

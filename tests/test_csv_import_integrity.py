@@ -107,6 +107,21 @@ class TestEmptyOptionalText:
         row = db_session.query(TransactionORM).one()
         assert (row.id, row.purpose) == (legacy.generate_id(), "")
 
+    @pytest.mark.parametrize(
+        ("csv_text", "stored"),
+        [
+            ("date,name,amount\n2025-03-04,,-2.00\n", ("nan", "")),
+            ("date,name,purpose,amount\n2025-03-04,,memo,-2.00\n", ("nan", "memo")),
+            ("date,description,name,purpose,amount\n2025-03-04,Purchase,,memo,-2.00\n", ("nan", "memo")),
+        ],
+    )
+    def test_reimport_matches_every_legacy_nan_shape(self, db_session, tmp_path, csv_text, stored):
+        name, purpose = stored
+        legacy = TransactionInput(date=date(2025, 3, 4), name=name, purpose=purpose, amount=-2.0)
+        CSVProcessor(db_session).save_transactions([legacy])
+
+        assert _import(db_session, _write(tmp_path, csv_text)) == (0, 1)
+
 
 class TestDateOrder:
     """B8: no silent guess between day-first and month-first."""
@@ -247,6 +262,34 @@ class TestGermanAndOtherLayouts:
         _, errors = _parse(db_session, path)
 
         assert errors == ["Line 2: Invalid amount: '12abc'"]
+
+
+class TestMalformedFiles:
+    """A malformed file is rejected, never read with shifted or swallowed cells."""
+
+    def test_row_with_extra_cells_is_an_error(self, db_session, tmp_path):
+        path = _write(tmp_path, "date,name,amount\n2025-03-04,Shop,-1.00\n2025-03-05,Shop,-12,34\n")
+
+        _, errors = _parse(db_session, path)
+
+        assert errors == ["Line 3: expected 3 cells, found 4"]
+
+    def test_trailing_empty_cells_are_allowed(self, db_session, tmp_path):
+        path = _write(tmp_path, "date;name;amount\n04.03.2025;Shop;-1,00;\n")
+
+        transactions, errors = _parse(db_session, path)
+
+        assert errors == []
+        assert transactions[0].amount == -1.0
+
+    def test_unclosed_quote_rejects_the_file(self, db_session, tmp_path):
+        path = _write(tmp_path, 'date,amount,name\n2025-03-04,-1.00,"Shop\n2025-03-05,-2.00,Other\n')
+
+        transactions, errors = _parse(db_session, path)
+
+        assert transactions == []
+        assert len(errors) == 1
+        assert errors[0].startswith("Failed to read CSV file:")
 
 
 class TestRowErrors:

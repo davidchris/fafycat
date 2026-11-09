@@ -107,6 +107,7 @@ def find_fuzzy_duplicate(session: Session, txn: TransactionInput) -> Transaction
             TransactionORM.date >= window_start,
             TransactionORM.date <= window_end,
         )
+        .order_by(TransactionORM.date, TransactionORM.id)
         .all()
     )
     if not candidates:
@@ -130,6 +131,7 @@ def find_fuzzy_duplicate(session: Session, txn: TransactionInput) -> Transaction
     txn_tokens = normalize_merchant_tokens(txn.name, txn.purpose)
     txn_settlement = is_settlement_like(txn.name, txn.purpose)
 
+    counterparts = []
     for candidate in candidates:
         if candidate in same_content:
             continue
@@ -139,8 +141,12 @@ def find_fuzzy_duplicate(session: Session, txn: TransactionInput) -> Transaction
             continue
         candidate_tokens = normalize_merchant_tokens(candidate_name, candidate_purpose)
         if _token_overlap(txn_tokens, candidate_tokens) > OVERLAP_THRESHOLD:
-            return candidate
-    return None
+            counterparts.append(candidate)
+    # Match one to one: the n-th identical row takes the n-th counterpart not
+    # already claimed by an identical row above. Two settlement lines for two
+    # identical purchases never both collapse onto one stored purchase.
+    index = txn.occurrence - len(same_content)
+    return counterparts[index] if index < len(counterparts) else None
 
 
 def keep_preferred_fields(existing: TransactionORM, txn: TransactionInput, merchant_pattern: str) -> None:
