@@ -244,6 +244,17 @@ def _render_unreviewed_notice(unreviewed: dict[str, Any]) -> str:
 
 
 # HTML endpoints for HTMX integration
+def _format_eur(value: float) -> str:
+    """Format a euro amount with the sign in front of the currency symbol (``-€500.00``)."""
+    return f"-€{abs(value):.2f}" if value < 0 else f"€{value:.2f}"
+
+
+def _format_variance(variance: float, percentage: float | None) -> str:
+    """Format a budget variance with its share of the budget; ``n/a`` when there is no budget."""
+    share = "n/a" if percentage is None else f"{percentage:.1f}%"
+    return f"{_format_eur(variance)} ({share})"
+
+
 @router.get("/budget-variance-html", response_class=HTMLResponse)
 async def get_budget_variance_html(
     session: Session = Depends(get_db_session),
@@ -292,10 +303,10 @@ async def get_budget_variance_html(
                         <td>
                             {html.escape(str(variance["category_name"]))}
                         </td>
-                        <td>€{variance["budget"]:.2f}</td>
-                        <td>€{variance["actual"]:.2f}{unreviewed_note}</td>
+                        <td>{_format_eur(variance["budget"])}</td>
+                        <td>{_format_eur(variance["actual"])}{unreviewed_note}</td>
                         <td>
-                            €{variance["variance"]:.2f} ({variance["variance_percentage"]:.1f}%)
+                            {_format_variance(variance["variance"], variance["variance_percentage"])}
                         </td>
                         <td style="{status_style}">{status_text}</td>
                     </tr>
@@ -311,13 +322,13 @@ async def get_budget_variance_html(
                     <tr class="font-bold" style="background: var(--bg-hover)">
                         <td>TOTAL</td>
                         <td>
-                            €{summary["total_budget"]:.2f}
+                            {_format_eur(summary["total_budget"])}
                         </td>
                         <td>
-                            €{summary["total_actual"]:.2f}
+                            {_format_eur(summary["total_actual"])}
                         </td>
                         <td style="{summary_style}">
-                            €{summary["total_variance"]:.2f} ({summary["total_variance_percentage"]:.1f}%)
+                            {_format_variance(summary["total_variance"], summary["total_variance_percentage"])}
                         </td>
                         <td style="{summary_style}">
                             {"Over Budget" if summary["total_variance"] < 0 else "Under Budget"}

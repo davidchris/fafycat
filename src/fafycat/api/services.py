@@ -1,8 +1,9 @@
 """Service layer for database operations."""
 
+import calendar
 import math
 import statistics
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import and_, case, func, literal, or_, select
@@ -724,7 +725,10 @@ class AnalyticsService:
     def _get_transaction_category_data(
         session: Session, start_date: date, end_date: date, include_unreviewed: bool = True
     ) -> dict[int, dict]:
-        """Get transaction data grouped by category and year.
+        """Get spending per category, with budgets for every calendar year of the range.
+
+        Amounts are converted to money spent (see ``money_spent``) here, so the rest of the
+        variance code only sees positive spending.
 
         Args:
             session: Database session.
@@ -733,14 +737,13 @@ class AnalyticsService:
             include_unreviewed: When False, only reviewed transactions are aggregated.
 
         Returns:
-            Mapping of category id to budget/actual data, including unreviewed shares.
+            Mapping of category id to budget/spent data, including unreviewed shares.
         """
         # Group transactions by year and category to handle cross-year periods
         query = (
             session.query(
                 CategoryORM.id,
                 CategoryORM.name,
-                CategoryORM.type,
                 func.strftime("%Y", TransactionORM.date).label("year"),
                 func.coalesce(func.sum(TransactionORM.amount), 0).label("actual_amount"),
                 AnalyticsService._unreviewed_amount_sum().label("unreviewed_amount"),
@@ -754,53 +757,56 @@ class AnalyticsService:
             .filter(CategoryORM.is_active)
             .filter(TransactionORM.date.between(start_date, end_date))
             .filter(or_(TransactionORM.category_id.is_not(None), TransactionORM.predicted_category_id.is_not(None)))
-            .group_by(CategoryORM.id, CategoryORM.name, CategoryORM.type, func.strftime("%Y", TransactionORM.date))
+            .group_by(CategoryORM.id, CategoryORM.name, func.strftime("%Y", TransactionORM.date))
         )
         query = AnalyticsService._apply_review_filter(query, include_unreviewed)
 
-        results = query.all()
-        category_data = {}
-
-        for result in results:
+        category_data: dict[int, dict] = {}
+        for result in query.all():
             category_id = result.id
-            category_name = result.name
-            year = int(result.year)
-            actual_amount = float(result.actual_amount)
-
             if category_id not in category_data:
-                category_data[category_id] = {
-                    "category_name": category_name,
-                    "yearly_data": {},
-                    "total_actual": 0,
-                    "total_budget": 0,
+                category_data[category_id] = AnalyticsService._new_variance_entry(
+                    session, category_id, result.name, start_date, end_date
+                )
+            data = category_data[category_id]
+            year_data = data["yearly_data"][int(result.year)]
+
+            spent = money_spent(float(result.actual_amount))
+            unreviewed_spent = money_spent(float(result.unreviewed_amount or 0.0))
+            unreviewed_count = int(result.unreviewed_count or 0)
+
+            year_data["actual"] += spent
+            year_data["unreviewed_amount"] += unreviewed_spent
+            year_data["unreviewed_count"] += unreviewed_count
+            data["total_actual"] += spent
+            data["unreviewed_amount"] += unreviewed_spent
+            data["unreviewed_count"] += unreviewed_count
+
+        return category_data
+
+    @staticmethod
+    def _new_variance_entry(
+        session: Session, category_id: int, category_name: str, start_date: date, end_date: date
+    ) -> dict[str, Any]:
+        """Return an empty variance entry carrying the category's budget for the range."""
+        yearly_budgets = AnalyticsService._yearly_budgets(session, category_id, start_date, end_date)
+        return {
+            "category_name": category_name,
+            "yearly_data": {
+                year: {
+                    "budget": budget["budget"],
+                    "actual": 0.0,
+                    "months": budget["months"],
                     "unreviewed_amount": 0.0,
                     "unreviewed_count": 0,
                 }
-
-            # Get year-specific budget and calculate period budget
-            year_budget = BudgetService.get_budget_for_category_year(session, category_id, year)
-            year_start = max(start_date, date(year, 1, 1))
-            year_end = min(end_date, date(year, 12, 31))
-            months_in_year = (year_end.year - year_start.year) * 12 + year_end.month - year_start.month + 1
-            period_budget = year_budget * months_in_year
-
-            unreviewed_amount = float(result.unreviewed_amount or 0.0)
-            unreviewed_count = int(result.unreviewed_count or 0)
-
-            category_data[category_id]["yearly_data"][year] = {
-                "budget": period_budget,
-                "actual": actual_amount,
-                "months": months_in_year,
-                "unreviewed_amount": unreviewed_amount,
-                "unreviewed_count": unreviewed_count,
-            }
-
-            category_data[category_id]["total_actual"] += actual_amount
-            category_data[category_id]["total_budget"] += period_budget
-            category_data[category_id]["unreviewed_amount"] += unreviewed_amount
-            category_data[category_id]["unreviewed_count"] += unreviewed_count
-
-        return category_data
+                for year, budget in yearly_budgets.items()
+            },
+            "total_actual": 0.0,
+            "total_budget": sum(budget["budget"] for budget in yearly_budgets.values()),
+            "unreviewed_amount": 0.0,
+            "unreviewed_count": 0,
+        }
 
     @staticmethod
     def _add_budgeted_categories_without_transactions(
@@ -814,97 +820,85 @@ class AnalyticsService:
         for category in spending_categories:
             cat_id = _to_int(category.id)
             if cat_id not in category_data:
-                total_budget = AnalyticsService._calculate_total_budget_for_period(
-                    session, cat_id, start_date, end_date
+                entry = AnalyticsService._new_variance_entry(
+                    session, cat_id, _to_str(category.name), start_date, end_date
                 )
+                if entry["total_budget"] > 0:
+                    category_data[cat_id] = entry
 
-                if total_budget > 0:
-                    category_data[cat_id] = {
-                        "category_name": _to_str(category.name),
-                        "yearly_data": {},
-                        "total_actual": 0,
-                        "total_budget": total_budget,
-                        "unreviewed_amount": 0.0,
-                        "unreviewed_count": 0,
-                    }
+    @staticmethod
+    def _yearly_budgets(
+        session: Session, category_id: int, start_date: date, end_date: date
+    ) -> dict[int, dict[str, float]]:
+        """Return the prorated budget of each calendar year that the range touches.
+
+        Each year uses its own budget plan, falling back to the legacy ``categories.budget``
+        (see ``BudgetService.get_budget_for_category_year``). The monthly budget is prorated with
+        ``budgeted_months``.
+
+        Returns:
+            Mapping of year to ``{"budget": ..., "months": ...}``.
+        """
+        yearly: dict[int, dict[str, float]] = {}
+        for year in range(start_date.year, end_date.year + 1):
+            months = budgeted_months(max(start_date, date(year, 1, 1)), min(end_date, date(year, 12, 31)))
+            monthly_budget = BudgetService.get_budget_for_category_year(session, category_id, year)
+            yearly[year] = {"budget": monthly_budget * months, "months": months}
+        return yearly
 
     @staticmethod
     def _calculate_total_budget_for_period(
         session: Session, category_id: int, start_date: date, end_date: date
     ) -> float:
-        """Calculate total budget for a category across a date range."""
-        total_budget = 0
-        current_date = start_date
-
-        while current_date <= end_date:
-            year = current_date.year
-            year_budget = BudgetService.get_budget_for_category_year(session, category_id, year)
-
-            year_start = max(start_date, date(year, 1, 1))
-            year_end = min(end_date, date(year, 12, 31))
-            months_in_year = (year_end.year - year_start.year) * 12 + year_end.month - year_start.month + 1
-
-            total_budget += year_budget * months_in_year
-
-            current_date = date(year + 1, 1, 1)
-            if current_date > end_date:
-                break
-
-        return total_budget
+        """Return a category's prorated budget for a date range, across year boundaries."""
+        yearly = AnalyticsService._yearly_budgets(session, category_id, start_date, end_date)
+        return sum(budget["budget"] for budget in yearly.values())
 
     @staticmethod
     def _build_variance_result(category_data: dict[int, dict], start_date: date, end_date: date) -> dict[str, Any]:
-        """Build the final variance result from category data."""
+        """Build the final variance result from category data.
+
+        ``actual`` is money spent (positive) and ``variance`` is ``budget - actual``: positive
+        means under budget, negative means overspent. A category without a budget is overspent
+        by everything it spent. ``variance_percentage`` is ``None`` when there is no budget.
+        """
         variances = []
-        total_budget = 0
-        total_actual = 0
+        total_budget = 0.0
+        total_actual = 0.0
 
         for category_id, data in category_data.items():
             budget = data["total_budget"]
-            actual = data["total_actual"]
-            unreviewed_amount = data.get("unreviewed_amount", 0.0)
-
-            # Calculate variance based on spending vs income categories
-            if budget > 0 and actual <= 0:  # Spending category
-                displayed_actual = abs(actual)
-                # Mirror the sign convention of the displayed actual so both read the same way.
-                unreviewed_amount = abs(unreviewed_amount)
-                variance = budget - displayed_actual
-                variance_pct = (variance / budget * 100) if budget > 0 else 0
-            else:  # Income/saving categories
-                displayed_actual = actual
-                variance = budget - actual
-                variance_pct = (variance / budget * 100) if budget > 0 else 0
+            spent = data["total_actual"]
+            variance = budget - spent
 
             variances.append(
                 {
                     "category_id": category_id,
                     "category_name": data["category_name"],
                     "budget": budget,
-                    "actual": displayed_actual,
-                    "unreviewed_amount": unreviewed_amount,
-                    "unreviewed_count": data.get("unreviewed_count", 0),
+                    "actual": spent,
+                    "unreviewed_amount": data["unreviewed_amount"],
+                    "unreviewed_count": data["unreviewed_count"],
                     "variance": variance,
-                    "variance_percentage": variance_pct,
+                    "variance_percentage": _percent_of_budget(variance, budget),
                     "is_overspent": variance < 0,
                     "yearly_breakdown": data["yearly_data"],
                 }
             )
 
             total_budget += budget
-            total_actual += actual
+            total_actual += spent
 
         variances.sort(key=lambda x: abs(x["variance"]), reverse=True)
+        total_variance = total_budget - total_actual
 
         return {
             "variances": variances,
             "summary": {
                 "total_budget": total_budget,
                 "total_actual": total_actual,
-                "total_variance": total_budget - total_actual,
-                "total_variance_percentage": ((total_budget - total_actual) / total_budget * 100)
-                if total_budget > 0
-                else 0,
+                "total_variance": total_variance,
+                "total_variance_percentage": _percent_of_budget(total_variance, total_budget),
             },
             "date_range": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
         }
@@ -1078,6 +1072,11 @@ class AnalyticsService:
     ) -> dict[str, Any]:
         """Get category-wise spending analysis.
 
+        ``amount`` is the signed sum (spending negative). ``budget`` is the category's prorated
+        budget for the range, from the same source as ``get_budget_variance``. ``budget_variance``
+        is ``budget - spent`` for spending categories (negative means overspent) and ``None`` for
+        income and saving. ``percentage`` is the category's share of the total of its own type.
+
         Args:
             session: Database session.
             start_date: First day of the range; defaults to the start of the current month.
@@ -1103,7 +1102,6 @@ class AnalyticsService:
                 CategoryORM.id,
                 CategoryORM.name,
                 CategoryORM.type,
-                CategoryORM.budget,
                 func.count(TransactionORM.id).label("transaction_count"),
                 func.sum(TransactionORM.amount).label("total_amount"),
                 AnalyticsService._unreviewed_amount_sum().label("unreviewed_amount"),
@@ -1123,17 +1121,19 @@ class AnalyticsService:
         if category_type:
             query = query.filter(CategoryORM.type == category_type)
 
-        query = query.group_by(CategoryORM.id, CategoryORM.name, CategoryORM.type, CategoryORM.budget)
+        query = query.group_by(CategoryORM.id, CategoryORM.name, CategoryORM.type)
         query = query.order_by(func.sum(TransactionORM.amount).desc())
 
         results = query.all()
 
         categories = []
-        total_amount = 0
+        total_amount = 0.0
+        type_totals: dict[str, float] = {}
 
         for result in results:
-            amount = float(result.total_amount) if result.total_amount else 0
-            budget = float(result.budget)
+            amount = float(result.total_amount) if result.total_amount else 0.0
+            # Same budget source and proration as the variance endpoint.
+            budget = AnalyticsService._calculate_total_budget_for_period(session, result.id, start_date, end_date)
 
             categories.append(
                 {
@@ -1145,15 +1145,18 @@ class AnalyticsService:
                     "unreviewed_amount": float(result.unreviewed_amount or 0.0),
                     "unreviewed_count": int(result.unreviewed_count or 0),
                     "transaction_count": result.transaction_count,
-                    "budget_variance": budget - amount if result.type == CategoryType.SPENDING else None,
+                    "budget_variance": budget - money_spent(amount) if result.type == CategoryType.SPENDING else None,
                 }
             )
 
             total_amount += amount
+            type_totals[result.type] = type_totals.get(result.type, 0.0) + amount
 
-        # Calculate percentages
+        # Share of the category's own type total (spending of all spending, income of all income).
+        # Both amounts carry the same sign, so the ratio is positive for spending too.
         for category in categories:
-            category["percentage"] = (category["amount"] / total_amount * 100) if total_amount > 0 else 0
+            type_total = type_totals[category["category_type"]]
+            category["percentage"] = (category["amount"] / type_total * 100) if type_total else 0.0
 
         return {
             "categories": categories,
@@ -1490,7 +1493,7 @@ class AnalyticsService:
             date_conditions = [
                 and_(
                     func.strftime("%Y", TransactionORM.date) == str(year),
-                    TransactionORM.date <= date(year, latest_transaction_date.month, latest_transaction_date.day),
+                    TransactionORM.date <= same_day_in_year(year, latest_transaction_date),
                 )
                 for year in years
             ]
@@ -1528,11 +1531,7 @@ class AnalyticsService:
 
             # Calculate months with data for accurate monthly average
             query_start_date = date(year, 1, 1) if latest_transaction_date else None
-            query_end_date = (
-                date(year, latest_transaction_date.month, latest_transaction_date.day)
-                if latest_transaction_date
-                else None
-            )
+            query_end_date = same_day_in_year(year, latest_transaction_date) if latest_transaction_date else None
             months_with_data = AnalyticsService._get_months_with_data(
                 session,
                 category_id,
@@ -1599,7 +1598,7 @@ class AnalyticsService:
         windows: list[dict[str, str]] = []
         for year in sorted(years):
             start = date(year, 1, 1)
-            end = date(year, cutoff.month, cutoff.day) if cutoff else date(year, 12, 31)
+            end = same_day_in_year(year, cutoff) if cutoff else date(year, 12, 31)
             part = AnalyticsService._get_unreviewed_summary(session, start, end, include_unreviewed)
             total_count += part["count"]
             total_amount += part["amount"]
@@ -1756,6 +1755,68 @@ class AnalyticsService:
             "default_year": default_year,
             "latest_transaction_date": latest_transaction_date.isoformat() if latest_transaction_date else None,
         }
+
+
+def money_spent(amount: float) -> float:
+    """Convert a signed spending amount into money spent.
+
+    Sign convention: the database stores money leaving the account as a negative ``amount``,
+    so the summed amount of a spending category is negative. Budget variance reports money spent
+    as a positive ``actual``; category breakdown keeps the signed ``amount`` and uses this
+    function only for ``budget_variance``. A net refund gives a negative value.
+
+    Args:
+        amount: Signed sum of transaction amounts.
+
+    Returns:
+        Money spent, positive for net outflows.
+    """
+    return -amount
+
+
+def budgeted_months(start_date: date, end_date: date) -> float:
+    """Return how many months of a monthly budget a date range covers.
+
+    Each calendar month counts by the share of its days inside the range: a full month is 1.0,
+    1-15 March is 15/31. A full year is exactly 12.
+
+    Args:
+        start_date: First day of the range (inclusive).
+        end_date: Last day of the range (inclusive).
+
+    Returns:
+        Number of budget months, 0.0 for an empty range.
+    """
+    months = 0.0
+    current = start_date
+    while current <= end_date:
+        days_in_month = calendar.monthrange(current.year, current.month)[1]
+        month_end = date(current.year, current.month, days_in_month)
+        months += ((min(end_date, month_end) - current).days + 1) / days_in_month
+        if month_end >= end_date:
+            break
+        current = month_end + timedelta(days=1)
+    return months
+
+
+def same_day_in_year(year: int, day: date) -> date:
+    """Return the month and day of ``day`` in ``year``; 29 February becomes 28 February.
+
+    Args:
+        year: Target year.
+        day: Date whose month and day are kept.
+
+    Returns:
+        The same calendar day in ``year``, clamped to 28 February in non-leap years.
+    """
+    if day.month == 2 and day.day == 29 and not calendar.isleap(year):
+        return date(year, 2, 28)
+    return date(year, day.month, day.day)
+
+
+def _percent_of_budget(variance: float, budget: float) -> float | None:
+    """Return ``variance`` as a percentage of ``budget``, or ``None`` without a budget."""
+    return variance / budget * 100 if budget > 0 else None
 
 
 class BudgetService:
