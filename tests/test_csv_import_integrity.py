@@ -113,14 +113,20 @@ class TestEmptyOptionalText:
             ("date,name,amount\n2025-03-04,,-2.00\n", ("nan", "")),
             ("date,name,purpose,amount\n2025-03-04,,memo,-2.00\n", ("nan", "memo")),
             ("date,description,name,purpose,amount\n2025-03-04,Purchase,,memo,-2.00\n", ("nan", "memo")),
+            # pandas read an all-digit column as int64 ("00123" -> "123"), or as float64 when it had blanks.
+            ("date,name,purpose,amount\n2025-03-04,Kiosk,00123,-2.00\n", ("Kiosk", "123")),
+            ("date,name,purpose,amount\n2025-03-04,Kiosk,00123,-2.00\n", ("Kiosk", "123.0")),
+            ("date,name,purpose,amount\n2025-03-04,007,memo,-2.00\n", ("7", "memo")),
+            ("date,name,purpose,amount\n2025-03-04,Kiosk,1.50,-2.00\n", ("Kiosk", "1.5")),
         ],
     )
-    def test_reimport_matches_every_legacy_nan_shape(self, db_session, tmp_path, csv_text, stored):
+    def test_reimport_matches_every_legacy_text_shape(self, db_session, tmp_path, csv_text, stored):
         name, purpose = stored
         legacy = TransactionInput(date=date(2025, 3, 4), name=name, purpose=purpose, amount=-2.0)
         CSVProcessor(db_session).save_transactions([legacy])
 
         assert _import(db_session, _write(tmp_path, csv_text)) == (0, 1)
+        assert db_session.query(TransactionORM).count() == 1
 
 
 class TestDateOrder:

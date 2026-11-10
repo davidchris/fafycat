@@ -3,6 +3,7 @@
 import codecs
 import csv
 import io
+import math
 import re
 import uuid
 from collections import Counter
@@ -237,13 +238,37 @@ def _parse_amount(raw: str, decimal: str = ".") -> float:
     return -value if negative or match[1] == "-" else value
 
 
-def _drop_legacy_nan_text(existing: TransactionORM, txn: TransactionInput, cleaner: MerchantCleaner) -> None:
-    """Replace the ``"nan"`` an older import stored for an empty cell with ``""``."""
-    if existing.purpose == "nan" and txn.purpose == "":
-        existing.purpose = ""
-    if existing.name == "nan" and txn.name == "":
-        existing.name = ""
-        existing.merchant_pattern = cleaner.clean("")
+def _legacy_text_forms(text: str) -> set[str]:
+    """The forms the pandas importer (0.3.0 and older) may have stored and hashed for a cell.
+
+    It stored an empty cell as ``"nan"``. It read a column of numbers as int64
+    (``"00123"`` became ``"123"``) or, with blanks or decimals, as float64
+    (``"123.0"``, ``"1.5"``).
+    """
+    if text == "":
+        return {"", "nan"}
+    forms = {text}
+    try:
+        number = float(text)
+    except ValueError:
+        return forms
+    if math.isfinite(number):
+        forms.add(str(number))
+        if number.is_integer():
+            forms.add(str(int(number)))
+    return forms
+
+
+def _restore_legacy_text(existing: TransactionORM, txn: TransactionInput, cleaner: MerchantCleaner) -> None:
+    """Replace the text an older import stored (``"nan"``, ``"123"``) with the text in the file.
+
+    The id keeps its old value, so later re-imports still match the row.
+    """
+    if existing.purpose != txn.purpose and existing.purpose in _legacy_text_forms(txn.purpose):
+        existing.purpose = txn.purpose
+    if existing.name != txn.name and existing.name in _legacy_text_forms(txn.name):
+        existing.name = txn.name
+        existing.merchant_pattern = cleaner.clean(txn.name)
 
 
 class CSVProcessor:
@@ -442,7 +467,7 @@ class CSVProcessor:
 
             existing = self._find_existing(txn, txn_id)
             if existing is not None:
-                _drop_legacy_nan_text(existing, txn, self.merchant_cleaner)
+                _restore_legacy_text(existing, txn, self.merchant_cleaner)
                 duplicate_count += 1
                 continue
 
@@ -489,13 +514,13 @@ class CSVProcessor:
     def _find_existing(self, txn: TransactionInput, txn_id: str) -> TransactionORM | None:
         """Find the stored row with this id, or with the id an older import gave it.
 
-        Imports before empty cells were read as ``""`` stored them as ``"nan"`` and
-        hashed that into the id.
+        Older imports stored and hashed some cells differently: an empty cell as
+        ``"nan"``, a number as ``"123"`` or ``"123.0"``. See :func:`_legacy_text_forms`.
         """
         ids = [txn_id]
         if txn.occurrence == 0:
-            names = {txn.name, txn.name or "nan"}
-            purposes = {txn.purpose, txn.purpose or "nan"}
+            names = _legacy_text_forms(txn.name)
+            purposes = _legacy_text_forms(txn.purpose)
             ids += [
                 txn.model_copy(update={"name": name, "purpose": purpose}).generate_id()
                 for name in names
