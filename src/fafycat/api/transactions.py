@@ -80,16 +80,20 @@ async def update_transaction_category(
 @router.put("/{transaction_id}/categorize-htmx", response_class=HTMLResponse)
 async def categorize_transaction_htmx(
     transaction_id: str,
-    actual_category: str = Form(...),
+    actual_category: str | None = Form(None),
+    category_id: int | None = Form(None),
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
-    """HTMX-enabled categorization endpoint that returns HTML fragment."""
-    update = TransactionUpdate(actual_category=actual_category, is_reviewed=True)
+    """HTMX-enabled categorization endpoint that returns HTML fragment.
+
+    The review table sends ``category_id``; ``actual_category`` takes a name or ``name (type)``.
+    """
     try:
+        update = TransactionUpdate(actual_category=actual_category, category_id=category_id, is_reviewed=True)
         result = TransactionService.update_transaction_category(
             session=db, transaction_id=transaction_id, update=update
         )
-    except LookupError as e:
+    except (LookupError, ValueError) as e:
         return HTMLResponse(
             content=f'<div class="alert alert-error">{html_escape(str(e))}</div>',
             status_code=400,
@@ -113,9 +117,6 @@ async def categorize_transaction_htmx(
             categories,
             pattern=pattern,
             sibling_count=sibling_count,
-            # The submitted reference: it resolved once, so propagate resolves it the same way,
-            # also when it is a qualified "name (type)".
-            category_name=actual_category.strip(),
         )
     else:
         html = render_row(result, categories)
@@ -125,7 +126,8 @@ async def categorize_transaction_htmx(
 @router.post("/propagate", response_class=HTMLResponse)
 async def propagate_category(
     source_id: str = Form(...),
-    actual_category: str = Form(...),
+    actual_category: str | None = Form(None),
+    category_id: int | None = Form(None),
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
     """Apply a just-saved category to every unreviewed transaction with the same merchant pattern.
@@ -134,7 +136,9 @@ async def propagate_category(
     ``transactions-changed`` so the table reloads the rows that changed
     underneath the user.
     """
-    result = TransactionService.propagate_category(session=db, source_id=source_id, category_name=actual_category)
+    result = TransactionService.propagate_category(
+        session=db, source_id=source_id, category_name=actual_category, category_id=category_id
+    )
     return HTMLResponse(
         content=render_propagation_result(source_id, result["applied"]),
         headers={"HX-Trigger": "transactions-changed"},

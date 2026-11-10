@@ -116,6 +116,23 @@ def find_category(session: Session, ref: str) -> CategoryORM:
     raise CategoryNotFoundError(ref)
 
 
+def resolve_category(session: Session, *, name: str | None = None, category_id: int | None = None) -> CategoryORM:
+    """Resolve a category by id when given, else by name with :func:`find_category`.
+
+    Raises:
+        CategoryNotFoundError: No category matches.
+        AmbiguousCategoryError: The name is shared and needs its type.
+    """
+    if category_id is not None:
+        category = session.get(CategoryORM, category_id)
+        if category is None:
+            raise CategoryNotFoundError(f"id {category_id}")
+        return category
+    if name is None:
+        raise CategoryNotFoundError("(none given)")
+    return find_category(session, name)
+
+
 def _category_ids_for(session: Session, ref: str) -> list[int]:
     """Ids a category filter matches: one for a resolvable reference, every namesake for a shared name."""
     try:
@@ -468,7 +485,7 @@ class TransactionService:
     def update_transaction_category(
         session: Session, transaction_id: str, update: TransactionUpdate
     ) -> TransactionResponse | None:
-        """Set a transaction's category from a name or ``name (type)`` reference.
+        """Set a transaction's category from its id, a name, or a ``name (type)`` reference.
 
         Returns:
             The updated transaction, or None when the transaction does not exist.
@@ -482,7 +499,7 @@ class TransactionService:
         if not transaction:
             return None
 
-        category = find_category(session, update.actual_category)
+        category = resolve_category(session, name=update.actual_category, category_id=update.category_id)
 
         # Update transaction
         record_review_event(
@@ -542,7 +559,9 @@ class TransactionService:
         return pattern, _unreviewed_siblings(session, transaction, _to_int_or_none(transaction.category_id)).count()
 
     @staticmethod
-    def propagate_category(session: Session, source_id: str, category_name: str) -> dict:
+    def propagate_category(
+        session: Session, source_id: str, category_name: str | None = None, category_id: int | None = None
+    ) -> dict:
         """Apply a category to the unreviewed siblings the model saw like the source.
 
         Each affected transaction is marked reviewed and gets its own Review
@@ -553,7 +572,8 @@ class TransactionService:
         Args:
             session: Open database session. Committed by this function.
             source_id: The transaction the user corrected.
-            category_name: Name of the category to apply.
+            category_name: Name of the category to apply, used when ``category_id`` is not given.
+            category_id: Id of the category to apply.
 
         Returns:
             A dict with the number of transactions ``applied``, the
@@ -562,11 +582,11 @@ class TransactionService:
         source = session.query(TransactionORM).filter(TransactionORM.id == source_id).first()
         pattern = _pattern_of(source)
         try:
-            category: CategoryORM | None = find_category(session, category_name)
+            category: CategoryORM | None = resolve_category(session, name=category_name, category_id=category_id)
         except LookupError:
             category = None
         if source is None or not pattern or category is None:
-            return {"applied": 0, "pattern": pattern, "category": category_name}
+            return {"applied": 0, "pattern": pattern, "category": category_name or category_id}
 
         siblings = _unreviewed_siblings(session, source, _to_int(category.id)).all()
 

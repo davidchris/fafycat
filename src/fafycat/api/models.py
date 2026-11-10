@@ -3,7 +3,7 @@
 import re
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fafycat.core.models import ReviewPriority
 
@@ -32,10 +32,21 @@ class TransactionResponse(BaseModel):
 
 
 class TransactionUpdate(BaseModel):
-    """Request model for updating transaction category."""
+    """Request model for updating transaction category.
 
-    actual_category: str
+    Give the category as ``actual_category`` (a name, or ``name (type)``) or as
+    ``category_id``. The id never collides; the web forms send it.
+    """
+
+    actual_category: str | None = None
+    category_id: int | None = None
     is_reviewed: bool = True
+
+    @model_validator(mode="after")
+    def _one_category_reference(self) -> "TransactionUpdate":
+        if (self.actual_category is None) == (self.category_id is None):
+            raise ValueError("give exactly one of actual_category or category_id")
+        return self
 
 
 class BulkCategorizeRequest(BaseModel):

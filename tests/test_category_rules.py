@@ -1,5 +1,6 @@
 """Category names: unique ignoring case, one length limit, and unambiguous lookups."""
 
+import re
 from datetime import date
 
 import pytest
@@ -94,8 +95,31 @@ class TestLegacyDuplicateNames:
 
         html = test_client.get("/api/transactions/table?status=pending").text
 
-        assert '<option value="other (income)" selected>other (income)</option>' in html
-        assert '<option value="other (spending)">other (spending)</option>' in html
+        assert f'<option value="{others["income"]}" selected>other (income)</option>' in html
+        assert f'<option value="{others["spending"]}">other (spending)</option>' in html
+
+    def test_the_review_forms_save_the_category_the_user_picked(self, test_client, db_session, others):
+        """An imported category literally named ``other (income)`` must not capture the income ``other``."""
+        literal = CategoryORM(name="other (income)", type="spending")
+        db_session.add(literal)
+        db_session.commit()
+        _txn(db_session, "t1", merchant_pattern="SHOP")
+        _txn(db_session, "t2", merchant_pattern="SHOP")
+
+        table = test_client.get("/api/transactions/table?status=pending").text
+        row = table[table.index('id="transaction-t1"') :]
+        field = re.search(r'<select name="([^"]+)"', row)[1]
+        value_by_label = {label: value for value, label in re.findall(r'<option value="([^"]+)"[^>]*>([^<]+)<', row)}
+        assert set(value_by_label) == {"other (spending)", "other (income)", "other (income) (spending)"}
+
+        saved = test_client.put("/api/transactions/t1/categorize-htmx", data={field: value_by_label["other (income)"]})
+        prompt = saved.text[saved.text.index('id="propagate-t1"') :]
+        hidden = dict(re.findall(r'type="hidden" name="([^"]+)" value="([^"]*)"', prompt))
+        test_client.post("/api/transactions/propagate", data=hidden)
+
+        db_session.expire_all()
+        assert db_session.get(TransactionORM, "t1").category_id == others["income"]
+        assert db_session.get(TransactionORM, "t2").category_id == others["income"]
 
     def test_a_qualified_name_assigns_that_category(self, test_client, db_session, others):
         _txn(db_session, "t1")
