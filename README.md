@@ -162,6 +162,11 @@ Common bank formats supported:
 - **No Hosted Backend**: The web UI is served by your local FafyCat process
 - **Your Data**: You own and control all your financial data
 - **Open Source**: Fully auditable codebase
+- **Loopback Only by Default**: The server binds to `127.0.0.1` and has **no authentication**. It answers only to the
+  host names `localhost`, `127.0.0.1` and `::1` (blocks DNS rebinding) and rejects any POST/PUT/PATCH/DELETE whose
+  `Origin` or `Referer` is another site (blocks cross-site request forgery). `fafycat serve --host <address>` exposes
+  every transaction to anyone who can reach that address and prints a warning; that address is allowed automatically.
+  To allow more host names (for example a LAN name), set `FAFYCAT_ALLOWED_HOSTS=fafycat.lan,192.168.1.20`.
 
 ## 🤖 Use with Coding Agents
 

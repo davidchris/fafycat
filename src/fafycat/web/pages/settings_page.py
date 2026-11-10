@@ -1029,7 +1029,7 @@ def render_budget_variance_section():
                     const overspent = Math.abs(category.variance);
                     html += `
                         <div class="flex justify-between items-center text-sm">
-                            <span>${category.category_name}</span>
+                            <span>${escapeHtml(category.category_name)}</span>
                             <span class="font-medium">&euro;${overspent.toFixed(0)} over</span>
                         </div>
                     `;
@@ -1195,9 +1195,8 @@ def render_yearly_budget_management(current_year):
         // Local fallback in case main.js hasn't defined it yet
         if (typeof escapeHtml === 'undefined') {{
             function escapeHtml(text) {{
-                const div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
+                const map = {{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }};
+                return String(text ?? '').replace(/[&<>"']/g, ch => map[ch]);
             }}
         }}
 

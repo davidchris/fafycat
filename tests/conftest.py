@@ -36,6 +36,8 @@ def _isolate_fafycat_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         if key.startswith("FAFYCAT_"):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("FAFYCAT_CONFIG", str(tmp_path / "no-fafycat-config.toml"))
+    # TestClient sends ``Host: testserver``; allow it the way a user allows a LAN host name.
+    monkeypatch.setenv("FAFYCAT_ALLOWED_HOSTS", "testserver")
 
 
 @pytest.fixture

@@ -1,7 +1,6 @@
 """Analytics API endpoints for FafyCat."""
 
 import html
-import json
 from datetime import date
 from typing import Any
 
@@ -11,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_session
 from fafycat.api.services import AnalyticsService
+from fafycat.core.security import script_json
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -339,7 +339,7 @@ async def get_budget_variance_html(
         </div>
         <script>
             // Update chart with new data
-            updateBudgetVarianceChart({json.dumps(data)});
+            updateBudgetVarianceChart({script_json(data)});
         </script>
         """
 
