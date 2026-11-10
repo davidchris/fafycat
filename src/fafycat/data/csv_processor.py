@@ -459,14 +459,17 @@ class CSVProcessor:
         self.ambiguous_categories.clear()
         new_count = 0
         duplicate_count = 0
+        # Rows this call inserted or matched; an old-id lookup must not hand them to another input row.
+        claimed: set[str] = set()
 
         # Insert account-direct rows before card-settlement rows so the row
         # with the real purchase date survives fuzzy dedup.
         for txn in sort_direct_rows_first(transactions):
             txn_id = txn.generate_id()
 
-            existing = self._find_existing(txn, txn_id)
+            existing = self._find_existing(txn, txn_id, claimed)
             if existing is not None:
+                claimed.add(str(existing.id))
                 _restore_legacy_text(existing, txn, self.merchant_cleaner)
                 duplicate_count += 1
                 continue
@@ -506,28 +509,35 @@ class CSVProcessor:
             # Session runs with autoflush=False: flush so later rows in this
             # batch can dedup (exact and fuzzy) against this one.
             self.session.flush()
+            claimed.add(txn_id)
             new_count += 1
 
         self.session.commit()
         return new_count, duplicate_count
 
-    def _find_existing(self, txn: TransactionInput, txn_id: str) -> TransactionORM | None:
+    def _find_existing(self, txn: TransactionInput, txn_id: str, claimed: set[str]) -> TransactionORM | None:
         """Find the stored row with this id, or with the id an older import gave it.
 
         Older imports stored and hashed some cells differently: an empty cell as
         ``"nan"``, a number as ``"123"`` or ``"123.0"``. See :func:`_legacy_text_forms`.
+        An old id never matches a row in ``claimed``: ``00123`` must not swallow
+        the ``123`` row imported from the same file a moment ago.
         """
-        ids = [txn_id]
-        if txn.occurrence == 0:
-            names = _legacy_text_forms(txn.name)
-            purposes = _legacy_text_forms(txn.purpose)
-            ids += [
+        exact = self.session.query(TransactionORM).filter(TransactionORM.id == txn_id).first()
+        if exact is not None or txn.occurrence != 0:
+            return exact
+        legacy_ids = (
+            {
                 txn.model_copy(update={"name": name, "purpose": purpose}).generate_id()
-                for name in names
-                for purpose in purposes
-                if (name, purpose) != (txn.name, txn.purpose)
-            ]
-        return self.session.query(TransactionORM).filter(TransactionORM.id.in_(ids)).first()
+                for name in _legacy_text_forms(txn.name)
+                for purpose in _legacy_text_forms(txn.purpose)
+            }
+            - {txn_id}
+            - claimed
+        )
+        if not legacy_ids:
+            return None
+        return self.session.query(TransactionORM).filter(TransactionORM.id.in_(legacy_ids)).first()
 
     def _resolve_category(self, txn: TransactionInput) -> CategoryORM | None:
         """Find the category a CSV label names, or None (counted) when there is not exactly one.

@@ -128,6 +128,14 @@ class TestEmptyOptionalText:
         assert _import(db_session, _write(tmp_path, csv_text)) == (0, 1)
         assert db_session.query(TransactionORM).count() == 1
 
+    def test_legacy_matching_never_merges_two_rows_of_one_file(self, db_session, tmp_path):
+        """``00123`` may match an old ``123`` row, but not the ``123`` row imported just before it."""
+        path = _write(tmp_path, "date,name,purpose,amount\n2025-03-04,Kiosk,123,-2.00\n2025-03-04,Kiosk,00123,-2.00\n")
+
+        assert _import(db_session, path) == (2, 0)
+        assert sorted(row.purpose for row in db_session.query(TransactionORM)) == ["00123", "123"]
+        assert _import(db_session, path) == (0, 2)
+
 
 class TestDateOrder:
     """B8: no silent guess between day-first and month-first."""
