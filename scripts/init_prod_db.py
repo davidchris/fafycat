@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """Initialize the production FafyCat database."""
 
-import os
 import sys
 from pathlib import Path
-
-# Set production environment
-os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_prod.db"
-os.environ["FAFYCAT_ENV"] = "production"
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fafycat.core.config import AppConfig
+from fafycat.core.config import resolve_config
 from fafycat.core.database import DatabaseManager
 
 
@@ -20,7 +15,7 @@ def main() -> None:
     """Initialize production database (empty - no default categories)."""
     print("🐱 Initializing FafyCat PRODUCTION database")
 
-    config = AppConfig()
+    config = resolve_config()
     config.ensure_dirs()
 
     print(f"📊 Database: {config.database.url}")

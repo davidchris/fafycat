@@ -12,16 +12,10 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 # Module imports after path manipulation (required by E402)
-from fafycat.core.config import AppConfig  # noqa: E402
+from fafycat.core.config import resolve_config  # noqa: E402
 from fafycat.core.database import DatabaseManager  # noqa: E402
 from fafycat.core.models import TransactionInput  # noqa: E402
 from fafycat.data.csv_processor import CSVProcessor  # noqa: E402
-
-# Set production environment only if not already set
-if "FAFYCAT_DB_URL" not in os.environ:
-    os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_prod.db"
-if "FAFYCAT_ENV" not in os.environ:
-    os.environ["FAFYCAT_ENV"] = "production"
 
 
 def parse_labeled_csv(file_path: Path) -> list[TransactionInput]:
@@ -118,13 +112,12 @@ def import_all_labeled_data(data_path: Path | None = None) -> None:
         print(f"❌ No CSV files found in {labeled_data_dir}")
         return
 
-    print("🐱 Importing labeled data to PRODUCTION database")
+    config = resolve_config()
+    print(f"🐱 Importing labeled data into {config.database.url}")
     print(f"📁 Source: {labeled_data_dir}")
     print(f"📊 Found {len(csv_files)} files")
     print("-" * 60)
 
-    # Initialize config and database
-    config = AppConfig()
     config.ensure_dirs()
     db_manager = DatabaseManager(config)
 

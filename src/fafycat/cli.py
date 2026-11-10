@@ -3,11 +3,15 @@
 import argparse
 import json
 import logging
-import os
 import sys
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fafycat.core.config import AppConfig
+    from fafycat.core.database import DatabaseManager
 
 
 def _positive_int(value: str) -> int:
@@ -70,42 +74,55 @@ def _year_list(value: str) -> list[int]:
     return years
 
 
-def _apply_data_dir_override(data_dir: Path | None) -> None:
-    """Set environment overrides so config derives paths from data_dir."""
-    if data_dir is None:
-        return
+def _resolve_config(args: argparse.Namespace) -> "AppConfig":
+    """Resolve the data location from ``--data-dir`` and ``--dev``; warn on stderr about stray databases.
 
-    resolved_data_dir = data_dir.resolve()
-    os.environ["FAFYCAT_DATA_DIR"] = str(resolved_data_dir)
-    os.environ.setdefault("FAFYCAT_MODEL_DIR", str(resolved_data_dir / "models"))
-    os.environ.setdefault("FAFYCAT_EXPORT_DIR", str(resolved_data_dir / "exports"))
-
-
-def _legacy_database_url(data_dir: Path | None, dev: bool) -> str | None:
-    """Return the legacy repo-local database URL when appropriate.
-
-    Backward compatibility only applies to production `serve` with no explicit
-    database/data-dir override. Development mode retains the mode-specific DB.
+    Every command goes through here, so ``serve``, ``import`` and the query
+    commands open the same database file for the same flags and environment.
     """
-    if dev or data_dir is not None or "FAFYCAT_DB_URL" in os.environ:
-        return None
+    from fafycat.cli_query.status import location_warnings
+    from fafycat.core.config import resolve_config
 
-    legacy_db = (Path.cwd() / "data" / "fafycat_prod.db").resolve()
-    if legacy_db.exists():
-        return f"sqlite:///{legacy_db}"
+    config = resolve_config(args.data_dir, dev=args.dev)
+    for warning in location_warnings(config):
+        print(f"Warning: {warning}", file=sys.stderr)
+    return config
 
-    return None
+
+def _open_query_database(args: argparse.Namespace) -> "DatabaseManager":
+    """Open the database read-only for a query command, or exit 1 with a JSON error.
+
+    Query commands never create, upgrade, or repair the database; that is the
+    job of ``fafycat init``, ``fafycat import`` and ``fafycat serve``.
+    """
+    from fafycat.cli_query.output import emit_error
+    from fafycat.core.config import sqlite_path
+    from fafycat.core.database import DatabaseManager
+
+    config = _resolve_config(args)
+    path = sqlite_path(config.database.url)
+    if path is not None and not path.exists():
+        emit_error(f"No FafyCat database at {path}. Run `fafycat init` or `fafycat import FILE` first.")
+    try:
+        db_manager = DatabaseManager(config, read_only=True)
+    except ValueError as exc:
+        emit_error(str(exc))
+    problems = db_manager.schema_problems()
+    if problems:
+        emit_error(
+            f"The database {path or config.database.url} is older than this FafyCat version "
+            f"(missing {', '.join(problems)}). Run `fafycat init` or start `fafycat serve` once to upgrade it."
+        )
+    return db_manager
 
 
-def _setup_dev_database() -> None:
+def _setup_dev_database(config: "AppConfig") -> None:
     """Seed the dev database with synthetic data if empty."""
     from fafycat.api.services import CategoryService, TransactionService
-    from fafycat.core.config import AppConfig
     from fafycat.core.database import DatabaseManager
     from fafycat.data.csv_processor import CSVProcessor, create_synthetic_transactions
     from fafycat.data.merchant_pattern import backfill_merchant_patterns
 
-    config = AppConfig()
     db_manager = DatabaseManager(config)
     db_manager.create_tables()
 
@@ -128,40 +145,22 @@ def _setup_dev_database() -> None:
 
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the fafycat web server."""
-    _apply_data_dir_override(args.data_dir)
+    from fafycat.core.config import export_to_environ
 
-    if args.dev:
-        os.environ.setdefault("FAFYCAT_ENV", "development")
-        db_name = "fafycat_dev.db"
-    else:
-        os.environ.setdefault("FAFYCAT_ENV", "production")
-        db_name = "fafycat_prod.db"
-
-    if "FAFYCAT_DB_URL" not in os.environ:
-        legacy_db_url = _legacy_database_url(args.data_dir, args.dev)
-        if legacy_db_url is not None:
-            os.environ["FAFYCAT_DB_URL"] = legacy_db_url
-
-    if "FAFYCAT_DB_URL" not in os.environ:
-        from platformdirs import user_data_dir
-
-        data_dir = Path(os.getenv("FAFYCAT_DATA_DIR", user_data_dir("fafycat")))
-        os.environ["FAFYCAT_DB_URL"] = f"sqlite:///{data_dir / db_name}"
+    config = _resolve_config(args)
+    # The app (and uvicorn's reload worker) builds AppConfig() from the environment.
+    export_to_environ(config)
+    config.ensure_dirs()
 
     port = args.port or (8001 if args.dev else 8000)
     host = args.host or "127.0.0.1"
 
-    from fafycat.core.config import AppConfig
-
-    config = AppConfig()
-    config.ensure_dirs()
-
     if args.dev:
-        _setup_dev_database()
+        _setup_dev_database(config)
 
     env_label = "DEVELOPMENT" if args.dev else "PRODUCTION"
     print(f"🐱 Starting FafyCat in {env_label} mode")
-    print(f"📊 Database: {os.environ['FAFYCAT_DB_URL']}")
+    print(f"📊 Database: {config.database.url}")
     print(f"🌐 http://localhost:{port}")
     print(f"📚 API docs: http://localhost:{port}/docs")
     print("-" * 50)
@@ -180,7 +179,11 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
 def cmd_import(args: argparse.Namespace) -> None:
     """Import a CSV file."""
-    _apply_data_dir_override(args.data_dir)
+    from fafycat.core.config import export_to_environ
+
+    config = _resolve_config(args)
+    # Prediction after import loads the Categorizer through AppConfig().
+    export_to_environ(config)
 
     csv_path = Path(args.file)
     if not csv_path.exists():
@@ -188,12 +191,10 @@ def cmd_import(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     from fafycat.api.upload import predict_transaction_categories
-    from fafycat.core.config import AppConfig
     from fafycat.core.database import DatabaseManager
     from fafycat.data.csv_processor import CSVProcessor
     from fafycat.data.merchant_pattern import backfill_merchant_patterns
 
-    config = AppConfig()
     config.ensure_dirs()
     db_manager = DatabaseManager(config)
     db_manager.create_tables()
@@ -226,18 +227,12 @@ def cmd_import(args: argparse.Namespace) -> None:
 
 def cmd_cat_list(args: argparse.Namespace) -> None:
     """List categories as JSON."""
-    _apply_data_dir_override(args.data_dir)
-
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import CategoryService
     from fafycat.cli_query.output import emit_success
-    from fafycat.core.config import AppConfig
-    from fafycat.core.database import DatabaseManager
 
-    config = AppConfig()
-    db_manager = DatabaseManager(config)
-    db_manager.create_tables()
+    db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         categories = CategoryService.get_categories(session, include_inactive=args.include_inactive)
@@ -248,15 +243,11 @@ def cmd_cat_list(args: argparse.Namespace) -> None:
 
 def cmd_tx_list(args: argparse.Namespace) -> None:
     """List transactions as a paginated JSON envelope."""
-    _apply_data_dir_override(args.data_dir)
-
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import TransactionService
     from fafycat.cli_query.date_range import resolve_date_range
     from fafycat.cli_query.output import emit_error, emit_success
-    from fafycat.core.config import AppConfig
-    from fafycat.core.database import DatabaseManager
 
     _has_date_arg = (
         args.start is not None
@@ -284,9 +275,7 @@ def cmd_tx_list(args: argparse.Namespace) -> None:
     elif args.unreviewed:
         is_reviewed = False
 
-    config = AppConfig()
-    db_manager = DatabaseManager(config)
-    db_manager.create_tables()
+    db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         result = TransactionService.get_transactions_with_pagination(
@@ -315,18 +304,12 @@ def cmd_tx_list(args: argparse.Namespace) -> None:
 
 def cmd_budget_show(args: argparse.Namespace) -> None:
     """Return per-category budgets for a year as JSON."""
-    _apply_data_dir_override(args.data_dir)
-
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import BudgetService
     from fafycat.cli_query.output import emit_success
-    from fafycat.core.config import AppConfig
-    from fafycat.core.database import DatabaseManager
 
-    config = AppConfig()
-    db_manager = DatabaseManager(config)
-    db_manager.create_tables()
+    db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         result = BudgetService.get_budgets_for_year(session, args.year)
@@ -349,14 +332,11 @@ def _add_exclude_unreviewed_argument(parser: argparse.ArgumentParser) -> None:
 
 def cmd_analytics_monthly(args: argparse.Namespace) -> None:
     """Return monthly income/spending/saving totals as JSON."""
-    _apply_data_dir_override(args.data_dir)
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import AnalyticsService
     from fafycat.cli_query.date_range import resolve_date_range
     from fafycat.cli_query.output import emit_error, emit_success
-    from fafycat.core.config import AppConfig
-    from fafycat.core.database import DatabaseManager
 
     year: int | None = None
     start_date: date | None = None
@@ -379,9 +359,7 @@ def cmd_analytics_monthly(args: argparse.Namespace) -> None:
         except ValueError as exc:
             emit_error(str(exc))
 
-    config = AppConfig()
-    db_manager = DatabaseManager(config)
-    db_manager.create_tables()
+    db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         result = AnalyticsService.get_monthly_summary(
@@ -397,14 +375,11 @@ def cmd_analytics_monthly(args: argparse.Namespace) -> None:
 
 def cmd_analytics_breakdown(args: argparse.Namespace) -> None:
     """Return per-category spending totals for a date range as JSON."""
-    _apply_data_dir_override(args.data_dir)
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import AnalyticsService
     from fafycat.cli_query.date_range import resolve_date_range
     from fafycat.cli_query.output import emit_error, emit_success
-    from fafycat.core.config import AppConfig
-    from fafycat.core.database import DatabaseManager
 
     start_date: date | None = None
     end_date: date | None = None
@@ -425,9 +400,7 @@ def cmd_analytics_breakdown(args: argparse.Namespace) -> None:
         except ValueError as exc:
             emit_error(str(exc))
 
-    config = AppConfig()
-    db_manager = DatabaseManager(config)
-    db_manager.create_tables()
+    db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         result = AnalyticsService.get_category_breakdown(
@@ -443,14 +416,11 @@ def cmd_analytics_breakdown(args: argparse.Namespace) -> None:
 
 def cmd_analytics_variance(args: argparse.Namespace) -> None:
     """Return budget-vs-actual variance per category for a date range as JSON."""
-    _apply_data_dir_override(args.data_dir)
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import AnalyticsService
     from fafycat.cli_query.date_range import resolve_date_range
     from fafycat.cli_query.output import emit_error, emit_success
-    from fafycat.core.config import AppConfig
-    from fafycat.core.database import DatabaseManager
 
     start_date: date | None = None
     end_date: date | None = None
@@ -471,9 +441,7 @@ def cmd_analytics_variance(args: argparse.Namespace) -> None:
         except ValueError as exc:
             emit_error(str(exc))
 
-    config = AppConfig()
-    db_manager = DatabaseManager(config)
-    db_manager.create_tables()
+    db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         result = AnalyticsService.get_budget_variance(
@@ -488,14 +456,11 @@ def cmd_analytics_variance(args: argparse.Namespace) -> None:
 
 def cmd_analytics_savings(args: argparse.Namespace) -> None:
     """Return monthly and cumulative savings for a date range as JSON."""
-    _apply_data_dir_override(args.data_dir)
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import AnalyticsService
     from fafycat.cli_query.date_range import resolve_date_range
     from fafycat.cli_query.output import emit_error, emit_success
-    from fafycat.core.config import AppConfig
-    from fafycat.core.database import DatabaseManager
 
     start_date: date | None = None
     end_date: date | None = None
@@ -517,9 +482,7 @@ def cmd_analytics_savings(args: argparse.Namespace) -> None:
         except ValueError as exc:
             emit_error(str(exc))
 
-    config = AppConfig()
-    db_manager = DatabaseManager(config)
-    db_manager.create_tables()
+    db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         result = AnalyticsService.get_savings_tracking(
@@ -535,19 +498,14 @@ def cmd_analytics_savings(args: argparse.Namespace) -> None:
 
 def cmd_analytics_yoy(args: argparse.Namespace) -> None:
     """Return year-over-year comparison data as JSON."""
-    _apply_data_dir_override(args.data_dir)
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import AnalyticsService
     from fafycat.cli_query.output import emit_success
-    from fafycat.core.config import AppConfig
-    from fafycat.core.database import DatabaseManager
 
     years: list[int] | None = args.years or None
 
-    config = AppConfig()
-    db_manager = DatabaseManager(config)
-    db_manager.create_tables()
+    db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         result = AnalyticsService.get_year_over_year_comparison(
@@ -562,17 +520,12 @@ def cmd_analytics_yoy(args: argparse.Namespace) -> None:
 
 def cmd_analytics_top(args: argparse.Namespace) -> None:
     """Return top spending transactions for a given month as JSON."""
-    _apply_data_dir_override(args.data_dir)
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import AnalyticsService
     from fafycat.cli_query.output import emit_success
-    from fafycat.core.config import AppConfig
-    from fafycat.core.database import DatabaseManager
 
-    config = AppConfig()
-    db_manager = DatabaseManager(config)
-    db_manager.create_tables()
+    db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         result = AnalyticsService.get_top_transactions_by_month(
@@ -600,14 +553,25 @@ def cmd_skill_install(args: argparse.Namespace) -> None:
     emit_success({"installed": str(written)})
 
 
+def cmd_status(args: argparse.Namespace) -> None:
+    """Print version, data location, database counts, model state, and location warnings as JSON."""
+    logging.disable(logging.WARNING)
+
+    from fafycat import __version__
+    from fafycat.cli_query.output import emit_success
+    from fafycat.cli_query.status import build_status
+    from fafycat.core.config import resolve_config
+
+    # Warnings go into the JSON instead of stderr.
+    config = resolve_config(args.data_dir, dev=args.dev)
+    emit_success(build_status(config, dev=args.dev, version=__version__))
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize fafycat data directory and default categories."""
-    _apply_data_dir_override(args.data_dir)
-
-    from fafycat.core.config import AppConfig
     from fafycat.core.database import DatabaseManager
 
-    config = AppConfig()
+    config = _resolve_config(args)
     config.ensure_dirs()
 
     print(f"📁 Data directory: {config.data_dir}")
@@ -621,10 +585,12 @@ def cmd_init(args: argparse.Namespace) -> None:
     print("✅ FafyCat initialized successfully")
 
 
-def _add_data_dir_argument(parser: argparse.ArgumentParser, *, suppress_default: bool = False) -> None:
-    """Add the shared --data-dir argument.
+def _add_data_dir_argument(
+    parser: argparse.ArgumentParser, *, suppress_default: bool = False, dev_help: str | None = None
+) -> None:
+    """Add the shared --data-dir and --dev arguments, which together pick the database.
 
-    Root parser uses default=None (authoritative).  Group and leaf parsers use
+    Root parser uses default=None/False (authoritative).  Group and leaf parsers use
     suppress_default=True so an absent flag doesn't overwrite a value already set
     by a higher-level parser in the chain.
     """
@@ -633,6 +599,12 @@ def _add_data_dir_argument(parser: argparse.ArgumentParser, *, suppress_default:
         type=Path,
         default=argparse.SUPPRESS if suppress_default else None,
         help="Override data directory (default: platform user data dir)",
+    )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        default=argparse.SUPPRESS if suppress_default else False,
+        help=dev_help or "Use the development database (fafycat_dev.db), the one `fafycat serve --dev` opens",
     )
 
 
@@ -657,15 +629,13 @@ def main() -> None:
         prog="fafycat",
         description="FafyCat - Local-first transaction categorization with ML",
     )
+    from fafycat import __version__
+
+    parser.add_argument("--version", action="version", version=f"fafycat {__version__}")
     _add_data_dir_argument(parser)
     subparsers = parser.add_subparsers(dest="command")
 
     serve_parser = subparsers.add_parser("serve", help="Start the web server")
-    serve_parser.add_argument(
-        "--dev",
-        action="store_true",
-        help="Development mode (hot reload, synthetic data, port 8001)",
-    )
     serve_parser.add_argument(
         "--port",
         type=int,
@@ -673,7 +643,11 @@ def main() -> None:
         help="Port number (default: 8001 for dev, 8000 for prod)",
     )
     serve_parser.add_argument("--host", default=None, help="Host to bind to (default: 127.0.0.1)")
-    _add_data_dir_argument(serve_parser, suppress_default=True)
+    _add_data_dir_argument(
+        serve_parser,
+        suppress_default=True,
+        dev_help="Development mode (fafycat_dev.db, hot reload, synthetic data, port 8001)",
+    )
 
     import_parser = subparsers.add_parser("import", help="Import transactions from a CSV file")
     import_parser.add_argument("file", type=Path, help="Path to the CSV file")
@@ -681,6 +655,17 @@ def main() -> None:
 
     init_parser = subparsers.add_parser("init", help="Initialize data directory and default categories")
     _add_data_dir_argument(init_parser, suppress_default=True)
+
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Show version, database path, row counts, and model state",
+        description=(
+            "Print the version, data dir, database path and row counts, model state, and warnings about "
+            "other database files as JSON. Never changes anything. Examples: fafycat status  |  "
+            "fafycat --dev status"
+        ),
+    )
+    _add_data_dir_argument(status_parser, suppress_default=True)
 
     # tx subcommand group
     tx_parser = subparsers.add_parser("tx", help="Transaction queries")
@@ -979,24 +964,26 @@ def main() -> None:
         ),
         "skill": (skill_parser, {"install": cmd_skill_install}),
     }
-    if args.command in group_commands:
-        from fafycat.core.config_file import ConfigFileError
-
-        group_parser, handlers = group_commands[args.command]
-        try:
-            _dispatch_group(group_parser, args, handlers)
-        except ConfigFileError as exc:
-            from fafycat.cli_query.output import emit_error
-
-            emit_error(str(exc))
-        return
-
     leaf_commands: dict[str, Callable[[argparse.Namespace], None]] = {
         "serve": cmd_serve,
         "import": cmd_import,
         "init": cmd_init,
+        "status": cmd_status,
     }
-    leaf_commands[args.command](args)
+
+    from fafycat.core.config import DataLocationError
+    from fafycat.core.config_file import ConfigFileError
+
+    try:
+        if args.command in group_commands:
+            group_parser, handlers = group_commands[args.command]
+            _dispatch_group(group_parser, args, handlers)
+        else:
+            leaf_commands[args.command](args)
+    except (ConfigFileError, DataLocationError) as exc:
+        from fafycat.cli_query.output import emit_error
+
+        emit_error(str(exc))
 
 
 if __name__ == "__main__":

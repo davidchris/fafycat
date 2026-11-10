@@ -46,13 +46,7 @@ FafyCat is a privacy-focused financial transaction categorization tool that uses
    uv sync
    ```
 
-3. **Configure environment** (optional)
-   ```bash
-   cp .env.example .env
-   # Edit .env only if you want to override the defaults
-   ```
-
-4. **Start the application**
+3. **Start the application**
    ```bash
    # Start the packaged app
    fafycat serve
@@ -64,7 +58,7 @@ FafyCat is a privacy-focused financial transaction categorization tool that uses
    uv run fafycat serve --dev
    ```
 
-5. **Open your browser**
+4. **Open your browser**
    - Development: http://localhost:8001
    - Production: http://localhost:8000
 
@@ -181,31 +175,59 @@ See [docs/coding-agents.md](docs/coding-agents.md) for the full guide.
 
 ## 🛠️ Configuration
 
-### Environment Variables
+### Where your data lives
 
-Create a `.env` file only if you want to override the default user-data location:
+Every command (`serve`, `import`, `init`, `status`, and the query commands) opens the same database
+for the same flags and environment:
+
+| Mode | Database |
+|------|----------|
+| Production (default) | `<data dir>/fafycat_prod.db` |
+| Development (`--dev`) | `<data dir>/fafycat_dev.db`, seeded with synthetic data by `fafycat serve --dev` |
+
+`--data-dir` and `--dev` work with every command, at any position: `fafycat --dev tx list`,
+`fafycat serve --dev`, `fafycat import file.csv --data-dir /path`.
+
+The data dir is the first of: `--data-dir`, `FAFYCAT_DATA_DIR`, `[paths] data_dir` in
+`~/.config/fafycat/config.toml` (or the file named by `FAFYCAT_CONFIG`), and the platform user-data
+directory (`~/Library/Application Support/fafycat` on macOS, `~/.local/share/fafycat` on Linux).
+
+The database follows the same rule, command-line flag > environment > config file > default:
+
+1. `--data-dir` or `--dev` given: `<data dir>/fafycat_prod.db` or `<data dir>/fafycat_dev.db`.
+   `FAFYCAT_DB_URL` and `[paths] db_url` are then ignored, and models and exports go under
+   `--data-dir` too.
+2. Else `FAFYCAT_DB_URL`.
+3. Else `[paths] db_url` in the config file.
+4. Else `<data dir>/fafycat_prod.db`.
+
+`fafycat status` shows the database it chose and, in `database.source`, which rule chose it.
+
+Run `fafycat status` to see the database path, row counts, and model state. It also warns when
+another database file with transactions exists, for example a `fafycat.db` written by
+`fafycat import` in version 0.3 and earlier. FafyCat never merges or deletes such files. To use
+one, point `FAFYCAT_DB_URL` at it.
+
+If you run FafyCat from a checkout that has `./data/fafycat_prod.db` and you configure no other
+location, all commands use that file (models stay in the data dir) and print a warning. Set
+`FAFYCAT_DB_URL=sqlite:///$PWD/data/fafycat_prod.db` to choose it explicitly and silence the warning.
+
+### Environment variables
+
+FafyCat reads these from the process environment. It does not load a `.env` file; export them in
+your shell or service definition.
 
 ```bash
-# Data defaults to your platform user-data directory
-# Override only if you want a custom location
-FAFYCAT_DATA_DIR=/path/to/fafycat-data
-FAFYCAT_EXPORT_DIR=/path/to/fafycat-data/exports
-FAFYCAT_MODEL_DIR=/path/to/fafycat-data/models
-
-# Optional explicit database override
-FAFYCAT_DB_URL=sqlite:////path/to/fafycat-data/fafycat.db
-
-# Server settings
-FAFYCAT_DEV_PORT=8001
-FAFYCAT_PROD_PORT=8000
-FAFYCAT_HOST=127.0.0.1
+FAFYCAT_DATA_DIR=/path/to/fafycat-data          # data dir (database, models/, exports/)
+FAFYCAT_MODEL_DIR=/path/to/fafycat-data/models  # default: <data dir>/models; --data-dir overrides it
+FAFYCAT_EXPORT_DIR=/path/to/fafycat-data/exports  # default: <data dir>/exports; --data-dir overrides it
+FAFYCAT_DB_URL=sqlite:////path/to/fafycat.db    # use this database unless --data-dir or --dev is given
+FAFYCAT_CONFIG=/path/to/config.toml             # config file (default: ~/.config/fafycat/config.toml)
+FAFYCAT_DB_ECHO=true                            # log SQL statements
 ```
 
-### Database Management
-
-- **Default**: Uses your platform user-data directory
-- **Development**: `fafycat serve --dev` seeds synthetic test data
-- **Custom**: Set `FAFYCAT_DB_URL` or pass `--data-dir`
+The server binds to `127.0.0.1:8000` (`--dev`: port 8001). Use `fafycat serve --host HOST --port PORT`
+to change that.
 
 ## 📈 Performance
 

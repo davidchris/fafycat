@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
+from fafycat import __version__
 from fafycat.core.config import AppConfig
 from fafycat.core.database import DatabaseManager
 
@@ -30,7 +31,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="FafyCat - Family Finance Categorizer",
         description="Local-first transaction categorization tool",
-        version="0.1.0",
+        version=__version__,
     )
 
     # Initialize app configuration and database

@@ -45,36 +45,6 @@ def test_cli_import_malformed_csv_prints_error_json(cli_runner, tmp_path):
     assert "error" in payload
 
 
-def test_legacy_database_url_uses_legacy_prod_db_in_prod(tmp_path, monkeypatch):
-    legacy_db = tmp_path / "data" / "fafycat_prod.db"
-    legacy_db.parent.mkdir()
-    legacy_db.write_text("")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("FAFYCAT_DB_URL", raising=False)
-
-    assert cli._legacy_database_url(data_dir=None, dev=False) == f"sqlite:///{legacy_db.resolve()}"
-
-
-def test_legacy_database_url_skips_dev_mode(tmp_path, monkeypatch):
-    legacy_db = tmp_path / "data" / "fafycat_prod.db"
-    legacy_db.parent.mkdir()
-    legacy_db.write_text("")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("FAFYCAT_DB_URL", raising=False)
-
-    assert cli._legacy_database_url(data_dir=None, dev=True) is None
-
-
-def test_legacy_database_url_skips_explicit_data_dir(tmp_path, monkeypatch):
-    legacy_db = tmp_path / "data" / "fafycat_prod.db"
-    legacy_db.parent.mkdir()
-    legacy_db.write_text("")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("FAFYCAT_DB_URL", raising=False)
-
-    assert cli._legacy_database_url(data_dir=Path("/tmp/custom-data"), dev=False) is None
-
-
 @pytest.mark.integration
 def test_cli_import_valid_csv_prints_expected_json_shape(cli_runner, tmp_path):
     """The CLI's public JSON contract: these four keys must be present.
@@ -99,8 +69,13 @@ def test_cli_import_valid_csv_prints_expected_json_shape(cli_runner, tmp_path):
 
 
 @pytest.mark.integration
-def test_cat_list_returns_envelope_shape(cli_runner):
-    """cat list on a fresh DB returns envelope with categories list and total_count."""
+def test_cat_list_returns_envelope_shape(cli_runner, tmp_data_dir: Path):
+    """cat list on an empty DB returns envelope with categories list and total_count."""
+    cli_runner("init")
+    conn = sqlite3.connect(tmp_data_dir / "test.db")
+    with conn:
+        conn.execute("DELETE FROM categories")
+    conn.close()
     result = cli_runner("cat", "list")
     assert result.returncode == 0, f"stderr={result.stderr!r}"
     payload = json.loads(result.stdout)

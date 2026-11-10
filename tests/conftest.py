@@ -21,12 +21,21 @@ from sqlalchemy.orm import sessionmaker
 _ROOT = Path(__file__).parent.parent
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _hide_user_config_file(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Keep ~/.config/fafycat/config.toml out of module- and session-scoped fixtures too."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("FAFYCAT_CONFIG", str(tmp_path_factory.mktemp("no-config") / "missing.toml"))
+        yield
+
+
 @pytest.fixture(autouse=True)
-def _isolate_fafycat_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Strip FAFYCAT_* env vars before each test; restore on teardown."""
+def _isolate_fafycat_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Strip FAFYCAT_* env vars and hide the user's config file before each test; restore on teardown."""
     for key in list(os.environ):
         if key.startswith("FAFYCAT_"):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("FAFYCAT_CONFIG", str(tmp_path / "no-fafycat-config.toml"))
 
 
 @pytest.fixture

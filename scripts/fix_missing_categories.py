@@ -1,25 +1,20 @@
 #!/usr/bin/env python3
 """Fix transactions that were imported without proper category assignment."""
 
-import os
 import sys
 from pathlib import Path
-
-# Set production environment to work with the production database
-os.environ["FAFYCAT_DB_URL"] = "sqlite:///data/fafycat_prod.db"
-os.environ["FAFYCAT_ENV"] = "production"
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fafycat.core.config import AppConfig
+from fafycat.core.config import resolve_config
 from fafycat.core.database import CategoryORM, DatabaseManager, TransactionORM
 
 
 def fix_missing_categories() -> None:
     """Fix transactions with missing category assignments based on merchant patterns."""
 
-    config = AppConfig()
+    config = resolve_config()
     db_manager = DatabaseManager(config)
 
     with db_manager.get_session() as session:

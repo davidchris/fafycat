@@ -7,14 +7,14 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fafycat.core.config import AppConfig
+from fafycat.core.config import resolve_config
 from fafycat.core.database import DatabaseManager
 from fafycat.data.csv_processor import CSVProcessor, create_synthetic_transactions
 
 
 def main() -> None:
     """Import synthetic transactions."""
-    config = AppConfig()
+    config = resolve_config()
     db_manager = DatabaseManager(config)
 
     with db_manager.get_session() as session:

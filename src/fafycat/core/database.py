@@ -1,6 +1,7 @@
 """Database operations using SQLAlchemy."""
 
 import logging
+import sqlite3
 from datetime import UTC, datetime
 
 from sqlalchemy import (
@@ -17,10 +18,11 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    inspect,
 )
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 
-from .config import AppConfig
+from .config import AppConfig, sqlite_path
 
 logger = logging.getLogger(__name__)
 
@@ -219,8 +221,20 @@ class ReviewEventORM(Base):
 class DatabaseManager:
     """Database connection and session management."""
 
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, *, read_only: bool = False):
+        """Connect to the configured database.
+
+        Args:
+            config: Application configuration; ``config.database.url`` is opened.
+            read_only: Open a SQLite file with ``mode=ro``, so no statement can
+                change it. The file must exist. Callers must not call
+                ``create_tables`` on such a manager.
+
+        Raises:
+            ValueError: ``read_only`` is set but the URL is not a SQLite file.
+        """
         self.config = config
+        self.read_only = read_only
 
         # Configure SQLite connection with timeout for long operations
         connect_args = {}
@@ -230,15 +244,51 @@ class DatabaseManager:
                 "check_same_thread": False,
             }
 
-        self.engine = create_engine(config.database.url, echo=config.database.echo, connect_args=connect_args)
+        db_file = sqlite_path(config.database.url) if read_only else None
+        if read_only and db_file is None:
+            raise ValueError(f"Read-only access needs a SQLite database file, not {config.database.url}")
+        if db_file is not None:
+            uri = f"{db_file.resolve().as_uri()}?mode=ro"
+            self.engine = create_engine(
+                "sqlite://",
+                echo=config.database.echo,
+                creator=lambda: sqlite3.connect(uri, uri=True, timeout=300, check_same_thread=False),
+            )
+        else:
+            self.engine = create_engine(config.database.url, echo=config.database.echo, connect_args=connect_args)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+
+    def schema_problems(self) -> list[str]:
+        """List the tables and columns the ORM declares but the database lacks, without changing anything.
+
+        Returns:
+            Entries such as ``"table budget_plans"`` or ``"column transactions.merchant_pattern"``;
+            empty when ``create_tables`` has nothing to add.
+        """
+        inspector = inspect(self.engine)
+        existing_tables = set(inspector.get_table_names())
+        problems: list[str] = []
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                problems.append(f"table {table.name}")
+                continue
+            existing_columns = {column["name"] for column in inspector.get_columns(table.name)}
+            problems.extend(
+                f"column {table.name}.{column.name}" for column in table.columns if column.name not in existing_columns
+            )
+        return problems
 
     def create_tables(self) -> None:
         """Create all database tables and any indexes missing from existing tables.
 
         ``create_all`` skips tables that already exist, so indexes added to the
-        schema after a database was created are built explicitly here.
+        schema after a database was created are built explicitly here. This
+        also runs the review-flag repair, so only the server and the writing
+        CLI commands (``init``, ``import``) call it; query commands open the
+        database read-only instead.
         """
+        if self.read_only:
+            raise RuntimeError("create_tables() needs a writable DatabaseManager")
         Base.metadata.create_all(bind=self.engine)
         with self.engine.connect() as conn:
             for table in Base.metadata.tables.values():
