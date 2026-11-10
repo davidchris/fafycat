@@ -20,19 +20,20 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fafycat.core.config import AppConfig, export_to_environ, resolve_config
+from fafycat.core.config import AppConfig, export_to_environ, resolve_config, sqlite_path
 from fafycat.core.database import DatabaseManager
 
 
 def reset_database(config: AppConfig) -> None:
     """Remove the configured database file to start fresh; other database files are left alone."""
-    # Extract database file path from URL
-    db_url = config.database.url
-    if db_url.startswith("sqlite:///"):
-        db_file_path = Path(db_url.replace("sqlite:///", ""))
-        if db_file_path.exists():
-            print(f"Removing existing database: {db_file_path}")
-            db_file_path.unlink()
+    db_file_path = sqlite_path(config.database.url)
+    if db_file_path is None:
+        # Rebuilding on top of a database we cannot delete would keep its old rows.
+        print(f"Error: cannot reset {config.database.url}: only a SQLite database file can be reset")
+        sys.exit(1)
+    if db_file_path.exists():
+        print(f"Removing existing database: {db_file_path}")
+        db_file_path.unlink()
 
 
 def initialize_fresh_database(config: AppConfig) -> DatabaseManager:
