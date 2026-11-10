@@ -7,6 +7,51 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-11
+
+### Changed
+- **The model learns from people only.** Training, Merchant Rules, the
+  calibration table, and the training-readiness counts use Human Labels:
+  transactions whose latest Review Event is a user review, a propagation,
+  or a labelled CSV import. Auto-accepts and bulk approves no longer feed
+  the model its own guesses. Models trained before this change
+  (`2.1-stack`) must be retrained. (#62)
+- **Merchant names survive cleaning.** Only a trailing city or `DE` is
+  stripped ("Cafe de Paris" stays whole). Partial Merchant Rules,
+  keyword features, and category-type guesses match whole words, so
+  "Amazing Thai Restaurant" no longer hits the AMAZON rule. Stored
+  Merchant Patterns are recomputed once on upgrade. (#62)
+- **Savings are net saved.** A transfer to savings counts as saving, a
+  transfer back counts as de-saving. Savings tracking reports net saved
+  per month (negative for a de-saving month), counts only saving months
+  in averages, and adds `months_with_desaving`. The `amount`,
+  `cumulative_amount`, `unreviewed_amount`, and `total_savings` fields
+  change sign. Budget variance stays spending-only. (#67)
+- **Category names are unique, ignoring case.** New defaults use
+  `investment_income` and `other_income`. A duplicate name returns 409,
+  names are limited to 50 characters, and a name an old database holds
+  twice is resolved to the active one or written as `name (type)`. The
+  review forms send the category id, and `PUT /api/transactions/{id}/category`
+  accepts `category_id` as well as a name. (#65)
+
+### Fixed
+- `/api/ml/predict` and `/api/ml/predict/bulk` work with the default
+  ensemble. (#65)
+- `batch-repredict` pages with a cursor and reports an accurate
+  `remaining`; the review and settings pages re-predict the whole queue.
+  (#65)
+- Excel export works (`openpyxl` is now a dependency). CSV and Excel
+  exports neutralise spreadsheet formulas in text cells. (#65)
+- Client errors stay client errors: an out-of-range budget year is 400, an
+  empty export is 404, an unknown `sort_by` is 400, and an unknown
+  category is 400 "Category not found". (#65)
+- Settings: "Create Your First Category" works, failed changes show the
+  server's error, every inactive category is reachable, and "model ready"
+  means the model actually loaded. (#65)
+- `analytics top` accepts `--this-month`/`--last-month`; `--category`
+  ignores case and an unknown name exits 1 with a JSON error. Confidence
+  0.0 shows as 0 %, a missing one as N/A. (#65)
+
 ## [0.3.1] - 2026-11-11
 
 ### Fixed
@@ -230,7 +275,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - The repository was prepared for wider public sharing with updated
   documentation.
 
-[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/davidchris/fafycat/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/davidchris/fafycat/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/davidchris/fafycat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/davidchris/fafycat/compare/v0.1.1...v0.2.0
