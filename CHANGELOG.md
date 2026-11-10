@@ -48,7 +48,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 - `fafycat status` (database path and source, row counts, model state,
-  stray database files) and `fafycat --version`. (#66)
+  stray database files) and `fafycat --version`. (#66, #70)
 
 ### Removed
 - The `.env` instructions and the `FAFYCAT_*_PORT`, `FAFYCAT_HOST`, and
