@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+- scikit-learn 1.9.1 (was 1.7.0). Training results are unchanged, and
+  saved models do not need a retrain.
+
 ## [0.4.0] - 2026-11-11
 
 ### Changed
