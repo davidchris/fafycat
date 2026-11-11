@@ -11,6 +11,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import pickle
 import sqlite3
 import subprocess
 import sys
@@ -204,6 +205,23 @@ def test_status_with_data_dir_ignores_config_file_db_url(tmp_path: Path, hermeti
     assert database["path"] == str(data_dir.resolve() / "fafycat_prod.db")
     assert database["source"] == "--data-dir/--dev flag"
     assert _sha256(elsewhere) == before
+
+
+def test_status_reports_why_the_saved_model_does_not_load(tmp_path: Path, run_cli) -> None:
+    """Status reaches the model loader, so an old model is reported as needing a retrain."""
+    data_dir = tmp_path / "data"
+    _make_db(data_dir / "fafycat_prod.db")
+    (data_dir / "models").mkdir()
+    legacy = {"model_version": "1.0-ensemble", "lgbm_model_data": {}, "nb_component": None}
+    (data_dir / "models" / "ensemble_categorizer.pkl").write_bytes(pickle.dumps(legacy))
+
+    result = run_cli("status", "--data-dir", str(data_dir))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    model = json.loads(result.stdout)["model"]
+    assert model["exists"] is True
+    assert model["loads"] is False
+    assert model["error"].startswith("IncompatibleModelError")
 
 
 def test_bare_app_config_defaults_to_the_prod_database(tmp_path: Path, hermetic_env, monkeypatch) -> None:

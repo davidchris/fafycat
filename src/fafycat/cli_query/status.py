@@ -118,6 +118,7 @@ def _model_status(config: AppConfig) -> dict[str, Any]:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
+    from fafycat.core.database import Base
     from fafycat.ml.categorizer import TransactionCategorizer
     from fafycat.ml.ensemble_categorizer import EnsembleCategorizer
 
@@ -126,8 +127,10 @@ def _model_status(config: AppConfig) -> dict[str, Any]:
     if not path.exists():
         return status
 
-    # Loading needs a session object but reads no rows; keep the user's database out of it.
+    # The categorizers query their tables when built, but loading reads no rows. Give them an empty
+    # in-memory schema so the user's database stays out of it.
     engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     try:
         categorizer = (
