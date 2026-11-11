@@ -357,6 +357,7 @@ def render_review_page(request: Request):
         </div>
     </div>
 
+    <script src="/static/js/repredict.js" defer></script>
     <script src="/static/js/review.js" defer></script>
     """
 

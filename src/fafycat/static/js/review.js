@@ -2,7 +2,7 @@
 //
 // The retrain endpoint hands back a job id and does the work in a background
 // thread, so this script starts the job, polls it to completion, re-predicts
-// the unreviewed transactions with the fresh model, and reloads the table.
+// the unreviewed transactions with the fresh model (repredict.js), and reloads the table.
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLLS = 600; // 20 minutes at the poll interval above
@@ -100,16 +100,10 @@ async function pollUntilFinished(jobId) {
     throw new Error('Training is taking longer than expected. Check the settings page.');
 }
 
-async function repredictQueue() {
-    const response = await fetch('/api/ml/predict/batch-repredict', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+function repredictQueue() {
+    return repredictAll(function (remaining) {
+        setButtonLabel('Re-predicting the queue… ' + remaining + ' remaining');
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(errorMessage(data, 'Re-prediction failed.'));
-    }
-    return data;
 }
 
 function refreshQueueTable() {
@@ -158,9 +152,12 @@ function describeRepredictSummary(summary) {
         return 'Model retrained. No transactions needed a new prediction.';
     }
     const autoAccepted = summary.auto_accepted || 0;
+    const notReached = summary.remaining
+        ? ' ' + summary.remaining + ' transactions were not re-predicted yet; run it again.'
+        : '';
     return (
         'Model retrained and ' + made + ' transactions re-predicted — ' +
-        autoAccepted + ' auto-accepted, ' + (made - autoAccepted) + ' left to review.'
+        autoAccepted + ' auto-accepted, ' + (made - autoAccepted) + ' left to review.' + notReached
     );
 }
 

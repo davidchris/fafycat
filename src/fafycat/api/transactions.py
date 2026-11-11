@@ -2,6 +2,7 @@
 
 import contextlib
 from datetime import date
+from html import escape as html_escape
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_session
 from fafycat.api.models import BulkApproveRequest, BulkCategorizeRequest, TransactionResponse, TransactionUpdate
-from fafycat.api.services import REVIEW_IMPACT_SORT, CategoryService, TransactionService
+from fafycat.api.services import REVIEW_IMPACT_SORT, SORT_KEYS, CategoryService, TransactionService
 from fafycat.core.models import ReviewPriority
 from fafycat.web.components.transaction_table import (
     render_propagation_result,
@@ -59,8 +60,16 @@ async def get_pending_transactions(
 async def update_transaction_category(
     transaction_id: str, update: TransactionUpdate, db: Session = Depends(get_db_session)
 ) -> TransactionResponse:
-    """Update the category of a specific transaction."""
-    result = TransactionService.update_transaction_category(session=db, transaction_id=transaction_id, update=update)
+    """Update the category of a specific transaction.
+
+    The category is a name, ignoring case, or ``name (type)`` when several types share the name.
+    """
+    try:
+        result = TransactionService.update_transaction_category(
+            session=db, transaction_id=transaction_id, update=update
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     if not result:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -71,12 +80,24 @@ async def update_transaction_category(
 @router.put("/{transaction_id}/categorize-htmx", response_class=HTMLResponse)
 async def categorize_transaction_htmx(
     transaction_id: str,
-    actual_category: str = Form(...),
+    actual_category: str | None = Form(None),
+    category_id: int | None = Form(None),
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
-    """HTMX-enabled categorization endpoint that returns HTML fragment."""
-    update = TransactionUpdate(actual_category=actual_category, is_reviewed=True)
-    result = TransactionService.update_transaction_category(session=db, transaction_id=transaction_id, update=update)
+    """HTMX-enabled categorization endpoint that returns HTML fragment.
+
+    The review table sends ``category_id``; ``actual_category`` takes a name or ``name (type)``.
+    """
+    try:
+        update = TransactionUpdate(actual_category=actual_category, category_id=category_id, is_reviewed=True)
+        result = TransactionService.update_transaction_category(
+            session=db, transaction_id=transaction_id, update=update
+        )
+    except (LookupError, ValueError) as e:
+        return HTMLResponse(
+            content=f'<div class="alert alert-error">{html_escape(str(e))}</div>',
+            status_code=400,
+        )
 
     if not result:
         return HTMLResponse(
@@ -96,8 +117,6 @@ async def categorize_transaction_htmx(
             categories,
             pattern=pattern,
             sibling_count=sibling_count,
-            # The stored name, not the submitted one: it is what propagate looks up.
-            category_name=result.actual_category or actual_category,
         )
     else:
         html = render_row(result, categories)
@@ -107,7 +126,8 @@ async def categorize_transaction_htmx(
 @router.post("/propagate", response_class=HTMLResponse)
 async def propagate_category(
     source_id: str = Form(...),
-    actual_category: str = Form(...),
+    actual_category: str | None = Form(None),
+    category_id: int | None = Form(None),
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
     """Apply a just-saved category to every unreviewed transaction with the same merchant pattern.
@@ -116,7 +136,9 @@ async def propagate_category(
     ``transactions-changed`` so the table reloads the rows that changed
     underneath the user.
     """
-    result = TransactionService.propagate_category(session=db, source_id=source_id, category_name=actual_category)
+    result = TransactionService.propagate_category(
+        session=db, source_id=source_id, category_name=actual_category, category_id=category_id
+    )
     return HTMLResponse(
         content=render_propagation_result(source_id, result["applied"]),
         headers={"HX-Trigger": "transactions-changed"},
@@ -134,7 +156,7 @@ async def get_transactions_table(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     status: str = Query("pending"),  # pending, reviewed, all
-    sort_by: str = Query(REVIEW_IMPACT_SORT),  # review_impact, date, confidence_score, amount, name
+    sort_by: str = Query(REVIEW_IMPACT_SORT, description=f"One of {', '.join(SORT_KEYS)}"),
     sort_order: str = Query("desc"),  # asc, desc
     search: str = Query(""),
     category_filter: str = Query(""),
@@ -143,6 +165,8 @@ async def get_transactions_table(
     db: Session = Depends(get_db_session),
 ) -> HTMLResponse:
     """Get transactions table fragment for HTMX filtering with pagination."""
+    if sort_by not in SORT_KEYS:
+        raise HTTPException(status_code=400, detail=f"sort_by must be one of {', '.join(SORT_KEYS)}")
     # Convert status parameter to filters ("all" means no filter)
     is_reviewed = {"pending": False, "reviewed": True}.get(status)
 
@@ -187,9 +211,12 @@ async def bulk_categorize_transactions(request: BulkCategorizeRequest, db: Sessi
 
     for transaction_id in request.transaction_ids:
         update = TransactionUpdate(actual_category=request.category)
-        result = TransactionService.update_transaction_category(
-            session=db, transaction_id=transaction_id, update=update
-        )
+        try:
+            result = TransactionService.update_transaction_category(
+                session=db, transaction_id=transaction_id, update=update
+            )
+        except LookupError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         if result:
             updated_count += 1
 

@@ -1,5 +1,7 @@
 """Transaction table renderer shared by the review page and HTMX endpoints."""
 
+from collections import Counter
+
 from fasthtml.common import (
     A,
     Button,
@@ -20,27 +22,53 @@ from fasthtml.common import (
     to_xml,
 )
 
+from fafycat.api.services import qualified_name
 from fafycat.web.components.pagination import FILTER_HX_INCLUDE, create_full_pagination
 
 COLUMN_COUNT = 7
 """Columns in the transaction table; inline prompt rows span all of them."""
 
 
+def category_labels(categories) -> dict:
+    """Map each category id to a label no other category shares.
+
+    A name shared by several types (databases made with the old default set)
+    is shown as ``name (type)``. A category whose own name equals such a label,
+    for example an imported ``other (income)``, gets its type appended too.
+    """
+    name_counts = Counter(cat.name.lower() for cat in categories)
+    labels = {cat.id: qualified_name(cat) if name_counts[cat.name.lower()] > 1 else cat.name for cat in categories}
+    label_counts = Counter(label.lower() for label in labels.values())
+    for cat in categories:
+        if labels[cat.id] == cat.name and label_counts[cat.name.lower()] > 1:
+            labels[cat.id] = qualified_name(cat)
+    return labels
+
+
 def _category_select(tx, categories) -> Select:
-    """Category dropdown with the transaction's current category preselected."""
-    current = tx.actual_category or tx.predicted_category
+    """Category dropdown with the transaction's current category preselected.
+
+    Options submit the category id, so two categories with similar names never
+    stand for each other.
+    """
+    current_id = getattr(tx, "actual_category_id", None) or getattr(tx, "predicted_category_id", None)
+    current_name = tx.actual_category or tx.predicted_category
+    labels = category_labels(categories)
     # NotStr keeps the empty value attribute — fastcore drops falsy attr values,
     # and the placeholder must submit "" rather than its label text.
     options = [Option("Select category...", value=NotStr(""))]
     for cat in categories:
-        options.append(Option(cat.name, value=cat.name, selected=cat.name == current))
-    return Select(*options, name="actual_category", cls="form-select")
+        selected = cat.id == current_id if current_id is not None else cat.name == current_name
+        options.append(Option(labels[cat.id], value=str(cat.id), selected=selected))
+    return Select(*options, name="category_id", cls="form-select")
 
 
 def _confidence_color(confidence: float | None) -> str:
-    if confidence and confidence < 0.5:
+    if confidence is None:
+        return "text-secondary"
+    if confidence < 0.5:
         return "text-spending"
-    if confidence and confidence < 0.8:
+    if confidence < 0.8:
         return "text-income"
     return "text-success"
 
@@ -48,7 +76,7 @@ def _confidence_color(confidence: float | None) -> str:
 def _row(tx, categories) -> Tr:
     """Build a transaction row with its HTMX categorization form."""
     category_name = tx.actual_category or tx.predicted_category or "Uncategorized"
-    confidence_display = f"{tx.confidence:.1%}" if tx.confidence else "N/A"
+    confidence_display = f"{tx.confidence:.1%}" if tx.confidence is not None else "N/A"
     if tx.is_reviewed:
         badge = Span(f"{category_name} ✓", cls="badge badge-success")
         status_text, status_color = "Complete", "text-success"
@@ -102,7 +130,7 @@ def _row(tx, categories) -> Tr:
     )
 
 
-def _propagation_prompt(tx, pattern: str, sibling_count: int, category_name: str) -> Tr:
+def _propagation_prompt(tx, pattern: str, sibling_count: int, category_label: str) -> Tr:
     """Build the inline row offering to apply a just-saved category to its siblings."""
     return Tr(
         Td(
@@ -112,8 +140,8 @@ def _propagation_prompt(tx, pattern: str, sibling_count: int, category_name: str
             ),
             Form(
                 Input(type="hidden", name="source_id", value=str(tx.id)),
-                Input(type="hidden", name="actual_category", value=category_name),
-                Button(f"Apply {category_name} to all", type="submit", cls="btn btn-primary btn-sm"),
+                Input(type="hidden", name="category_id", value=str(tx.actual_category_id)),
+                Button(f"Apply {category_label} to all", type="submit", cls="btn btn-primary btn-sm"),
                 hx_post="/api/transactions/propagate",
                 hx_target=f"#propagate-{tx.id}",
                 hx_swap="outerHTML",
@@ -139,7 +167,7 @@ def render_row(tx, categories) -> str:
     return to_xml(_row(tx, categories))
 
 
-def render_row_with_prompt(tx, categories, *, pattern: str, sibling_count: int, category_name: str) -> str:
+def render_row_with_prompt(tx, categories, *, pattern: str, sibling_count: int) -> str:
     """Render a saved row followed by the prompt to propagate its category.
 
     Both rows are returned together because the categorize endpoint swaps the
@@ -150,9 +178,9 @@ def render_row_with_prompt(tx, categories, *, pattern: str, sibling_count: int, 
         categories: Categories offered in the row's dropdown.
         pattern: Cleaned merchant name the siblings share.
         sibling_count: Number of unreviewed siblings, always greater than zero.
-        category_name: Category the user saved, offered for the siblings.
     """
-    return to_xml(_row(tx, categories)) + to_xml(_propagation_prompt(tx, pattern, sibling_count, category_name))
+    label = category_labels(categories).get(tx.actual_category_id, tx.actual_category)
+    return to_xml(_row(tx, categories)) + to_xml(_propagation_prompt(tx, pattern, sibling_count, label))
 
 
 def render_propagation_result(source_id: str, applied: int) -> str:

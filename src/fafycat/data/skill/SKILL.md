@@ -10,6 +10,7 @@ Read-only access to your household finance data. Every command prints JSON to st
 
 ### `fafycat tx list`
 Paginated transaction list. Response envelope: `transactions`, `total_count`, `has_next`, `skip`, `limit`. Default limit 20, cap 500.
+`--category` ignores case; an unknown name exits 1 with `{"error": "Category not found: ..."}`.
 ```
 fafycat tx list --month 2025-01
 fafycat tx list --ytd --category Groceries --limit 50
@@ -76,11 +77,12 @@ fafycat analytics yoy --type spending --years 2023,2024,2025
 ```
 
 ### `fafycat analytics top`
-Largest spending transactions for a month. `--year` defaults to current year; `--month` defaults to current month.
+Largest spending transactions for a month. `--year` defaults to current year; `--month` (1-12) defaults to current month.
+`--this-month` or `--last-month` pick the month instead; they cannot be combined with `--year`/`--month`.
 Response: `year`, `month`, `month_name`, `top_transactions`, `total_spending`, `transactions_count`, `unreviewed`.
 ```
 fafycat analytics top --year 2025 --month 3
-fafycat analytics top --limit 10
+fafycat analytics top --last-month --limit 10
 ```
 
 ## Unreviewed transactions

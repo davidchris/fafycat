@@ -90,7 +90,7 @@ def predict_unpredicted(
     transactions left unprocessed because of ``limit``. Commits.
     """
     query = db.query(TransactionORM).filter(TransactionORM.predicted_category_id.is_(None))
-    txns, remaining = _select_with_limit(query, limit)
+    txns, remaining = _select_page(query, limit)
     return _apply_predictions(db, txns, categorizer, threshold=threshold, trigger=trigger), remaining
 
 
@@ -122,28 +122,45 @@ def repredict_unreviewed(
     categorizer: ConfidenceCategorizer,
     *,
     limit: int = 1000,
+    after: str | None = None,
     threshold: float | None = None,
     trigger: str = "repredict",
-) -> tuple[CategorizationSummary, int]:
-    """Re-predict unreviewed transactions that already have a Prediction.
+) -> tuple[CategorizationSummary, int, str | None]:
+    """Re-predict one page of unreviewed transactions that already have a Prediction.
 
-    Returns the Categorization Summary and the number of matching
-    transactions left unprocessed because of ``limit``. Commits.
+    A re-predicted row below the Auto-approve Threshold still matches the
+    filter, so pages are walked by transaction id: pass the returned cursor as
+    ``after`` to get the next page. Commits.
+
+    Args:
+        db: Database session.
+        categorizer: Produces the new Predictions.
+        limit: Page size.
+        after: Cursor from the previous page; only ids after it are selected.
+        threshold: Auto-approve Threshold; the stored setting when None.
+        trigger: Audit Trail trigger name.
+
+    Returns:
+        The Categorization Summary, the number of matching transactions after
+        this page, and the cursor for the next page (None when this was the last).
     """
     query = db.query(TransactionORM).filter(
         TransactionORM.is_reviewed.is_(False),
         TransactionORM.predicted_category_id.is_not(None),
     )
-    txns, remaining = _select_with_limit(query, limit)
-    return _apply_predictions(db, txns, categorizer, threshold=threshold, trigger=trigger), remaining
+    if after is not None:
+        query = query.filter(TransactionORM.id > after)
+    txns, remaining = _select_page(query, limit)
+    next_cursor = str(txns[-1].id) if txns and remaining else None
+    return _apply_predictions(db, txns, categorizer, threshold=threshold, trigger=trigger), remaining, next_cursor
 
 
-def _select_with_limit(query, limit: int) -> tuple[list[TransactionORM], int]:
-    """Fetch up to ``limit`` matches and count how many are left beyond it."""
-    txns = query.limit(limit).all()
-    if len(txns) < limit:
+def _select_page(query, limit: int) -> tuple[list[TransactionORM], int]:
+    """Fetch the first ``limit`` matches by id and count the matches after them."""
+    txns = query.order_by(TransactionORM.id).limit(limit).all()
+    if not txns or len(txns) < limit:
         return txns, 0
-    return txns, max(0, query.count() - len(txns))
+    return txns, query.filter(TransactionORM.id > txns[-1].id).count()
 
 
 def _to_input(txn: TransactionORM) -> TransactionInput:

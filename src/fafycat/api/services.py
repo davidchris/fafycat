@@ -2,11 +2,13 @@
 
 import calendar
 import math
+import re
 import statistics
 from datetime import date, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import and_, case, func, literal, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased, joinedload
 from sqlalchemy.sql import ColumnElement
 
@@ -31,6 +33,139 @@ Measured in experiments/04-queue-ordering: at every reviewer budget this order
 labels more of the backlog correctly than least-confident-first, because a
 review of a merchant with many pending rows propagates to all of them.
 """
+
+
+SORT_COLUMNS = {
+    "date": TransactionORM.date,
+    "confidence_score": TransactionORM.confidence_score,
+    "amount": TransactionORM.amount,
+    "name": TransactionORM.name,
+}
+"""Transaction columns the review table may sort by, besides :data:`REVIEW_IMPACT_SORT`."""
+
+SORT_KEYS = (REVIEW_IMPACT_SORT, *SORT_COLUMNS)
+"""Every accepted ``sort_by`` value."""
+
+
+class CategoryNotFoundError(LookupError):
+    """No category has the given name."""
+
+    def __init__(self, ref: str) -> None:
+        super().__init__(f"Category not found: {ref}")
+
+
+class AmbiguousCategoryError(LookupError):
+    """Several categories share the name; the caller must say which type it means."""
+
+    def __init__(self, ref: str, candidates: list[CategoryORM]) -> None:
+        self.candidates = candidates
+        options = ", ".join(f"'{qualified_name(c)}'" for c in candidates)
+        super().__init__(f"Category name '{ref}' is used by several types; use one of {options}")
+
+
+class DuplicateCategoryError(ValueError):
+    """A category with this name exists already, ignoring case and type."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Category '{name}' already exists")
+
+
+_QUALIFIED = re.compile(r"^(?P<name>.+) \((?P<type>spending|income|saving)\)$")
+
+
+def qualified_name(category: Any) -> str:
+    """``name (type)``: the label that tells apart categories sharing a name."""
+    return f"{category.name} ({category.type})"
+
+
+def _name_key(name: object) -> str:
+    """Comparison key for category names: stripped and case-folded in Python.
+
+    SQLite's ``lower()`` folds ASCII only, so ``Ärzte`` would not match ``ärzte`` in SQL.
+    """
+    return str(name).strip().casefold()
+
+
+def find_category(session: Session, ref: str) -> CategoryORM:
+    """Resolve a category reference: its name, ignoring case, or ``name (type)``.
+
+    Names are unique for new categories, but databases created with the old
+    default set hold ``other`` and ``investment`` twice. Such a name resolves
+    to the one active category of that name, else only with the type
+    qualifier, so a lookup never guesses.
+
+    Raises:
+        CategoryNotFoundError: No category matches.
+        AmbiguousCategoryError: Several active categories share the unqualified name.
+    """
+    ref = ref.strip()
+    categories = session.query(CategoryORM).order_by(CategoryORM.id).all()
+    found = [c for c in categories if _name_key(c.name) == _name_key(ref)]
+    if len(found) > 1:
+        active = [c for c in found if c.is_active]
+        if len(active) == 1:
+            return active[0]
+        raise AmbiguousCategoryError(ref, found)
+    if found:
+        return found[0]
+    qualified = _QUALIFIED.match(ref)
+    if qualified:
+        for category in categories:
+            if _name_key(category.name) == _name_key(qualified["name"]) and category.type == qualified["type"]:
+                return category
+    raise CategoryNotFoundError(ref)
+
+
+def resolve_category(session: Session, *, name: str | None = None, category_id: int | None = None) -> CategoryORM:
+    """Resolve a category by id when given, else by name with :func:`find_category`.
+
+    Raises:
+        CategoryNotFoundError: No category matches.
+        AmbiguousCategoryError: The name is shared and needs its type.
+    """
+    if category_id is not None:
+        category = session.get(CategoryORM, category_id)
+        if category is None:
+            raise CategoryNotFoundError(f"id {category_id}")
+        return category
+    if name is None:
+        raise CategoryNotFoundError("(none given)")
+    return find_category(session, name)
+
+
+def _category_ids_for(session: Session, ref: str) -> list[int]:
+    """Ids a category filter matches: one for a resolvable reference, every namesake for a shared name."""
+    try:
+        return [_to_int(find_category(session, ref).id)]
+    except AmbiguousCategoryError as e:
+        return [_to_int(c.id) for c in e.candidates]
+    except CategoryNotFoundError:
+        return []
+
+
+def _apply_sort(query, sort_by: str, sort_order: str):
+    """Order a transaction query by one of :data:`SORT_KEYS`, ties broken by id.
+
+    Raises:
+        ValueError: ``sort_by`` is not one of :data:`SORT_KEYS`.
+    """
+    descending = sort_order.lower() != "asc"
+    if sort_by == REVIEW_IMPACT_SORT:
+        impact = _review_impact_expr()
+        return query.order_by(
+            impact.desc() if descending else impact.asc(), TransactionORM.date.asc(), TransactionORM.id
+        )
+    if sort_by not in SORT_COLUMNS:
+        raise ValueError(f"sort_by must be one of {', '.join(SORT_KEYS)}")
+    sort_column = SORT_COLUMNS[sort_by]
+    return query.order_by(sort_column.desc() if descending else sort_column.asc(), TransactionORM.id)
+
+
+def _name_taken(session: Session, name: str, *, exclude_id: int | None = None) -> bool:
+    return any(
+        _name_key(other_name) == _name_key(name) and other_id != exclude_id
+        for other_id, other_name in session.query(CategoryORM.id, CategoryORM.name)
+    )
 
 
 def _pending_siblings_expr() -> ColumnElement:
@@ -163,8 +298,7 @@ class TransactionService:
 
         # Apply filters
         if category:
-            query = query.join(CategoryORM, TransactionORM.category_id == CategoryORM.id)
-            query = query.filter(CategoryORM.name == category)
+            query = query.filter(TransactionORM.category_id.in_(_category_ids_for(session, category)))
 
         if is_reviewed is not None:
             query = query.filter(TransactionORM.is_reviewed == is_reviewed)
@@ -199,6 +333,8 @@ class TransactionService:
                 account="",  # Will be added when we migrate account info
                 predicted_category=_to_str(t.predicted_category.name) if t.predicted_category else None,
                 actual_category=_to_str(t.category.name) if t.category else None,
+                predicted_category_id=_to_int_or_none(t.predicted_category_id),
+                actual_category_id=_to_int_or_none(t.category_id),
                 confidence=_to_float(t.confidence_score) if t.confidence_score is not None else None,
                 is_reviewed=_to_bool(t.is_reviewed),
                 review_priority=_to_str(t.review_priority) if t.review_priority else None,
@@ -232,7 +368,11 @@ class TransactionService:
         start_date: date | None = None,
         end_date: date | None = None,
     ) -> dict:
-        """Get transactions with pagination and enhanced filtering."""
+        """Get transactions with pagination and enhanced filtering.
+
+        Raises:
+            ValueError: ``sort_by`` is not one of :data:`SORT_KEYS`.
+        """
         # Build base query
         query = session.query(TransactionORM).options(
             joinedload(TransactionORM.category), joinedload(TransactionORM.predicted_category)
@@ -260,18 +400,13 @@ class TransactionService:
             else:
                 # Filter by effective/final category: actual_category takes precedence over predicted_category
                 # This ensures reviewed transactions use their assigned category, unreviewed use predicted category
+                category_ids = _category_ids_for(session, category)
                 query = query.filter(
                     or_(
-                        # Case 1: Has actual category and it matches (user-assigned, takes precedence)
-                        and_(
-                            TransactionORM.category_id.is_not(None),
-                            TransactionORM.category.has(CategoryORM.name == category),
-                        ),
-                        # Case 2: No actual category, but predicted category matches (unreviewed)
+                        TransactionORM.category_id.in_(category_ids),
                         and_(
                             TransactionORM.category_id.is_(None),
-                            TransactionORM.predicted_category_id.is_not(None),
-                            TransactionORM.predicted_category.has(CategoryORM.name == category),
+                            TransactionORM.predicted_category_id.in_(category_ids),
                         ),
                     )
                 )
@@ -299,14 +434,7 @@ class TransactionService:
         # Get total count before applying pagination
         total_count = query.count()
 
-        # Apply sorting
-        descending = sort_order.lower() != "asc"
-        if sort_by == REVIEW_IMPACT_SORT:
-            impact = _review_impact_expr()
-            query = query.order_by(impact.desc() if descending else impact.asc(), TransactionORM.date.asc())
-        else:
-            sort_column = getattr(TransactionORM, sort_by, TransactionORM.date)
-            query = query.order_by(sort_column.desc() if descending else sort_column.asc())
+        query = _apply_sort(query, sort_by, sort_order)
 
         # Apply pagination
         query = query.offset(skip).limit(limit)
@@ -329,6 +457,8 @@ class TransactionService:
                 account="",  # Will be added when we migrate account info
                 predicted_category=_to_str(t.predicted_category.name) if t.predicted_category else None,
                 actual_category=_to_str(t.category.name) if t.category else None,
+                predicted_category_id=_to_int_or_none(t.predicted_category_id),
+                actual_category_id=_to_int_or_none(t.category_id),
                 confidence=_to_float(t.confidence_score) if t.confidence_score is not None else None,
                 is_reviewed=_to_bool(t.is_reviewed),
                 review_priority=_to_str(t.review_priority) if t.review_priority else None,
@@ -355,17 +485,21 @@ class TransactionService:
     def update_transaction_category(
         session: Session, transaction_id: str, update: TransactionUpdate
     ) -> TransactionResponse | None:
-        """Update transaction category."""
+        """Set a transaction's category from its id, a name, or a ``name (type)`` reference.
+
+        Returns:
+            The updated transaction, or None when the transaction does not exist.
+
+        Raises:
+            CategoryNotFoundError: No category matches the reference.
+            AmbiguousCategoryError: The name is shared and needs its type.
+        """
         transaction = session.query(TransactionORM).filter(TransactionORM.id == transaction_id).first()
 
         if not transaction:
             return None
 
-        # Find category by name
-        category = session.query(CategoryORM).filter(CategoryORM.name == update.actual_category).first()
-
-        if not category:
-            return None
+        category = resolve_category(session, name=update.actual_category, category_id=update.category_id)
 
         # Update transaction
         record_review_event(
@@ -395,6 +529,8 @@ class TransactionService:
             account="",
             predicted_category=_to_str(transaction.predicted_category.name) if transaction.predicted_category else None,
             actual_category=_to_str(category.name),
+            predicted_category_id=_to_int_or_none(transaction.predicted_category_id),
+            actual_category_id=_to_int(category.id),
             confidence=_to_float(transaction.confidence_score) if transaction.confidence_score is not None else None,
             is_reviewed=_to_bool(transaction.is_reviewed),
             review_priority=_to_str(transaction.review_priority) if transaction.review_priority else None,
@@ -423,7 +559,9 @@ class TransactionService:
         return pattern, _unreviewed_siblings(session, transaction, _to_int_or_none(transaction.category_id)).count()
 
     @staticmethod
-    def propagate_category(session: Session, source_id: str, category_name: str) -> dict:
+    def propagate_category(
+        session: Session, source_id: str, category_name: str | None = None, category_id: int | None = None
+    ) -> dict:
         """Apply a category to the unreviewed siblings the model saw like the source.
 
         Each affected transaction is marked reviewed and gets its own Review
@@ -434,7 +572,8 @@ class TransactionService:
         Args:
             session: Open database session. Committed by this function.
             source_id: The transaction the user corrected.
-            category_name: Name of the category to apply.
+            category_name: Name of the category to apply, used when ``category_id`` is not given.
+            category_id: Id of the category to apply.
 
         Returns:
             A dict with the number of transactions ``applied``, the
@@ -442,9 +581,12 @@ class TransactionService:
         """
         source = session.query(TransactionORM).filter(TransactionORM.id == source_id).first()
         pattern = _pattern_of(source)
-        category = session.query(CategoryORM).filter(CategoryORM.name == category_name).first()
+        try:
+            category: CategoryORM | None = resolve_category(session, name=category_name, category_id=category_id)
+        except LookupError:
+            category = None
         if source is None or not pattern or category is None:
-            return {"applied": 0, "pattern": pattern, "category": category_name}
+            return {"applied": 0, "pattern": pattern, "category": category_name or category_id}
 
         siblings = _unreviewed_siblings(session, source, _to_int(category.id)).all()
 
@@ -505,6 +647,15 @@ class TransactionService:
         return {"approved": len(approved_ids), "transaction_ids": approved_ids}
 
 
+def _commit_category(session: Session, name: str) -> None:
+    """Commit a category change; a unique-constraint race becomes a DuplicateCategoryError."""
+    try:
+        session.commit()
+    except IntegrityError as e:
+        session.rollback()
+        raise DuplicateCategoryError(name) from e
+
+
 class CategoryService:
     """Service for category operations."""
 
@@ -528,11 +679,17 @@ class CategoryService:
 
     @staticmethod
     def create_category(session: Session, category: CategoryCreate) -> CategoryResponse:
-        """Create a new category."""
+        """Create a new category.
+
+        Raises:
+            DuplicateCategoryError: The name exists already, ignoring case and type.
+        """
+        if _name_taken(session, category.name):
+            raise DuplicateCategoryError(category.name)
         db_category = CategoryORM(name=category.name, type=category.type, budget=category.budget or 0.0)
 
         session.add(db_category)
-        session.commit()
+        _commit_category(session, category.name)
         session.refresh(db_category)
 
         return CategoryResponse(
@@ -547,7 +704,11 @@ class CategoryService:
 
     @staticmethod
     def update_category(session: Session, category_id: int, update: CategoryUpdate) -> CategoryResponse | None:
-        """Update an existing category."""
+        """Update an existing category.
+
+        Raises:
+            DuplicateCategoryError: The new name belongs to another category, ignoring case.
+        """
         category = session.query(CategoryORM).filter(CategoryORM.id == category_id).first()
 
         if not category:
@@ -555,6 +716,8 @@ class CategoryService:
 
         # Update fields if provided
         if update.name is not None:
+            if _name_taken(session, update.name, exclude_id=category_id):
+                raise DuplicateCategoryError(update.name)
             category.name = update.name
         if update.type is not None:
             category.type = update.type
@@ -563,7 +726,7 @@ class CategoryService:
         if update.budget is not None:
             category.budget = update.budget
 
-        session.commit()
+        _commit_category(session, _to_str(category.name))
 
         return CategoryResponse(
             id=_to_int(category.id),

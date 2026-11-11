@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from fafycat.api.dependencies import get_db_session
 from fafycat.api.models import CategoryCreate, CategoryResponse, CategoryUpdate
-from fafycat.api.services import CategoryService
+from fafycat.api.services import CategoryService, DuplicateCategoryError
 
 router = APIRouter(prefix="/categories", tags=["categories"])
 
@@ -20,16 +20,22 @@ async def get_categories(
 
 @router.post("/", response_model=CategoryResponse)
 async def create_category(category: CategoryCreate, db: Session = Depends(get_db_session)) -> CategoryResponse:
-    """Create a new category."""
-    return CategoryService.create_category(session=db, category=category)
+    """Create a new category. A name that exists already, ignoring case and type, is a 409."""
+    try:
+        return CategoryService.create_category(session=db, category=category)
+    except DuplicateCategoryError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 @router.put("/{category_id}", response_model=CategoryResponse)
 async def update_category(
     category_id: int, update: CategoryUpdate, db: Session = Depends(get_db_session)
 ) -> CategoryResponse:
-    """Update an existing category."""
-    result = CategoryService.update_category(session=db, category_id=category_id, update=update)
+    """Update an existing category. Renaming onto another category's name is a 409."""
+    try:
+        result = CategoryService.update_category(session=db, category_id=category_id, update=update)
+    except DuplicateCategoryError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
     if not result:
         raise HTTPException(status_code=404, detail="Category not found")

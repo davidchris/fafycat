@@ -16,6 +16,24 @@ from fafycat.core.database import CategoryORM, TransactionORM
 
 router = APIRouter(prefix="/export", tags=["export"])
 
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+"""A spreadsheet reads a text cell starting with one of these as a formula."""
+
+
+def neutralize_formula(value: Any) -> Any:
+    """Prefix a text cell that a spreadsheet would run as a formula with ``'``.
+
+    Only strings change; numbers such as a negative amount stay numbers.
+    """
+    if isinstance(value, str) and value.startswith(FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
+def spreadsheet_safe(data: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Copy of the export rows with every text cell passed through :func:`neutralize_formula`."""
+    return [{key: neutralize_formula(value) for key, value in row.items()} for row in data]
+
 
 class ExportService:
     """Service for data export operations."""
@@ -86,7 +104,7 @@ class ExportService:
         if not data:
             return "No data to export"
 
-        df = pd.DataFrame(data)
+        df = pd.DataFrame(spreadsheet_safe(data))
         return df.to_csv(index=False)
 
     @staticmethod
@@ -99,7 +117,7 @@ class ExportService:
             df.to_excel(cast(Any, buffer), index=False)
             return buffer.getvalue()
 
-        df = pd.DataFrame(data)
+        df = pd.DataFrame(spreadsheet_safe(data))
         buffer = io.BytesIO()
 
         # Create Excel with multiple sheets if we have categories
@@ -150,58 +168,54 @@ async def export_transactions(
     db: Session = Depends(get_db_session),
 ) -> Response:
     """Export transactions in the specified format."""
-    try:
-        # Get export data
-        data = ExportService.get_export_data(
-            session=db,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            categories=request.categories,
+    # Get export data
+    data = ExportService.get_export_data(
+        session=db,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        categories=request.categories,
+    )
+
+    if not data:
+        raise HTTPException(status_code=404, detail="No transactions found for export")
+
+    # Generate filename
+    date_suffix = ""
+    if request.start_date and request.end_date:
+        date_suffix = f"_{request.start_date}_{request.end_date}"
+    elif request.start_date:
+        date_suffix = f"_from_{request.start_date}"
+    elif request.end_date:
+        date_suffix = f"_until_{request.end_date}"
+
+    filename = f"fafycat_transactions{date_suffix}"
+
+    # Export based on format
+    if request.format == "csv":
+        content = ExportService.export_to_csv(data)
+        return Response(
+            content=content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}.csv"},
         )
 
-        if not data:
-            raise HTTPException(status_code=404, detail="No transactions found for export")
+    if request.format == "excel":
+        content = ExportService.export_to_excel(data)
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"},
+        )
 
-        # Generate filename
-        date_suffix = ""
-        if request.start_date and request.end_date:
-            date_suffix = f"_{request.start_date}_{request.end_date}"
-        elif request.start_date:
-            date_suffix = f"_from_{request.start_date}"
-        elif request.end_date:
-            date_suffix = f"_until_{request.end_date}"
+    if request.format == "json":
+        content = ExportService.export_to_json(data)
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename={filename}.json"},
+        )
 
-        filename = f"fafycat_transactions{date_suffix}"
-
-        # Export based on format
-        if request.format == "csv":
-            content = ExportService.export_to_csv(data)
-            return Response(
-                content=content,
-                media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename={filename}.csv"},
-            )
-
-        if request.format == "excel":
-            content = ExportService.export_to_excel(data)
-            return Response(
-                content=content,
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"},
-            )
-
-        if request.format == "json":
-            content = ExportService.export_to_json(data)
-            return Response(
-                content=content,
-                media_type="application/json",
-                headers={"Content-Disposition": f"attachment; filename={filename}.json"},
-            )
-
-        raise HTTPException(status_code=400, detail="Unsupported export format")
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}") from e
+    raise HTTPException(status_code=400, detail="Unsupported export format")
 
 
 @router.get("/summary")

@@ -10,7 +10,7 @@ from fakes import FakeTransaction
 
 
 def make_categories(*names: str) -> list[CategoryORM]:
-    return [CategoryORM(name=name, type="spending", budget=0.0) for name in names]
+    return [CategoryORM(id=i, name=name, type="spending", budget=0.0) for i, name in enumerate(names, start=1)]
 
 
 class TestRenderRow:
@@ -79,9 +79,9 @@ class TestRenderRow:
         assert 'hx-put="/api/transactions/tx42/categorize-htmx"' in html
         assert 'hx-target="#transaction-tx42"' in html
         assert 'hx-swap="outerHTML"' in html
-        assert 'name="actual_category"' in html
-        assert '<option value="Rent" selected' in html
-        assert '<option value="Groceries" selected' not in html
+        assert 'name="category_id"' in html
+        assert '<option value="2" selected>Rent</option>' in html
+        assert '<option value="1">Groceries</option>' in html
 
     def test_row_form_keeps_urlencoded_enctype(self):
         """FastHTML defaults Form to multipart; the endpoint contract is urlencoded."""

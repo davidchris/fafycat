@@ -233,7 +233,9 @@ def test_repredict_selects_only_unreviewed_with_existing_prediction(session: Ses
     session.add_all(txns)
     session.commit()
 
-    summary, remaining = repredict_unreviewed(session, FakeCategorizer({"unreviewed-predicted": 0.60}), threshold=0.50)
+    summary, remaining, _ = repredict_unreviewed(
+        session, FakeCategorizer({"unreviewed-predicted": 0.60}), threshold=0.50
+    )
 
     assert summary.total == 1
     assert summary.auto_accepted == 1
@@ -252,7 +254,7 @@ def test_repredict_limit_and_remaining_unreviewed_rule(session: Session) -> None
     session.add_all(txns)
     session.commit()
 
-    summary, remaining = repredict_unreviewed(session, FakeCategorizer(scores), limit=3, threshold=0.50)
+    summary, remaining, _ = repredict_unreviewed(session, FakeCategorizer(scores), limit=3, threshold=0.50)
 
     assert summary.total == 3
     assert remaining == 1

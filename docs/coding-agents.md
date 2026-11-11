@@ -86,6 +86,7 @@ fafycat tx list --unreviewed --last-n-months 3
 ```
 
 Pagination: `--skip`, `--limit` (default 20, cap 500). Response envelope includes `total_count` and `has_next`.
+`--category` ignores case; an unknown name exits 1 with a JSON error.
 
 ### Analytics
 
@@ -96,7 +97,10 @@ fafycat analytics variance --year 2025
 fafycat analytics savings --year 2025
 fafycat analytics yoy --type spending --years 2023,2024,2025
 fafycat analytics top --year 2025 --month 3
+fafycat analytics top --last-month
 ```
+
+`top` takes `--month` as a number (1-12) with `--year`, or `--this-month` / `--last-month`.
 
 `--type` on `breakdown` accepts exactly `income`, `saving`, or `spending` — anything else exits with code 2.
 

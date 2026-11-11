@@ -249,7 +249,7 @@ def cmd_tx_list(args: argparse.Namespace) -> None:
     """List transactions as a paginated JSON envelope."""
     logging.disable(logging.WARNING)
 
-    from fafycat.api.services import TransactionService
+    from fafycat.api.services import TransactionService, find_category
     from fafycat.cli_query.date_range import resolve_date_range
     from fafycat.cli_query.output import emit_error, emit_success
 
@@ -282,12 +282,18 @@ def cmd_tx_list(args: argparse.Namespace) -> None:
     db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
+        category = args.category or None
+        if category and category.strip().lower() != "uncategorized":
+            try:
+                find_category(session, category)
+            except LookupError as exc:
+                emit_error(str(exc))
         result = TransactionService.get_transactions_with_pagination(
             session,
             skip=args.skip,
             limit=limit,
             is_reviewed=is_reviewed,
-            category=args.category or None,
+            category=category,
             search=args.search or "",
             start_date=start_date,
             end_date=end_date,
@@ -527,15 +533,23 @@ def cmd_analytics_top(args: argparse.Namespace) -> None:
     logging.disable(logging.WARNING)
 
     from fafycat.api.services import AnalyticsService
-    from fafycat.cli_query.output import emit_success
+    from fafycat.cli_query.date_range import resolve_date_range
+    from fafycat.cli_query.output import emit_error, emit_success
+
+    year, month = args.year, args.month
+    if args.this_month or args.last_month:
+        if year is not None or month is not None:
+            emit_error("--this-month and --last-month cannot be combined with --year or --month")
+        start, _ = resolve_date_range(argparse.Namespace(this_month=args.this_month, last_month=args.last_month))
+        year, month = start.year, start.month
 
     db_manager = _open_query_database(args)
 
     with db_manager.get_session() as session:
         result = AnalyticsService.get_top_transactions_by_month(
             session,
-            year=args.year,
-            month=args.month,
+            year=year,
+            month=month,
             limit=args.limit,
             include_unreviewed=not args.exclude_unreviewed,
         )
@@ -694,7 +708,11 @@ def main() -> None:
     tx_list_parser.add_argument(
         "--limit", type=_bounded_int(1, 500), default=20, help="Maximum rows to return, 1–500 (default: 20)"
     )
-    tx_list_parser.add_argument("--category", default=None, help="Filter by category name")
+    tx_list_parser.add_argument(
+        "--category",
+        default=None,
+        help="Filter by category name, ignoring case; an unknown name is an error",
+    )
     tx_list_parser.add_argument("--search", default="", help="Full-text search in description")
     tx_reviewed_group = tx_list_parser.add_mutually_exclusive_group()
     tx_reviewed_group.add_argument("--reviewed", action="store_true", default=False, help="Only reviewed transactions")
@@ -919,7 +937,7 @@ def main() -> None:
         help="Top spending transactions for a given month",
         description=(
             "Return the largest spending transactions for a given month as JSON. "
-            "Examples: fafycat analytics top --year 2025 --month 3  |  fafycat analytics top --limit 10"
+            "Examples: fafycat analytics top --year 2025 --month 3  |  fafycat analytics top --last-month --limit 10"
         ),
     )
     _add_data_dir_argument(analytics_top_parser, suppress_default=True)
@@ -930,6 +948,13 @@ def main() -> None:
     )
     analytics_top_parser.add_argument(
         "--limit", type=_bounded_int(1, 50), default=5, help="Number of transactions to return, 1–50 (default: 5)"
+    )
+    analytics_top_month_group = analytics_top_parser.add_mutually_exclusive_group()
+    analytics_top_month_group.add_argument(
+        "--this-month", action="store_true", default=False, help="The current month (instead of --year/--month)"
+    )
+    analytics_top_month_group.add_argument(
+        "--last-month", action="store_true", default=False, help="The previous month (instead of --year/--month)"
     )
 
     # skill subcommand group

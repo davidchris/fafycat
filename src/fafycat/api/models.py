@@ -1,8 +1,9 @@
 """Pydantic models for API requests and responses."""
 
+import re
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fafycat.core.models import ReviewPriority
 
@@ -17,6 +18,8 @@ class TransactionResponse(BaseModel):
     account: str
     predicted_category: str | None = None
     actual_category: str | None = None
+    predicted_category_id: int | None = None
+    actual_category_id: int | None = None
     confidence: float | None = None
     is_reviewed: bool = False
     review_priority: str | None = None
@@ -29,10 +32,21 @@ class TransactionResponse(BaseModel):
 
 
 class TransactionUpdate(BaseModel):
-    """Request model for updating transaction category."""
+    """Request model for updating transaction category.
 
-    actual_category: str
+    Give the category as ``actual_category`` (a name, or ``name (type)``) or as
+    ``category_id``. The id never collides; the web forms send it.
+    """
+
+    actual_category: str | None = None
+    category_id: int | None = None
     is_reviewed: bool = True
+
+    @model_validator(mode="after")
+    def _one_category_reference(self) -> "TransactionUpdate":
+        if (self.actual_category is None) == (self.category_id is None):
+            raise ValueError("give exactly one of actual_category or category_id")
+        return self
 
 
 class BulkCategorizeRequest(BaseModel):
@@ -67,21 +81,55 @@ class CategoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+CATEGORY_NAME_MAX_LENGTH = 50
+"""Matches ``categories.name`` (``String(50)``) and the core ``Category`` model."""
+
+
+_TYPE_SUFFIX = re.compile(r" \((spending|income|saving)\)$")
+
+
+def _normalize_category_name(name: str | None) -> str | None:
+    """Strip and lowercase, as CSV import and the core model do.
+
+    Raises:
+        ValueError: The name ends in `` (spending)``, `` (income)`` or `` (saving)``,
+            the form reserved for telling apart categories that share a name.
+    """
+    if name is None:
+        return None
+    name = name.strip().lower()
+    if _TYPE_SUFFIX.search(name):
+        raise ValueError("a category name may not end in a type in parentheses, such as ' (income)'")
+    return name
+
+
 class CategoryCreate(BaseModel):
     """Request model for creating a category."""
 
-    name: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=CATEGORY_NAME_MAX_LENGTH)
     type: str = Field(..., pattern="^(spending|income|saving)$")
     budget: float | None = Field(None, ge=0)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, v: object) -> object:
+        """Strip and lowercase the name before the length check."""
+        return _normalize_category_name(v) if isinstance(v, str) else v
 
 
 class CategoryUpdate(BaseModel):
     """Request model for updating a category."""
 
-    name: str | None = Field(None, min_length=1, max_length=100)
+    name: str | None = Field(None, min_length=1, max_length=CATEGORY_NAME_MAX_LENGTH)
     type: str | None = Field(None, pattern="^(spending|income|saving)$")
     is_active: bool | None = None
     budget: float | None = Field(None, ge=0)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, v: object) -> object:
+        """Strip and lowercase the name before the length check."""
+        return _normalize_category_name(v) if isinstance(v, str) else v
 
 
 class UploadResponse(BaseModel):
