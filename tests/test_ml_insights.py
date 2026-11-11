@@ -80,7 +80,7 @@ class TestTrainingRecency:
         db_session.add(ModelMetadataORM(model_version="v1", training_date=trained_at, is_active=True))
         _add_review_event(db_session, "user_review", trained_at - timedelta(days=1), groceries)
         _add_review_event(db_session, "user_review", trained_at + timedelta(days=1), groceries)
-        _add_review_event(db_session, "bulk_approve", trained_at + timedelta(days=2), groceries)
+        _add_review_event(db_session, "import_label", trained_at + timedelta(days=2), groceries)
         db_session.commit()
 
         recency = get_training_recency(db_session)
@@ -88,9 +88,10 @@ class TestTrainingRecency:
         assert recency.last_trained_at == trained_at.replace(tzinfo=UTC)
         assert recency.reviews_since_training == 2
 
-    def test_auto_accepts_are_not_training_signal(self, db_session, categories):
+    def test_auto_accepts_and_bulk_approves_are_not_training_signal(self, db_session, categories):
         groceries, _ = categories
         _add_review_event(db_session, "auto_accept", datetime(2025, 1, 1), groceries)
+        _add_review_event(db_session, "bulk_approve", datetime(2025, 1, 4), groceries)
         _add_review_event(db_session, "import_label", datetime(2025, 1, 2), groceries)
         _add_review_event(db_session, "propagation", datetime(2025, 1, 3), groceries)
         db_session.commit()

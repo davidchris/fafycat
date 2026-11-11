@@ -24,6 +24,7 @@ from ..core.database import CategoryORM, ModelMetadataORM, TransactionORM
 from ..core.models import ModelMetrics, PredictionDetail, TransactionInput, TransactionPrediction
 from .calibration import TemperatureScaler, oof_probs
 from .feature_extractor import FeatureExtractor
+from .human_labels import human_label_criterion
 from .merchant_mapper import RULE_OVERRIDE_CONFIDENCE, MerchantMapper
 from .model_identity import model_fingerprint, probs_by_category
 
@@ -67,11 +68,12 @@ class TransactionCategorizer:
         self.model_id = "untrained"
 
     def prepare_training_data(self) -> tuple[pd.DataFrame, np.ndarray]:
-        """Prepare training data from database transactions."""
-        # Get transactions with confirmed categories
-        query = self.session.query(TransactionORM).filter(TransactionORM.category_id.isnot(None))
+        """Prepare training data from the human-labelled transactions.
 
-        transactions = query.all()
+        Auto-accepted and bulk-approved categories are left out; see
+        :mod:`fafycat.ml.human_labels`.
+        """
+        transactions = self.session.query(TransactionORM).filter(human_label_criterion()).all()
 
         if len(transactions) < self.config.min_training_samples:
             raise ValueError(
@@ -271,7 +273,7 @@ class TransactionCategorizer:
         the model's probabilities are still captured for the Audit Trail.
 
         This hard override is kept only for the single-model fallback. The
-        default ensemble treats a rule as a weighted voter instead.
+        default ensemble treats a rule as a voter the stack reads instead.
         """
         if not self.is_trained:
             raise ValueError("Model must be trained before prediction")

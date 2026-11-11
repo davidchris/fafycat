@@ -1,12 +1,15 @@
 """Rule-based merchant mapping system.
 
 A Merchant Rule maps a cleaned merchant name to a category. Rules are derived
-data: rebuilt from reviewed transactions on every training run, never edited
-by hand. In the ensemble a rule is a third weighted voter beside LightGBM and
-Naive Bayes. The single-model Categorizer, the non-default fallback, still
-lets a rule decide on its own at ``RULE_OVERRIDE_CONFIDENCE``.
+data: rebuilt from human-labelled transactions (see
+:mod:`fafycat.ml.human_labels`) on every training run, never edited by hand.
+In the ensemble a rule is a third voter beside LightGBM and Naive Bayes; the
+stack reads its vote as meta features. The single-model Categorizer, the
+non-default fallback, still lets a rule decide on its own at
+``RULE_OVERRIDE_CONFIDENCE``.
 """
 
+import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from datetime import date, datetime
@@ -18,6 +21,7 @@ from sqlalchemy.orm import Session
 from ..core.database import CategoryORM, MerchantMappingORM, TransactionORM
 from ..core.models import MerchantMapping
 from .feature_extractor import MerchantCleaner
+from .human_labels import human_label_criterion
 
 RULE_OVERRIDE_CONFIDENCE = 0.98
 """Confidence at which a rule decides alone in the single-model Categorizer.
@@ -85,8 +89,7 @@ def refresh_rule_for_pattern(session: Session, pattern: str, min_occurrences: in
         session.query(TransactionORM.category_id, func.count(TransactionORM.id), func.max(TransactionORM.date))
         .filter(
             TransactionORM.merchant_pattern == pattern,
-            TransactionORM.category_id.isnot(None),
-            TransactionORM.is_reviewed.is_(True),
+            human_label_criterion(),
         )
         .group_by(TransactionORM.category_id)
         .all()
@@ -124,6 +127,14 @@ def refresh_rule_for_pattern(session: Session, pattern: str, min_occurrences: in
 
 PARTIAL_MATCH_PENALTY = 0.9
 """A rule matched on shared words, not exactly, speaks with less confidence."""
+
+PARTIAL_MATCH_MIN_LENGTH = 5
+"""Shorter patterns ("DM", "BVG") match exactly only; as words they occur in too many names."""
+
+
+def _words(name: str) -> set[str]:
+    """Words of a cleaned merchant name; spaces and punctuation both separate them."""
+    return set(re.findall(r"\w+", name))
 
 
 class DerivedRule(NamedTuple):
@@ -184,6 +195,12 @@ class MerchantRuleSet:
     def __init__(self, rules: dict[str, tuple[int, float]]) -> None:
         self.rules = rules
         self._cleaner = MerchantCleaner()
+        self._by_word: dict[str, set[str]] = defaultdict(set)
+        """Partial-match candidates: each word of a long enough pattern mapped to its patterns."""
+        for pattern in rules:
+            if len(pattern) >= PARTIAL_MATCH_MIN_LENGTH:
+                for word in _words(pattern):
+                    self._by_word[word].add(pattern)
 
     @classmethod
     def from_derived(cls, derived: dict[str, DerivedRule]) -> "MerchantRuleSet":
@@ -192,6 +209,14 @@ class MerchantRuleSet:
 
     def get_category(self, merchant_name: str) -> MerchantMapping | None:
         """Find the rule for a merchant: exact match first, then partial.
+
+        A partial match needs every word of the rule's pattern to appear as a
+        whole word in the merchant name ("AMAZON" matches "AMAZON MARKETPLACE"
+        and "AMAZON.COM", never "AMAZING THAI"; spaces and punctuation
+        separate words), and the pattern must be at least
+        ``PARTIAL_MATCH_MIN_LENGTH`` characters long. When several rules
+        match, the most specific wins: most words, then longest, then
+        alphabetical, so the result never depends on rule order.
 
         Args:
             merchant_name: Raw merchant name as imported.
@@ -208,34 +233,19 @@ class MerchantRuleSet:
         if exact is not None:
             return MerchantMapping(merchant_pattern=clean_merchant, category_id=exact[0], confidence=exact[1])
 
-        for pattern, (category_id, confidence) in self.rules.items():
-            if self._is_partial_match(clean_merchant, pattern):
-                return MerchantMapping(
-                    merchant_pattern=pattern,
-                    category_id=category_id,
-                    confidence=confidence * PARTIAL_MATCH_PENALTY,
-                )
+        merchant_words = _words(clean_merchant)
+        candidates = set().union(*(self._by_word.get(word, set()) for word in merchant_words))
+        matches = [p for p in candidates if p in self.rules and _words(p) <= merchant_words]
+        if not matches:
+            return None
 
-        return None
-
-    @staticmethod
-    def _is_partial_match(merchant: str, pattern: str) -> bool:
-        """Check if merchant partially matches pattern."""
-        # For short patterns, require exact match
-        if len(pattern) < 5:
-            return False
-
-        # Check if pattern is contained in merchant or vice versa
-        merchant_words = set(merchant.split())
-        pattern_words = set(pattern.split())
-
-        # If pattern has only one word, check if it's in merchant
-        if len(pattern_words) == 1:
-            return any(word.startswith(list(pattern_words)[0][:4]) for word in merchant_words)
-
-        # For multi-word patterns, check overlap
-        overlap = len(merchant_words & pattern_words)
-        return overlap >= min(2, len(pattern_words))
+        pattern = min(matches, key=lambda p: (-len(_words(p)), -len(p), p))
+        category_id, confidence = self.rules[pattern]
+        return MerchantMapping(
+            merchant_pattern=pattern,
+            category_id=category_id,
+            confidence=confidence * PARTIAL_MATCH_PENALTY,
+        )
 
 
 class MerchantMapper:
@@ -311,10 +321,13 @@ class MerchantMapper:
         self._load_mappings()
 
     def reviewed_transactions(self) -> list[tuple[str, int, date]]:
-        """Every reviewed transaction as ``(merchant_name, category_id, date)``, ready for :func:`derive_rules`."""
+        """Every human-labelled transaction as ``(merchant_name, category_id, date)``.
+
+        Ready for :func:`derive_rules`.
+        """
         rows = (
             self.session.query(TransactionORM.name, TransactionORM.category_id, TransactionORM.date)
-            .filter(TransactionORM.category_id.isnot(None), TransactionORM.is_reviewed.is_(True))
+            .filter(human_label_criterion())
             .all()
         )
         return [(str(name), int(cast(int, category_id)), cast(date, seen)) for name, category_id, seen in rows]

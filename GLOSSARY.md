@@ -25,8 +25,12 @@ The process that takes transactions through prediction and review-priority assig
 _Avoid_: categorization strategy, hybrid categorization
 
 **Review**:
-A human confirming or correcting a transaction's predicted category. Reviewed transactions are training data.
+A human confirming or correcting a transaction's predicted category. A review produces a Human Label.
 _Avoid_: approval, validation
+
+**Human Label**:
+A transaction category a human decided: a review, a propagation of a review, or a labelled import. The latest Review Event's actor tells; a transaction from before the Audit Trail counts unless it is an auto-accept the reviewer never changed. Only Human Labels train the Categorizer, form Merchant Rules, and fill the calibration table. Auto-accepts and bulk approves copy the model's own Prediction and are not Human Labels.
+_Avoid_: reviewed transaction (it includes auto-accepts), ground truth
 
 **Review Priority**:
 The bucket the Prediction Pipeline assigns a transaction: `auto_accepted` (at or above the Auto-approve Threshold) or `standard` (needs review). `high` and `quality_check` are legacy values from the retired Strategic Selection step and may still appear on older rows.
@@ -41,7 +45,7 @@ The confidence score at or above which a Prediction is eligible for auto-accept.
 _Avoid_: confidence threshold
 
 **Merchant Rule**:
-An exact-match mapping from a Merchant Pattern to a category, derived from reviewed transactions on every training run and refreshed for one pattern after each review. In the ensemble a rule is a third weighted voter beside LightGBM and Naive Bayes; its weight is learned on validation and recorded in every Prediction Event.
+A mapping from a Merchant Pattern to a category, derived from Human Labels on every training run and refreshed for one pattern after each review. A rule matches a merchant exactly, or partially when every word of its pattern appears as a whole word in the merchant's pattern; a partial match speaks with less confidence, and the most specific matching rule wins. In the ensemble a rule is a third voter beside LightGBM and Naive Bayes; the stack reads its vote as meta features, and every Prediction Event records the vote.
 _Avoid_: merchant mapping (the table name), pattern
 
 **Audit Trail**:
@@ -49,7 +53,7 @@ The append-only record of how a transaction got its category: its Prediction Eve
 _Avoid_: history, log
 
 **Prediction Event**:
-One Prediction Pipeline run's full output for one transaction: what the Merchant Rule, LightGBM, and Naive Bayes each proposed, the ensemble weights, the model identity, and the decision against the Auto-approve Threshold.
+One Prediction Pipeline run's full output for one transaction: what the Merchant Rule, LightGBM, and Naive Bayes each proposed, the meta features the stack read, the model identity, and the decision against the Auto-approve Threshold.
 _Avoid_: prediction record, explanation
 
 **Review Event**:

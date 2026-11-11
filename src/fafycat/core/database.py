@@ -1,6 +1,7 @@
 """Database operations using SQLAlchemy."""
 
 import logging
+import re
 import sqlite3
 from datetime import UTC, datetime
 
@@ -218,6 +219,49 @@ class ReviewEventORM(Base):
     __table_args__ = (Index("idx_review_events_transaction", "transaction_id", "created_at"),)
 
 
+INCOME_TYPE_WORDS: frozenset[str] = frozenset(
+    {
+        "salary",
+        "income",
+        "freelance",
+        "dividend",
+        "interest",
+        "bonus",
+        "wage",
+        "paycheck",
+        "earnings",
+        "revenue",
+        "profit",
+        "refund",
+        "prize",
+        "winnings",
+        "commission",
+        "royalty",
+        "royalties",
+        "cashback",
+    }
+)
+"""Whole words in a category name that mark it as income."""
+
+SAVING_TYPE_WORDS: frozenset[str] = frozenset(
+    {
+        "saving",
+        "investment",
+        "fund",
+        "pension",
+        "retirement",
+        "401k",
+        "ira",
+        "stock",
+        "bond",
+        "etf",
+        "crypto",
+        "bitcoin",
+    }
+)
+"""Whole words in a category name that mark it as saving."""
+
+
 class DatabaseManager:
     """Database connection and session management."""
 
@@ -427,62 +471,23 @@ class DatabaseManager:
 
         return created_count
 
-    def _infer_category_type(self, category_name: str) -> str:
-        """Infer category type from category name patterns."""
-        name_lower = category_name.lower()
+    @staticmethod
+    def _infer_category_type(category_name: str) -> str:
+        """Guess a new category's type from the words in its name.
 
-        # Income patterns - expanded list
-        income_keywords = [
-            "salary",
-            "income",
-            "freelance",
-            "dividend",
-            "interest",
-            "bonus",
-            "wage",
-            "pay",
-            "paycheck",
-            "earnings",
-            "revenue",
-            "profit",
-            "refund",
-            "tax_refund",
-            "gift",
-            "prize",
-            "winnings",
-            "commission",
-            "royalties",
-            "cashback",
-        ]
-        if any(keyword in name_lower for keyword in income_keywords):
+        Words are split on anything that is not a letter or digit and matched
+        whole, with a trailing plural "s" ignored: "tax_refund" and "dividends"
+        are income, "emergency_fund" and "savings" are saving. Substrings never
+        count, so "paypal fees" and "miracle cure" stay spending. The user can
+        change the type afterwards; spending is the default.
+        """
+        words = {word for word in re.split(r"[^0-9a-zäöüß]+", category_name.lower()) if word}
+        words |= {word[:-1] for word in words if word.endswith("s")}
+
+        if words & INCOME_TYPE_WORDS:
             return "income"
-
-        # Saving patterns - expanded list
-        saving_keywords = [
-            "saving",
-            "investment",
-            "fund",
-            "pension",
-            "retirement",
-            "401k",
-            "ira",
-            "emergency",
-            "vacation_fund",
-            "house_fund",
-            "stocks",
-            "bonds",
-            "mutual",
-            "etf",
-            "crypto",
-            "bitcoin",
-            "savings_account",
-            "cd",
-            "certificate",
-        ]
-        if any(keyword in name_lower for keyword in saving_keywords):
+        if words & SAVING_TYPE_WORDS:
             return "saving"
-
-        # Default to spending for all other categories
         return "spending"
 
 

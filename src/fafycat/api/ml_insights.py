@@ -6,9 +6,11 @@ Two questions, one module:
   recorded since the active model was trained. That count is the review page's
   case for pressing "Retrain and re-predict the queue".
 * *Is the Auto-approve Threshold set right?* :func:`get_calibration_report`
-  splits reviewed transactions into confidence bands and reports how often the
-  reviewer kept the predicted category. A band with near-perfect agreement is a
-  band that is safe to auto-accept.
+  splits human-labelled transactions into confidence bands and reports how
+  often the reviewer kept the predicted category. A band with near-perfect
+  agreement is a band that is safe to auto-accept. Auto-accepted and
+  bulk-approved rows are left out: they agree with the Prediction by
+  construction and would make every band above the threshold look perfect.
 
 Both are read-only: nothing here writes or commits.
 """
@@ -19,24 +21,10 @@ from typing import cast
 
 from sqlalchemy.orm import Session
 
-from fafycat.core.audit_trail import ReviewActor
 from fafycat.core.database import ModelMetadataORM, ReviewEventORM, TransactionORM
 from fafycat.core.models import ReviewPriority
+from fafycat.ml.human_labels import HUMAN_LABEL_ACTORS, human_label_criterion
 from fafycat.ml.prediction_pipeline import get_auto_approve_threshold
-
-LABEL_ACTORS: frozenset[str] = frozenset(
-    {
-        ReviewActor.USER_REVIEW.value,
-        ReviewActor.BULK_APPROVE.value,
-        ReviewActor.IMPORT_LABEL.value,
-        ReviewActor.PROPAGATION.value,
-    }
-)
-"""Review Event actors that add training signal.
-
-Auto-accepts are excluded: they copy the model's own Prediction back onto the
-transaction and teach it nothing.
-"""
 
 CALIBRATION_BANDS: tuple[tuple[float, float], ...] = (
     (0.0, 0.5),
@@ -73,7 +61,7 @@ class CalibrationBand:
     lower: float
     upper: float
     reviewed: int
-    """Reviewed transactions in this band that carry both a category and a Prediction."""
+    """Human-labelled transactions in this band that carry a Prediction."""
 
     kept: int
     """Of those, how many ended up with the predicted category."""
@@ -119,6 +107,9 @@ class CalibrationReport:
     * Rows flagged reviewed but left without a category are skipped. They are
       not reviewer disagreements, and counting them as such badly distorts the
       high-confidence bands.
+
+    Only human labels count (see :mod:`fafycat.ml.human_labels`); an
+    auto-accept the reviewer later corrected counts as that correction.
     """
 
     bands: tuple[CalibrationBand, ...]
@@ -149,8 +140,11 @@ def get_training_recency(session: Session) -> TrainingRecency:
 
     Returns:
         The training date of the active model (None if never trained) and the
-        number of Review Events with training signal recorded after it. With no
-        trained model every such event counts.
+        number of Review Events with training signal (actors in
+        ``HUMAN_LABEL_ACTORS``) recorded after it. Auto-accepts and bulk
+        approves copy the model's own Prediction back onto the transaction and
+        teach it nothing, so they do not count. With no trained model every
+        human Review Event counts.
     """
     active_model = (
         session.query(ModelMetadataORM)
@@ -160,7 +154,7 @@ def get_training_recency(session: Session) -> TrainingRecency:
     )
     last_trained_at = _as_utc(cast(datetime | None, active_model.training_date)) if active_model else None
 
-    query = session.query(ReviewEventORM).filter(ReviewEventORM.actor.in_(LABEL_ACTORS))
+    query = session.query(ReviewEventORM).filter(ReviewEventORM.actor.in_(HUMAN_LABEL_ACTORS))
     if last_trained_at is not None:
         query = query.filter(ReviewEventORM.created_at > _as_naive(last_trained_at))
 
@@ -185,8 +179,7 @@ def get_calibration_report(session: Session) -> CalibrationReport:
             TransactionORM.predicted_category_id,
         )
         .filter(
-            TransactionORM.is_reviewed.is_(True),
-            TransactionORM.category_id.is_not(None),
+            human_label_criterion(),
             TransactionORM.predicted_category_id.is_not(None),
             TransactionORM.confidence_score.is_not(None),
         )

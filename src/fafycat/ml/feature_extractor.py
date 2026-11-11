@@ -8,16 +8,24 @@ import numpy as np
 from ..core.models import TransactionInput
 from .sepa_parser import SepaFieldParser
 
+LOCATION_SUFFIXES: frozenset[str] = frozenset({"berlin", "münchen", "hamburg", "köln", "frankfurt", "stuttgart"})
+"""City names a card terminal appends after the merchant name, compared case-insensitively."""
+
+COUNTRY_SUFFIX = "DE"
+"""Country code a card terminal appends. Matched in upper case only, so the word "de" in a name survives."""
+
 
 class MerchantCleaner:
     """Clean and normalize merchant names."""
+
+    VERSION = 2
+    """Bumped whenever ``clean`` changes its output, so stored Merchant Patterns get recomputed."""
 
     def __init__(self):
         self.sepa_parser = SepaFieldParser()
         self.patterns = [
             r"\d{4}\.\d{2}\.\d{2}.*",  # Dates
             r"//.*",  # Location info after //
-            r"\b(DE|Berlin|München|Hamburg|Köln|Frankfurt|Stuttgart)\b.*",  # Cities/countries
             r"Folgenr\.\d+.*",  # Transaction numbers
             r"\bNR\.\d+.*",  # Reference numbers
             r"\d{2}:\d{2}:\d{2}.*",  # Times
@@ -38,6 +46,8 @@ class MerchantCleaner:
         for pattern in self.patterns:
             cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
 
+        cleaned = self._strip_location_suffix(cleaned)
+
         # Normalize whitespace and case
         cleaned = re.sub(r"\s+", " ", cleaned)
         cleaned = cleaned.strip().upper()
@@ -49,6 +59,30 @@ class MerchantCleaner:
                 cleaned = cleaned[len(prefix) :].strip()
 
         return cleaned
+
+    @staticmethod
+    def _strip_location_suffix(name: str) -> str:
+        """Drop a trailing location suffix, keeping at least one word.
+
+        The suffix is the run of city names, country codes and numbers at the
+        end of the name, cut from its first city or country code: "EDEKA Markt
+        Berlin 1234" loses "Berlin 1234", "REWE Markt 42" keeps its number.
+        Words before that run are never touched, so "Cafe de Paris" and
+        "Frankfurt Airport" stay whole.
+        """
+        words = name.split()
+
+        def is_location(word: str) -> bool:
+            return word == COUNTRY_SUFFIX or word.casefold() in LOCATION_SUFFIXES
+
+        cut = len(words)
+        for index in range(len(words) - 1, 0, -1):
+            word = words[index]
+            if is_location(word):
+                cut = index
+            elif not word.isdigit():
+                break
+        return " ".join(words[:cut])
 
 
 class TextPreprocessor:
@@ -100,6 +134,22 @@ class TextPreprocessor:
         return " ".join(words)
 
 
+MERCHANT_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "is_supermarket": ("edeka", "rewe", "aldi", "lidl", "kaufland", "netto"),
+    "is_gas_station": ("shell", "esso", "aral", "bp", "total", "tankstelle"),
+    "is_restaurant": ("mcdonald", "burger", "pizza", "restaurant", "cafe"),
+    "is_transport": ("deutsche bahn", "db", "bvg", "uber", "taxi"),
+    "is_tech": ("amazon", "apple", "google", "microsoft", "netflix"),
+}
+"""Merchant category indicator features and the words that set them."""
+
+_MERCHANT_KEYWORD_PATTERNS = {
+    feature: re.compile(r"\b(?:" + "|".join(re.escape(word) for word in words) + r")\b", re.IGNORECASE)
+    for feature, words in MERCHANT_KEYWORDS.items()
+}
+"""Keywords match as whole words only: "TOTAL" is a gas station, "Totalcare" is not."""
+
+
 class FeatureExtractor:
     """Extract features from transactions for ML model."""
 
@@ -141,21 +191,10 @@ class FeatureExtractor:
                 any(x in transaction.purpose.lower() for x in ["dauerauftrag", "standing order", "subscription"])
             ),
             # Merchant category indicators
-            "is_supermarket": int(
-                any(x in clean_merchant.lower() for x in ["edeka", "rewe", "aldi", "lidl", "kaufland", "netto"])
-            ),
-            "is_gas_station": int(
-                any(x in clean_merchant.lower() for x in ["shell", "esso", "aral", "bp", "total", "tankstelle"])
-            ),
-            "is_restaurant": int(
-                any(x in clean_merchant.lower() for x in ["mcdonald", "burger", "pizza", "restaurant", "cafe"])
-            ),
-            "is_transport": int(
-                any(x in clean_merchant.lower() for x in ["deutsche bahn", "db ", "bvg", "uber", "taxi"])
-            ),
-            "is_tech": int(
-                any(x in clean_merchant.lower() for x in ["amazon", "apple", "google", "microsoft", "netflix"])
-            ),
+            **{
+                feature: int(pattern.search(clean_merchant) is not None)
+                for feature, pattern in _MERCHANT_KEYWORD_PATTERNS.items()
+            },
             # Text for TF-IDF
             "text_combined": self.text_preprocessor.process(f"{transaction.name} {transaction.purpose}"),
             # Currency features
@@ -208,11 +247,7 @@ class FeatureExtractor:
             "is_kartenzahlung",
             "is_online",
             "is_recurring",
-            "is_supermarket",
-            "is_gas_station",
-            "is_restaurant",
-            "is_transport",
-            "is_tech",
+            *MERCHANT_KEYWORDS,
             "is_eur",
             "has_iban",
             "has_mandate_ref",

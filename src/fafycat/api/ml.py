@@ -31,6 +31,7 @@ from fafycat.core.database import AppSettingsORM, CategoryORM
 from fafycat.core.models import TransactionInput
 from fafycat.ml.categorizer import TransactionCategorizer
 from fafycat.ml.ensemble_categorizer import EnsembleCategorizer, IncompatibleModelError
+from fafycat.ml.human_labels import count_human_labels
 from fafycat.ml.prediction_pipeline import (
     CategorizationSummary,
     get_auto_approve_threshold,
@@ -262,9 +263,7 @@ async def get_ml_status(
         model_path = config.ml.model_dir / model_filename
 
         # Check training data readiness
-        reviewed_count = (
-            db.query(TransactionORM).filter(TransactionORM.is_reviewed, TransactionORM.category_id.is_not(None)).count()
-        )
+        reviewed_count = count_human_labels(db)
 
         min_training_samples = 50  # Match train_model.py default
         training_ready = reviewed_count >= min_training_samples
