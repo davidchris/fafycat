@@ -45,8 +45,37 @@ function loadThemeColors() {
 window.THEME = THEME;
 window.toRgba = toRgba;
 
+/*
+ * Saving sign. Monthly summary and category breakdown amounts are signed from the checking
+ * account's view: a transfer to savings is negative (saving), a transfer back is positive
+ * (de-saving). Savings tracking already reports net saved (positive = saving).
+ */
+
+/** Net saved as a percentage of income; negative when the period de-saved. */
+function savingsRate(yearlyTotals) {
+    return yearlyTotals.income > 0 ? (-yearlyTotals.saving / yearlyTotals.income * 100) : 0;
+}
+
+/** Chart series for savings tracking; a de-saving month stays below zero. */
+function savingsTrackingSeries(savingsData) {
+    return {
+        monthly: savingsData.map(s => s.amount),
+        cumulative: savingsData.map(s => s.cumulative_amount)
+    };
+}
+
+/** Saving categories with their net saved, largest first. */
+function netSavedByCategory(categories) {
+    return categories
+        .filter(c => c.category_type === 'saving')
+        .map(c => ({ category: c, netSaved: -c.amount }))
+        .sort((a, b) => b.netSaved - a.netSaved);
+}
+
 if (window.__ANALYTICS_TEST_HOOKS__) {
-    window.__ANALYTICS_TEST_HOOKS__.toRgba = toRgba;
+    Object.assign(window.__ANALYTICS_TEST_HOOKS__, {
+        toRgba, savingsRate, savingsTrackingSeries, netSavedByCategory
+    });
 }
 
 // Chart instances storage
@@ -252,7 +281,7 @@ function updateMonthlyOverviewChart(data) {
                 },
                 {
                     label: 'Saving',
-                    data: monthlyData.map(m => -Math.abs(m.saving)),
+                    data: monthlyData.map(m => m.saving), // signed: de-saving shows above zero
                     backgroundColor: toRgba(THEME.saving, 0.8),
                     borderColor: THEME.saving,
                     borderWidth: 1,
@@ -309,8 +338,13 @@ function updateMonthlyOverviewChart(data) {
                 tooltip: {
                     callbacks: {
                         label: function(context) {
-                            const label = context.dataset.label || '';
                             const value = context.parsed.y;
+                            if (context.dataset.stack !== 'flow') {
+                                // Profit/loss lines keep their sign.
+                                return (context.dataset.label || '') + ': €' + value.toLocaleString();
+                            }
+                            const isDesaving = context.dataset.label === 'Saving' && value > 0;
+                            const label = isDesaving ? 'De-saving' : (context.dataset.label || '');
                             return label + ': €' + Math.abs(value).toLocaleString();
                         }
                     }
@@ -373,8 +407,7 @@ function updateMonthlySummaryStats(data) {
         yearlyTotals.income / monthsWithIncome : 0;
     const avgMonthlySpending = (monthlyData.length > 0 && monthsWithSpending > 0) ?
         yearlyTotals.spending / monthsWithSpending : 0;
-    const savingsRate = yearlyTotals.income > 0 ?
-        (yearlyTotals.saving / yearlyTotals.income * 100) : 0;
+    const rate = savingsRate(yearlyTotals);
 
     const statsHtml = `
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 p-4 rounded-lg">
@@ -387,8 +420,8 @@ function updateMonthlySummaryStats(data) {
                 <div class="text-sm" title="Average monthly spending across months with spending transactions">Avg Monthly Spending</div>
             </div>
             <div class="text-center">
-                <div class="text-lg font-bold" style="color: var(--color-saving)">${savingsRate.toFixed(1)}%</div>
-                <div class="text-sm" title="Percentage of income that was saved (savings / income × 100)">Savings Rate</div>
+                <div class="text-lg font-bold" style="color: var(--color-saving)">${rate.toFixed(1)}%</div>
+                <div class="text-sm" title="Net saved as a percentage of income (net saved / income × 100); negative when you de-saved">Savings Rate</div>
             </div>
             <div class="text-center">
                 <div class="text-lg font-bold ${yearlyTotals.profit_loss >= 0 ? 'amount-positive' : 'amount-negative'}">
@@ -606,10 +639,8 @@ function updateSavingCategoriesChart(data) {
     const categories = data.categories || [];
     const dateRange = formatDateRange(data.start_date, data.end_date, data.year);
 
-    // Get all saving categories, sorted by amount (descending)
-    const savingCategories = categories
-        .filter(c => c.category_type === 'saving')
-        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const savingRows = netSavedByCategory(categories);
+    const savingCategories = savingRows.map(r => r.category);
 
     if (savingCategories.length === 0) {
         ctx.style.display = 'none';
@@ -619,14 +650,14 @@ function updateSavingCategoriesChart(data) {
     ctx.style.display = 'block';
 
     const labels = savingCategories.map(c => c.category_name);
-    const amounts = savingCategories.map(c => Math.abs(c.amount));
+    const amounts = savingRows.map(r => r.netSaved);
 
     charts.savingCategories = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: labels,
             datasets: [{
-                label: 'Amount (€)',
+                label: 'Net saved (€)',
                 data: amounts,
                 backgroundColor: toRgba(THEME.saving, 0.8),
                 borderColor: THEME.saving,
@@ -713,8 +744,7 @@ function updateSavingsTrackingChart(data) {
         cumulativeValues = [0];
     } else {
         labels = savingsData.map(s => formatMonthLabel(s.month, savingsData));
-        monthlyValues = savingsData.map(s => Math.abs(s.amount));
-        cumulativeValues = savingsData.map(s => s.cumulative_amount);
+        ({ monthly: monthlyValues, cumulative: cumulativeValues } = savingsTrackingSeries(savingsData));
     }
 
     charts.savingsTracking = new Chart(ctx, {

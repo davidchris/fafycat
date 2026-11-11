@@ -71,3 +71,7 @@ _Avoid_: bulk apply, mass update
 **Categorization Summary**:
 The auto-accepted and needs-review counts reported after one Prediction Pipeline run.
 _Avoid_: prediction stats, results
+
+**Net Saved**:
+Money moved to savings minus money moved back, for saving categories: `-sum(amount)`, because a transfer to savings is an outflow (negative) from the checking account. Positive is saving; negative is de-saving.
+_Avoid_: savings (for the signed sum), savings balance

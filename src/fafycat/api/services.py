@@ -1338,6 +1338,9 @@ class AnalyticsService:
     ) -> dict[str, Any]:
         """Get savings analysis with monthly and cumulative tracking.
 
+        Every amount is net saved (see ``money_moved``): positive is saving, negative is
+        de-saving (money moved back from savings to the checking account).
+
         Args:
             session: Database session.
             year: Calendar year to report; ignored when ``start_date`` is given.
@@ -1408,9 +1411,8 @@ class AnalyticsService:
         # Populate with actual data
         for result in results:
             month = result.month
-            amount = float(result.savings_amount) if result.savings_amount else 0
-            monthly_savings[month]["amount"] = amount
-            monthly_savings[month]["unreviewed_amount"] = float(result.unreviewed_amount or 0.0)
+            monthly_savings[month]["amount"] = money_saved(float(result.savings_amount or 0.0))
+            monthly_savings[month]["unreviewed_amount"] = money_saved(float(result.unreviewed_amount or 0.0))
             monthly_savings[month]["unreviewed_count"] = int(result.unreviewed_count or 0)
 
         # Calculate cumulative savings
@@ -1419,7 +1421,7 @@ class AnalyticsService:
             cumulative_savings += month_data["amount"]
             month_data["cumulative_amount"] = cumulative_savings
 
-        # Calculate statistics
+        # Averages cover saving months only; de-saving months are counted separately.
         amounts = [m["amount"] for m in monthly_savings.values() if m["amount"] > 0]
 
         stats = {
@@ -1427,6 +1429,7 @@ class AnalyticsService:
             "average_monthly": sum(amounts) / len(amounts) if amounts else 0,
             "median_monthly": statistics.median(amounts) if amounts else 0,
             "months_with_savings": len(amounts),
+            "months_with_desaving": sum(1 for m in monthly_savings.values() if m["amount"] < 0),
         }
 
         return {
@@ -1920,21 +1923,41 @@ class AnalyticsService:
         }
 
 
-def money_spent(amount: float) -> float:
-    """Convert a signed spending amount into money spent.
+# Amounts are stored from the checking account's view: money out is negative, money in is
+# positive. Each category type has one "good direction": money spent, money earned, money saved.
+_GOOD_DIRECTION_SIGN = {CategoryType.SPENDING: -1.0, CategoryType.INCOME: 1.0, CategoryType.SAVING: -1.0}
 
-    Sign convention: the database stores money leaving the account as a negative ``amount``,
-    so the summed amount of a spending category is negative. Budget variance reports money spent
-    as a positive ``actual``; category breakdown keeps the signed ``amount`` and uses this
-    function only for ``budget_variance``. A net refund gives a negative value.
+
+def money_moved(category_type: str, amount: float) -> float:
+    """Convert a signed amount into the category type's good-direction amount.
+
+    - Spending: money spent, positive for net outflows; a net refund is negative.
+    - Income: money earned, the signed amount itself.
+    - Saving: net saved. A transfer to savings (negative) is saving, a transfer back from savings
+      (positive) is de-saving, so a net de-saving gives a negative value.
+
+    Budget variance reports money spent as a positive ``actual``; category breakdown keeps the
+    signed ``amount`` and uses money spent only for ``budget_variance``; savings tracking reports
+    net saved.
 
     Args:
+        category_type: A ``CategoryType`` value.
         amount: Signed sum of transaction amounts.
 
     Returns:
-        Money spent, positive for net outflows.
+        Money spent, earned or saved.
     """
-    return -amount
+    return _GOOD_DIRECTION_SIGN[CategoryType(category_type)] * amount
+
+
+def money_spent(amount: float) -> float:
+    """Return money spent for a signed spending amount (see ``money_moved``)."""
+    return money_moved(CategoryType.SPENDING, amount)
+
+
+def money_saved(amount: float) -> float:
+    """Return net saved for a signed saving amount (see ``money_moved``)."""
+    return money_moved(CategoryType.SAVING, amount)
 
 
 def budgeted_months(start_date: date, end_date: date) -> float:

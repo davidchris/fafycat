@@ -34,6 +34,8 @@ fafycat budget show 2025
 
 ### `fafycat analytics monthly`
 Monthly income/spending/saving totals. Response: `year`, `monthly_data` (12 entries), `yearly_totals`, `unreviewed`.
+Amounts are signed from the checking account's view: `income` positive, `spending` negative, `saving` negative
+for money moved to savings and positive for money moved back (de-saving). Net saved is `-saving`.
 ```
 fafycat analytics monthly --year 2025
 fafycat analytics monthly --ytd
@@ -52,7 +54,7 @@ fafycat analytics breakdown --ytd --type spending
 ```
 
 ### `fafycat analytics variance`
-Budget-vs-actual variance per spending category. Response: `variances`, `summary`, `date_range`, `unreviewed`.
+Budget-vs-actual variance per spending category (income and saving categories are not included, even with a budget). Response: `variances`, `summary`, `date_range`, `unreviewed`.
 `actual` and `summary.total_actual` are money spent as a **positive** number. `variance = budget - actual`:
 positive is under budget, negative is overspent (`is_overspent: true`). A category with no budget is overspent
 by what it spent; its `variance_percentage` is `null`. Budgets come from the year's budget plan (fallback: the
@@ -65,6 +67,10 @@ fafycat analytics variance --ytd
 
 ### `fafycat analytics savings`
 Monthly and cumulative savings. Response: `year`, `monthly_savings`, `statistics`, `unreviewed`.
+Every amount is **net saved**: positive is saving (money moved to savings), negative is de-saving (money moved
+back to the checking account). `cumulative_amount` is the running net saved. `statistics.average_monthly`,
+`median_monthly` and `months_with_savings` cover months with net saved > 0; `months_with_desaving` counts
+months with net saved < 0; `total_savings` is the net saved of the whole range.
 ```
 fafycat analytics savings --year 2025
 ```
