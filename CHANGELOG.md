@@ -7,6 +7,57 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-11
+
+### Fixed
+- **One database for every command.** `fafycat serve`, `import`, `init`,
+  all query commands, and the scripts now open the same file:
+  `<data dir>/fafycat_prod.db`, or `fafycat_dev.db` with `--dev` (now
+  accepted by every command). `--data-dir`/`--dev` take precedence over
+  `FAFYCAT_DB_URL`, which takes precedence over `db_url` in the config
+  file. Another database file with transactions (for example the
+  `fafycat.db` that the 0.3.0 CLI wrote to) is reported, never merged,
+  moved, or deleted. (#66)
+- **Query commands never write.** `tx`, `cat`, `budget`, `analytics`, and
+  `status` open the database read-only and no longer run schema upgrades.
+  Run `fafycat init` or `fafycat serve` once to upgrade an old database.
+  (#66)
+- **Budget numbers are right.** Variance is budget minus money spent
+  (2,700 budget, 1,300 spent is 1,400 under budget, not 4,000). A spending
+  category without a budget is overspent by everything it spent. Budgets
+  are prorated by day. The category breakdown reports each category's
+  share of its type and reads the yearly budget plan. Year-over-year no
+  longer crashes on 29 February. JSON fields changed meaning:
+  `summary.total_actual` is positive money spent, variance percentages are
+  `null` without a budget, and the breakdown `budget` is prorated. (#60)
+- **CSV import keeps every transaction.** Identical rows in one file are
+  all kept (the first keeps its old id, so re-imports still deduplicate).
+  Empty purposes are stored empty, not as `"nan"`, and digit-only text
+  keeps its leading zeros. Rows an older import stored as `"nan"` or as a
+  number (`123` for `00123`) still match on re-import. Day and month order is
+  inferred per file and an ambiguous file is rejected (`--date-order`
+  overrides). Semicolon-separated files, decimal commas, and cp1252
+  encoding import, so Sparkasse- and DKB-style exports work. `.CSV` is
+  accepted, every bad row is listed, and fuzzy dedup keeps the Merchant
+  Pattern in step with the name. Re-importing an old file adds the
+  same-day duplicates that earlier imports dropped. (#63)
+- **Browser hardening.** Requests with a foreign `Host` header get 400 and
+  cross-origin writes get 403, which closes CSRF and DNS rebinding. Allow
+  more host names with `FAFYCAT_ALLOWED_HOSTS` (`serve --host` adds its
+  address). JSON inside inline scripts is escaped. `python -m fafycat.app`
+  binds to 127.0.0.1, and `serve --host` on a non-loopback address warns
+  that there is no authentication. (#64)
+
+### Added
+- `fafycat status` (database path and source, row counts, model state,
+  stray database files) and `fafycat --version`. (#66, #70)
+
+### Removed
+- The `.env` instructions and the `FAFYCAT_*_PORT`, `FAFYCAT_HOST`, and
+  `FAFYCAT_ENV` variables from the docs: nothing read them. (#66)
+- Unbacked performance claims from the README, and three manual tests
+  that asserted nothing. (#61)
+
 ## [0.3.0] - 2026-10-29
 
 ### Changed
@@ -179,7 +230,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - The repository was prepared for wider public sharing with updated
   documentation.
 
-[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/davidchris/fafycat/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/davidchris/fafycat/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/davidchris/fafycat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/davidchris/fafycat/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/davidchris/fafycat/compare/v0.1.0...v0.1.1
