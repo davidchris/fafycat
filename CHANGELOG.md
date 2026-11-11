@@ -7,7 +7,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
-## [0.3.1] - 2026-11-10
+## [0.3.1] - 2026-11-11
 
 ### Fixed
 - **One database for every command.** `fafycat serve`, `import`, `init`,
@@ -32,7 +32,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `null` without a budget, and the breakdown `budget` is prorated. (#60)
 - **CSV import keeps every transaction.** Identical rows in one file are
   all kept (the first keeps its old id, so re-imports still deduplicate).
-  Empty purposes are stored empty, not as `"nan"`. Day and month order is
+  Empty purposes are stored empty, not as `"nan"`, and digit-only text
+  keeps its leading zeros. Rows an older import stored as `"nan"` or as a
+  number (`123` for `00123`) still match on re-import. Day and month order is
   inferred per file and an ambiguous file is rejected (`--date-order`
   overrides). Semicolon-separated files, decimal commas, and cp1252
   encoding import, so Sparkasse- and DKB-style exports work. `.CSV` is
