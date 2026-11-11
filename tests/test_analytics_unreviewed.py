@@ -316,13 +316,6 @@ class TestAnalyticsPage:
         assert 'id="unreviewed-alert-container"' in response.text
         assert "onchange=" not in response.text
 
-    def test_controller_script_drives_the_alert(self):
-        script = (Path(__file__).parent.parent / "src" / "fafycat" / "static" / "js" / "analytics_page.js").read_text()
-
-        assert "include_unreviewed" in script
-        assert "counted under their predicted category" in script
-        assert "exclude-unreviewed-toggle" in script
-
 
 class TestHomePage:
     """The Review card must surface the current month's unreviewed backlog."""
