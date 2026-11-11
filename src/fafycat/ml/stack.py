@@ -176,7 +176,7 @@ class StackLR:
             Self, fitted.
         """
         self.n_classes_ = n_classes
-        self.model_ = LogisticRegression(C=self.c, max_iter=self.max_iter, n_jobs=1)
+        self.model_ = LogisticRegression(C=self.c, max_iter=self.max_iter)
         self.model_.fit(self.design(v), y)
         return self
 
