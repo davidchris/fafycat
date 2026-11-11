@@ -196,7 +196,7 @@ def cmd_import(args: argparse.Namespace) -> None:
 
     from fafycat.api.upload import predict_transaction_categories
     from fafycat.core.database import DatabaseManager
-    from fafycat.data.csv_processor import CSVProcessor
+    from fafycat.data.csv_processor import CSVProcessor, format_import_errors
     from fafycat.data.merchant_pattern import backfill_merchant_patterns
 
     config.ensure_dirs()
@@ -206,10 +206,10 @@ def cmd_import(args: argparse.Namespace) -> None:
     with db_manager.get_session() as session:
         backfill_merchant_patterns(session)
         processor = CSVProcessor(session)
-        transactions, errors = processor.import_csv(csv_path)
+        transactions, errors = processor.import_csv(csv_path, date_order=args.date_order)
 
         if errors:
-            print(json.dumps({"error": f"CSV processing errors: {'; '.join(errors[:5])}"}))
+            print(json.dumps({"error": f"CSV processing errors: {format_import_errors(errors)}"}))
             sys.exit(1)
 
         if not transactions:
@@ -655,6 +655,12 @@ def main() -> None:
 
     import_parser = subparsers.add_parser("import", help="Import transactions from a CSV file")
     import_parser.add_argument("file", type=Path, help="Path to the CSV file")
+    import_parser.add_argument(
+        "--date-order",
+        choices=["dmy", "mdy"],
+        default=None,
+        help="Day/month order of dates like 03/04/2025 (default: detect from the file)",
+    )
     _add_data_dir_argument(import_parser, suppress_default=True)
 
     init_parser = subparsers.add_parser("init", help="Initialize data directory and default categories")

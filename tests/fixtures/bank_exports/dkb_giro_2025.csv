@@ -1,0 +1,8 @@
+﻿"Girokonto";"DE00 0000 0000 0000 0000 02"
+""
+"Kontostand vom 31.03.2025:";"2.345,67 €"
+""
+"Buchungsdatum";"Wertstellung";"Status";"Zahlungspflichtige*r";"Zahlungsempfänger*in";"Verwendungszweck";"Umsatztyp";"IBAN";"Betrag (€)";"Gläubiger-ID";"Mandatsreferenz";"Kundenreferenz"
+"31.03.25";"31.03.25";"Gebucht";"Erika Mustermann";"Supermarkt Beispiel GmbH";"Einkauf vom 30.03.";"Ausgang";"DE00000000000000000003";"-23,45";"";"";""
+"28.03.25";"28.03.25";"Gebucht";"Beispiel AG";"Erika Mustermann";"Lohn März 2025";"Eingang";"DE00000000000000000004";"2.800,00";"";"";""
+"27.03.25";"27.03.25";"Gebucht";"Erika Mustermann";"Stadtwerke Musterstadt";"Abschlag Strom";"Ausgang";"DE00000000000000000005";"-1.234,56";"DE00ZZZ00000000001";"M-0001";""

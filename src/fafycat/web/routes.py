@@ -1,11 +1,13 @@
 """Web routes for HTML pages."""
 
 import html
+from typing import Annotated
 
-from fastapi import APIRouter, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from sqlalchemy.orm import Session
 
-from fafycat.api.dependencies import get_db_manager
+from fafycat.api.dependencies import get_db_manager, get_db_session
 from fafycat.api.models import TransactionUpdate
 from fafycat.api.services import TransactionService
 from fafycat.web.components.alerts import create_info_alert, create_purple_alert, create_upload_result_alert
@@ -123,118 +125,86 @@ async def analytics_page(request: Request) -> HTMLResponse:
 
 
 @router.post("/upload-csv", response_class=HTMLResponse)
-async def upload_csv_web(request: Request, file: UploadFile) -> HTMLResponse:
-    """Handle CSV upload and return HTML response with preview."""
-    import os
-    import tempfile
-    from pathlib import Path
-
-    from fafycat.api.dependencies import get_db_manager
-
-    # Get database manager and session
-    db_manager = get_db_manager(request)
+async def upload_csv_web(
+    file: UploadFile,
+    db_session: Annotated[Session, Depends(get_db_session)],
+    date_order: Annotated[str | None, Form()] = None,
+) -> HTMLResponse:
+    """Handle CSV upload and return a full results page."""
+    from fafycat.api.upload import UploadError, _kept_clause, import_uploaded_csv, parse_date_order
 
     try:
-        with db_manager.get_session() as db_session:
-            from fafycat.data.csv_processor import CSVProcessor
-
-            # Save uploaded file temporarily
-            file_content = await file.read()
-            content_str = file_content.decode("utf-8")
-
-            # Create temp file and ensure it's written and closed properly
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmp_file:
-                tmp_file.write(content_str)
-                tmp_file_path = tmp_file.name
-
-            # Process the CSV
-            processor = CSVProcessor(db_session)
-            transactions, errors = processor.import_csv(Path(tmp_file_path))
-
-            # Clean up temp file
-            os.unlink(tmp_file_path)
-
-            if errors:
-                raise Exception(f"CSV processing errors: {'; '.join(errors[:5])}")
-
-            if not transactions:
-                raise Exception("No valid transactions found in CSV")
-
-            # Save transactions to database
-            new_count, duplicate_count = processor.save_transactions(transactions)
-
-            # Auto-predict categories for new transactions if model is available
-            from fafycat.api.upload import _kept_clause, empty_categorization_summary, predict_transaction_categories
-
-            if new_count > 0:
-                cat_summary = predict_transaction_categories(db_session, transactions, new_count)
-            else:
-                cat_summary = empty_categorization_summary()
-            predictions_made = cat_summary["predictions_made"]
-
-            # Create success page with results
-            if new_count > 0:
-                success_msg = f"✅ Successfully imported {new_count} new transactions!"
-            else:
-                success_msg = f"ℹ️ No new transactions imported. {duplicate_count} duplicates were skipped."
-
-            # Build components
-            filename = file.filename if file.filename is not None else "unknown"
-            upload_result = create_upload_result_alert(
-                success_msg, filename, len(transactions), new_count, duplicate_count
-            )
-
-            prediction_component = ""
-            if predictions_made > 0:
-                prediction_component = str(
-                    create_purple_alert(
-                        "ML Predictions Made",
-                        f"{predictions_made} transactions got predictions: "
-                        f"{cat_summary['auto_accepted']} auto-accepted, {cat_summary['needs_review']} need your review"
-                        f"{_kept_clause(cat_summary['already_reviewed'])}",
-                    )
-                )
-            elif new_count > 0 and cat_summary["prediction_error"]:
-                prediction_component = str(
-                    create_info_alert(
-                        "No ML Predictions", cat_summary["prediction_error"], "Go to Settings", "/settings"
-                    )
-                )
-            elif new_count > 0:
-                prediction_component = str(
-                    create_info_alert("No ML Predictions", "No trained model available", "Train a model", "/settings")
-                )
-
-            # Create action buttons
-            import_button = create_action_button("Import Another File", "/import", "blue")
-            review_button = create_action_button("Review Transactions", "/review", "green")
-            buttons = create_button_group(import_button, review_button)
-
-            content = f"""
-                <h1 class="card-header">Upload Results</h1>
-                {upload_result}
-                {prediction_component}
-                {buttons}
-            """
-
-            return HTMLResponse(create_page_layout("Upload Successful - FafyCat", content))
-
+        result = await import_uploaded_csv(file, db_session, parse_date_order(date_order))
     except Exception as e:
-        # Handle errors
+        details = e.details if isinstance(e, UploadError) else []
+        detail_list = "".join(f"<li>{html.escape(detail)}</li>" for detail in details)
         content = f"""
         <h1 class="card-header">Upload Error</h1>
 
         <div class="alert alert-error">
             <h2 class="alert-title">❌ Upload Failed</h2>
-            <p class="alert-body">Error: {html.escape(str(e))}</p>
+            <p class="alert-body">Error: {html.escape(str(e) if not details else "CSV processing errors:")}</p>
+            {f'<ul class="list-disc list-inside">{detail_list}</ul>' if detail_list else ""}
         </div>
 
         <a href="/import" class="btn btn-primary">
             Try Again
         </a>
         """
-
         return HTMLResponse(create_page_layout("Upload Error - FafyCat", content))
+
+    new_count, duplicate_count = result.new_count, result.duplicate_count
+    cat_summary = result.categorization
+    predictions_made = cat_summary["predictions_made"]
+
+    if new_count > 0:
+        success_msg = f"✅ Successfully imported {new_count} new transactions!"
+    else:
+        success_msg = f"ℹ️ No new transactions imported. {duplicate_count} duplicates were skipped."
+
+    upload_result = create_upload_result_alert(
+        success_msg, result.filename, result.rows_processed, new_count, duplicate_count
+    )
+
+    label_warning = result.label_warning()
+    label_component = (
+        str(create_info_alert("Category labels not matched", label_warning, "Review transactions", "/review"))
+        if label_warning
+        else ""
+    )
+
+    prediction_component = ""
+    if predictions_made > 0:
+        prediction_component = str(
+            create_purple_alert(
+                "ML Predictions Made",
+                f"{predictions_made} transactions got predictions: "
+                f"{cat_summary['auto_accepted']} auto-accepted, {cat_summary['needs_review']} need your review"
+                f"{_kept_clause(cat_summary['already_reviewed'])}",
+            )
+        )
+    elif new_count > 0 and cat_summary["prediction_error"]:
+        prediction_component = str(
+            create_info_alert("No ML Predictions", cat_summary["prediction_error"], "Go to Settings", "/settings")
+        )
+    elif new_count > 0:
+        prediction_component = str(
+            create_info_alert("No ML Predictions", "No trained model available", "Train a model", "/settings")
+        )
+
+    import_button = create_action_button("Import Another File", "/import", "blue")
+    review_button = create_action_button("Review Transactions", "/review", "green")
+    buttons = create_button_group(import_button, review_button)
+
+    content = f"""
+        <h1 class="card-header">Upload Results</h1>
+        {upload_result}
+        {label_component}
+        {prediction_component}
+        {buttons}
+    """
+
+    return HTMLResponse(create_page_layout("Upload Successful - FafyCat", content))
 
 
 @router.post("/transactions/{transaction_id}/categorize", response_model=None)

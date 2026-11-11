@@ -107,37 +107,57 @@ def find_fuzzy_duplicate(session: Session, txn: TransactionInput) -> Transaction
             TransactionORM.date >= window_start,
             TransactionORM.date <= window_end,
         )
+        .order_by(TransactionORM.date, TransactionORM.id)
         .all()
     )
     if not candidates:
         return None
 
+    # Exact content match: catches re-imports of a direct row whose stored
+    # duplicate was field-upgraded (its id still hashes the old settlement
+    # fields, so the exact-id check upstream misses it). The n-th identical row
+    # of a file (``occurrence`` n) is a duplicate only if n such rows are stored
+    # already: two identical bus tickets on one day are two transactions.
+    same_content = [
+        candidate
+        for candidate in candidates
+        if candidate.date == txn.date
+        and str(candidate.name) == txn.name
+        and str(candidate.purpose or "") == txn.purpose
+    ]
+    if len(same_content) > txn.occurrence:
+        return same_content[txn.occurrence]
+
     txn_tokens = normalize_merchant_tokens(txn.name, txn.purpose)
     txn_settlement = is_settlement_like(txn.name, txn.purpose)
 
+    counterparts = []
     for candidate in candidates:
+        if candidate in same_content:
+            continue
         candidate_name = str(candidate.name)
         candidate_purpose = str(candidate.purpose or "")
-        # Exact content match: catches re-imports of a direct row whose stored
-        # duplicate was field-upgraded (its id still hashes the old settlement
-        # fields, so the exact-id check upstream misses it).
-        if candidate.date == txn.date and candidate_name == txn.name and candidate_purpose == txn.purpose:
-            return candidate
         if is_settlement_like(candidate_name, candidate_purpose) == txn_settlement:
             continue
         candidate_tokens = normalize_merchant_tokens(candidate_name, candidate_purpose)
         if _token_overlap(txn_tokens, candidate_tokens) > OVERLAP_THRESHOLD:
-            return candidate
-    return None
+            counterparts.append(candidate)
+    # Match one to one: the n-th identical row takes the n-th counterpart not
+    # already claimed by an identical row above. Two settlement lines for two
+    # identical purchases never both collapse onto one stored purchase.
+    index = txn.occurrence - len(same_content)
+    return counterparts[index] if index < len(counterparts) else None
 
 
-def keep_preferred_fields(existing: TransactionORM, txn: TransactionInput) -> None:
+def keep_preferred_fields(existing: TransactionORM, txn: TransactionInput, merchant_pattern: str) -> None:
     """Adopt the account-direct row's fields when it arrives after its settlement line.
 
     The direct booking carries the real purchase date and clean merchant name.
     When the settlement row was imported first (e.g. card CSV before account
     CSV), upgrade the stored row's descriptive fields in place; id, category,
-    and review state are preserved.
+    and review state are preserved. ``merchant_pattern`` is the cleaned form of
+    ``txn.name``; it replaces the stored one, because siblings and Merchant
+    Rules key on it.
     """
     if is_settlement_like(txn.name, txn.purpose):
         return
@@ -147,6 +167,7 @@ def keep_preferred_fields(existing: TransactionORM, txn: TransactionInput) -> No
     existing.value_date = txn.value_date
     existing.name = txn.name
     existing.purpose = txn.purpose
+    existing.merchant_pattern = merchant_pattern
 
 
 def sort_direct_rows_first(transactions: list[TransactionInput]) -> list[TransactionInput]:

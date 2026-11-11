@@ -112,6 +112,34 @@ class TestFuzzySettlementDedup:
         assert survivor.date == date(2026, 4, 1)
         assert survivor.name == "Muster Markt Berlin"
 
+    def test_upgrade_also_rewrites_merchant_pattern(self, session):
+        """Siblings and Merchant Rules key on merchant_pattern; it must follow the new name (B22)."""
+        processor = CSVProcessor(session)
+        processor.save_transactions([_settlement_row()])
+        processor.save_transactions([_direct_row()])
+
+        survivor = session.query(TransactionORM).one()
+        assert survivor.merchant_pattern == "MUSTER MARKT"
+
+    def test_identical_settlements_match_one_direct_row_each(self, session):
+        """Two identical settlement lines are two purchases; one stored direct row absorbs only one."""
+        processor = CSVProcessor(session)
+        processor.save_transactions([_direct_row()])
+
+        new, dup = processor.save_transactions([_settlement_row(), _settlement_row()])
+
+        assert (new, dup) == (1, 1)
+
+    def test_identical_direct_twins_upgrade_both_stored_settlements(self, session):
+        processor = CSVProcessor(session)
+        processor.save_transactions([_settlement_row(), _settlement_row()])
+
+        new, dup = processor.save_transactions([_direct_row(), _direct_row()])
+
+        assert (new, dup) == (0, 2)
+        assert [row.name for row in session.query(TransactionORM)] == ["Muster Markt Berlin"] * 2
+        assert processor.save_transactions([_direct_row(), _direct_row()]) == (0, 2)
+
     def test_reimport_direct_row_after_upgrade_is_duplicate(self, session):
         """After a field upgrade the stored id still hashes the settlement fields."""
         processor = CSVProcessor(session)
