@@ -1,6 +1,6 @@
 # Train on Trusted Auto-accepts, grade on Human Labels only
 
-v0.4.0 (#62) trained only on Human Labels, so an auto-accept could not teach the model its own guesses. On real data that dropped 54% of the labels: recurring merchants (salary, Kindergeld, DSL, electricity) are auto-accepted every month, so a human never labels them again. Those categories fell below the training minimum, the model forgot them, and held-out accuracy fell from 0.89 to 0.77. We now train on Human Labels plus Trusted Auto-accepts at half weight, but grade the model (training metrics, calibration table) on Human Labels only. Spot Checks give an unbiased error rate for auto-accepts.
+v0.4.0 (#62) trained only on Human Labels, so an auto-accept could not teach the model its own guesses. On real data that dropped 54% of the labels: recurring payments such as income and utility bills are auto-accepted every month, so a human never labels them again. Those categories fell below the training minimum, the model forgot them, and held-out accuracy fell from 0.89 to 0.77. We now train on Human Labels plus Trusted Auto-accepts at half weight, but grade the model (training metrics, calibration table) on Human Labels only. Spot Checks give an unbiased error rate for auto-accepts.
 
 ## Considered Options
 
