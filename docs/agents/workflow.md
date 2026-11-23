@@ -27,7 +27,7 @@ An agent may move a ticket to `ready-for-agent` on its own only when every item 
 
 - The PR adds only what CI and the review threads cannot show: which proof covers which criterion, the demo, and the deviations.
 - Demos use fixture or sample data and repo-relative paths. They show no real personal data and no secrets.
-- Public text (commit messages, PR and issue bodies, review replies, docs, changelog entries, test fixtures) never names anything from the user's own data: no category names, merchants, payees or amounts. Describe results from real data in generic terms ("several recurring-payment categories"); aggregate counts are fine. A Claude Code hook (`scripts/private_terms_guard.py`, set in `.claude/settings.json`) blocks commits, pushes and GitHub text that contain a category name from the configured database or a term from `~/.config/fafycat/private-terms.txt`. Terms in `~/.config/fafycat/private-terms-allow.txt` never block. If the hook blocks you, rephrase. Do not add a term to the allowlist; only the user does that.
+- Public text (commit messages, PR and issue bodies, review replies, docs, changelog entries, test fixtures) never names anything from the user's own data: no category names, merchants, payees or amounts. Describe results from real data in generic terms ("several recurring-payment categories"); aggregate counts are fine. Before you commit, push or post, check the outgoing text against the category names in the configured database.
 
 ## Filing rule
 
