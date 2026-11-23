@@ -8,8 +8,10 @@ contains a private term. Outgoing text is:
   added lines of the staged and unstaged diffs, and the untracked files that a ``git add`` in
   the same command would stage.
 * ``git push``: the message, file names and added lines of each commit that no remote-tracking
-  branch has yet, so a first push and text added in one commit and removed in a later one count.
-* ``gh ...``: the command and any ``--body-file`` / ``-F`` file it reads.
+  branch has yet (merge resolutions and the targets of ``--tags`` included), so a first push and
+  text added in one commit and removed in a later one count.
+* ``gh ...``: the command, any ``--body-file`` / ``-F`` file it reads, and for ``gh pr create
+  --fill`` the messages of the commits it copies.
 * the GitHub tools of T3 Code that write PRs, issues and comments: their whole input.
 
 Git commands are checked in the repository they run in, after ``cd <dir>`` and ``git -C <dir>``.
@@ -75,9 +77,15 @@ def _added_lines(diff: str) -> str:
     return "\n".join(line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
 
 
-def _published_log(log: str) -> str:
-    """Keep what ``git log -p -U0`` would publish: messages, file names and added lines, not removed ones."""
-    return "\n".join(line for line in log.splitlines() if not line.startswith(("-", "@@", "index ")))
+def _outgoing_log(cwd: str, *revisions: str) -> str:
+    """Return what the commits in ``revisions`` publish: messages, file names and added lines.
+
+    Messages are indented, so a message line that starts with ``-`` is not mistaken for a
+    removed line. ``--cc`` shows what a merge commit changes beyond its parents, such as a
+    conflict resolution. Removed lines (``-`` and the combined-diff `` -``) are dropped.
+    """
+    log = _git(cwd, "log", "-p", "-U0", "--cc", "--no-color", "--no-ext-diff", "--format=%n%w(0,4,4)%B", *revisions)
+    return "\n".join(line for line in log.splitlines() if not re.match(r" ?-|@@|index ", line))
 
 
 def _read_file(cwd: str, name: str) -> str:
@@ -148,12 +156,25 @@ def _commit_message_files(args: list[str], cwd: str) -> str:
 
 def _pushed_revisions(args: list[str], cwd: str) -> list[str]:
     """Return the local revisions ``git push <args>`` would publish (HEAD when none is named)."""
+    tags = ["--tags"] if any(arg in ("--tags", "--follow-tags", "--mirror") for arg in args) else []
     if any(arg in ("--all", "--branches", "--mirror") for arg in args):
-        return ["--branches"]
+        return ["--branches", *tags]
     positional = [arg for arg in args if not arg.startswith("-")]
     sources = [refspec.lstrip("+").split(":", 1)[0] for refspec in positional[1:]]
     revisions = [src for src in sources if src and _git(cwd, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")]
-    return revisions or ["HEAD"]
+    return revisions + tags or ["HEAD"]
+
+
+def _gh_fill_messages(args: list[str], cwd: str) -> str:
+    """Return the commit messages ``gh pr create --fill`` would copy into the PR."""
+    if not any(arg.startswith("--fill") for arg in args):
+        return ""
+    base = next((value for flag, value in zip(args, args[1:], strict=False) if flag in ("-B", "--base")), "")
+    bases = [f"origin/{base}"] if base else []
+    for ref in [*bases, "origin/HEAD"]:
+        if _git(cwd, "rev-parse", "--verify", "--quiet", ref):
+            return _git(cwd, "log", "--format=%B", "HEAD", "--not", ref)
+    return _git(cwd, "log", "--format=%B", "HEAD", "--not", "--remotes")
 
 
 def _gh_body_files(args: list[str], cwd: str) -> str:
@@ -178,6 +199,7 @@ def outgoing_text(hook_input: dict) -> list[tuple[str, str]]:
     for tokens, directory in _simple_commands(command, cwd):
         if Path(tokens[0]).name == "gh":
             texts.append(("gh body file", _gh_body_files(tokens, directory)))
+            texts.append(("commit messages for gh --fill", _gh_fill_messages(tokens, directory)))
         if not (git := _git_subcommand(tokens, directory)):
             continue
         subcommand, args, directory = git
@@ -188,19 +210,7 @@ def outgoing_text(hook_input: dict) -> list[tuple[str, str]]:
             texts.append(("commit message file", _commit_message_files(args, directory)))
         elif subcommand == "push":
             revisions = _pushed_revisions(args, directory)
-            log = _git(
-                directory,
-                "log",
-                "-p",
-                "-U0",
-                "--no-color",
-                "--no-ext-diff",
-                "--format=%B",
-                *revisions,
-                "--not",
-                "--remotes",
-            )
-            texts.append(("pushed commits", _published_log(log)))
+            texts.append(("pushed commits", _outgoing_log(directory, *revisions, "--not", "--remotes")))
     for directory in dict.fromkeys(commits):
         texts.append(
             ("staged diff", _added_lines(_git(directory, "diff", "--cached", "-U0", "--no-color", "--no-ext-diff")))

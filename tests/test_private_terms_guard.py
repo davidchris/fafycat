@@ -118,3 +118,37 @@ def test_allow_list_lets_a_common_word_through(repo, tmp_path):
     result = _run(repo, "Bash", {"command": 'git commit -m "Fix childbenefit predictions"'})
 
     assert result.returncode == 0, result.stderr
+
+
+def test_push_checks_message_bullets_merge_resolutions_and_tags(repo, git):
+    """Text can hide in a bulleted message line, a merge resolution, or a commit only a tag points to."""
+    git("push", "-q", "-u", "origin", "HEAD")
+    git("commit", "-q", "--allow-empty", "-m", "notes", "-m", "- paid Acme Telecom")
+    bullet = _run(repo, "Bash", {"command": "git push"})
+
+    git("reset", "-q", "--hard", "HEAD~1")
+    git("checkout", "-q", "-b", "side")
+    git("commit", "-q", "--allow-empty", "-m", "side")
+    git("checkout", "-q", "-")
+    git("merge", "-q", "--no-ff", "-m", "merge side", "side")
+    (repo / "notes.md").write_text("Paid by Acme Telecom\n")
+    git("add", "notes.md")
+    git("commit", "-q", "--amend", "--no-edit")
+    merge = _run(repo, "Bash", {"command": "git push"})
+
+    git("reset", "-q", "--hard", "HEAD~1")
+    git("checkout", "-q", "side")
+    git("commit", "-q", "--allow-empty", "-m", "Fix Acme Telecom")
+    git("tag", "v1")
+    git("checkout", "-q", "-")
+    tags = _run(repo, "Bash", {"command": "git push origin --tags"})
+
+    assert [bullet.returncode, merge.returncode, tags.returncode] == [2, 2, 2]
+
+
+def test_gh_pr_fill_checks_the_commit_messages_it_copies(repo, git):
+    git("commit", "-q", "--allow-empty", "-m", "Fix Acme Telecom predictions")
+
+    result = _run(repo, "Bash", {"command": "gh pr create --fill"})
+
+    assert result.returncode == 2, result.stderr
