@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+- **The model remembers recurring merchants again.** Since 0.4.0, training
+  dropped every auto-accept, so salary, Kindergeld, DSL and electricity
+  lost their training data and could no longer be predicted. Training and
+  Merchant Rules now also learn from Trusted Auto-accepts (uncorrected for
+  two weeks, or from before the Audit Trail) at half weight. Training
+  metrics and the calibration table still count Human Labels only. Retrain
+  after upgrading. See `docs/adr/0001-train-on-trusted-auto-accepts.md`.
+
+### Added
+- **Spot Checks.** On import, 5% of the would-be auto-accepts, picked at
+  random, wait in the review queue. They stay there through re-predicts,
+  and a bare bulk approve skips them.
+
 ### Changed
 - scikit-learn 1.9.1 (was 1.7.0). Training results are unchanged, and
   saved models do not need a retrain.
