@@ -616,7 +616,9 @@ class TransactionService:
 
         Filters by ``review_priority`` and/or ``min_confidence``. With neither
         given, the Auto-approve Threshold is used as the confidence floor so a
-        bare call never approves low-confidence guesses.
+        bare call never approves low-confidence guesses. Spot Checks are left
+        for a human unless ``review_priority`` names them: a bulk approve is
+        no Human Label, so it would void the check.
         """
         if review_priority is None and min_confidence is None:
             min_confidence = get_auto_approve_threshold(session)
@@ -627,6 +629,13 @@ class TransactionService:
         )
         if review_priority is not None:
             query = query.filter(TransactionORM.review_priority == review_priority)
+        else:
+            query = query.filter(
+                or_(
+                    TransactionORM.review_priority.is_(None),
+                    TransactionORM.review_priority != ReviewPriority.SPOT_CHECK.value,
+                )
+            )
         if min_confidence is not None:
             query = query.filter(TransactionORM.confidence_score >= min_confidence)
 

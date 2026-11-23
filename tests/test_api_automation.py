@@ -114,10 +114,20 @@ class TestBulkApproveEndpoint:
         assert low.is_reviewed is False
 
     def test_bulk_approve_empty_body_uses_auto_approve_threshold(self, test_client, db_session):
-        """POST with empty body approves pending predictions at or above the auto-approve threshold."""
+        """POST with empty body approves pending predictions at or above the auto-approve threshold.
+
+        A Spot Check waits for a human review, whatever its confidence.
+        """
         cat = _insert_category(db_session)
         confident = _insert_transaction(db_session, name="A", predicted_category_id=cat.id, confidence_score=0.9)
         _insert_transaction(db_session, name="B", predicted_category_id=cat.id, confidence_score=0.5)
+        _insert_transaction(
+            db_session,
+            name="C",
+            predicted_category_id=cat.id,
+            confidence_score=0.99,
+            review_priority=ReviewPriority.SPOT_CHECK,
+        )
         db_session.commit()
 
         resp = test_client.post("/api/transactions/bulk-approve")

@@ -19,12 +19,15 @@ class CategoryType(StrEnum):
 class ReviewPriority(StrEnum):
     """Review Priority a transaction gets after prediction.
 
-    The Prediction Pipeline writes only ``STANDARD`` (needs review) and
-    ``AUTO_ACCEPTED``. ``HIGH`` and ``QUALITY_CHECK`` are legacy values from
-    the retired Strategic Selection step; older rows may still carry them.
+    The Prediction Pipeline writes ``STANDARD`` (needs review),
+    ``AUTO_ACCEPTED``, and ``SPOT_CHECK`` (would have auto-accepted, held back
+    at random so a human checks it). ``HIGH`` and ``QUALITY_CHECK`` are legacy
+    values from the retired Strategic Selection step; older rows may still
+    carry them.
     """
 
     STANDARD = "standard"
+    SPOT_CHECK = "spot_check"
     HIGH = "high"
     QUALITY_CHECK = "quality_check"
     AUTO_ACCEPTED = "auto_accepted"

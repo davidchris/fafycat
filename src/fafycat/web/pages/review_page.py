@@ -234,7 +234,7 @@ def render_review_page(request: Request):
 
         <div class="mb-8">
             <h2 class="text-lg font-semibold mb-4">Needs review ({transaction_count} transactions)</h2>
-            <p class="text-secondary mb-4">Predictions at or above {threshold:.0%} confidence are auto-accepted. Everything else is listed here until you save a category, ordered so that one review resolves the most: merchants with many pending transactions and uncertain predictions come first.</p>
+            <p class="text-secondary mb-4">Predictions at or above {threshold:.0%} confidence are auto-accepted, except a few random Spot Checks per import that check the auto-accepts. Everything else is listed here until you save a category, ordered so that one review resolves the most: merchants with many pending transactions and uncertain predictions come first.</p>
             {transactions_html}
         </div>
 
