@@ -59,8 +59,10 @@ class NaiveBayesTextClassifier:
 
         return text_features
 
-    def fit(self, transactions: list[TransactionInput], labels: np.ndarray) -> None:
-        """Train the Naive Bayes classifier on transaction text."""
+    def fit(
+        self, transactions: list[TransactionInput], labels: np.ndarray, sample_weight: np.ndarray | None = None
+    ) -> None:
+        """Train the Naive Bayes classifier on transaction text, optionally weighting rows."""
         if len(transactions) != len(labels):
             raise ValueError("Number of transactions must match number of labels")
 
@@ -75,7 +77,7 @@ class NaiveBayesTextClassifier:
         X_text = self.vectorizer.fit_transform(text_features)
 
         # Train classifier
-        self.classifier.fit(X_text, labels_encoded)
+        self.classifier.fit(X_text, labels_encoded, sample_weight=sample_weight)
 
         self.is_fitted = True
 

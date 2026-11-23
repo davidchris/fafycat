@@ -20,11 +20,11 @@ from sklearn.model_selection import StratifiedKFold
 from sqlalchemy.orm import Session
 
 from ..core.config import MLConfig
-from ..core.database import CategoryORM, ModelMetadataORM, TransactionORM
+from ..core.database import CategoryORM, ModelMetadataORM
 from ..core.models import MerchantMapping, PredictionDetail, TransactionInput, TransactionPrediction
 from .calibration import TemperatureScaler, fold_count
 from .categorizer import TransactionCategorizer
-from .human_labels import human_label_criterion
+from .human_labels import HUMAN_LABEL_WEIGHT, training_labels
 from .merchant_mapper import MerchantRuleSet, derive_rules
 from .model_identity import model_fingerprint, probs_by_category
 from .naive_bayes_classifier import NaiveBayesTextClassifier
@@ -136,13 +136,19 @@ class EnsembleCategorizer:
             max_features=self.config.nb_max_features,
         )
 
-    def prepare_training_data(self) -> tuple[list[TransactionInput], np.ndarray]:
-        """Prepare training data from the human-labelled transactions.
+    def prepare_training_data(self) -> tuple[list[TransactionInput], np.ndarray, np.ndarray]:
+        """Prepare training data from the Human Labels and Trusted Auto-accepts.
 
-        Auto-accepted and bulk-approved categories are left out; see
+        Fresh auto-accepts and bulk approves are left out; see
         :mod:`fafycat.ml.human_labels`.
+
+        Returns:
+            The transactions, their category ids, and their training weights
+            (1 for a Human Label, less for a Trusted Auto-accept).
         """
-        transactions = self.session.query(TransactionORM).filter(human_label_criterion()).all()
+        weighted = training_labels(self.session)
+        transactions = [txn for txn, _ in weighted]
+        weight_by_id = {txn.id: weight for txn, weight in weighted}
 
         if len(transactions) < self.config.min_training_samples:
             raise ValueError(
@@ -185,6 +191,7 @@ class EnsembleCategorizer:
         # Convert to TransactionInput format
         txn_inputs = []
         categories = []
+        weights = []
 
         for txn in filtered_transactions:
             txn_input = TransactionInput(
@@ -197,8 +204,9 @@ class EnsembleCategorizer:
             )
             txn_inputs.append(txn_input)
             categories.append(txn.category_id)
+            weights.append(weight_by_id[txn.id])
 
-        return txn_inputs, np.array(categories)
+        return txn_inputs, np.array(categories), np.array(weights)
 
     @staticmethod
     def _training_split_rules(transactions: list[TransactionInput], labels: np.ndarray) -> MerchantRuleSet:
@@ -227,7 +235,9 @@ class EnsembleCategorizer:
         Five stratified folds produce out-of-fold outputs of every voter for
         every training row. Those fit the two temperatures and the stack.
         The final voters are then fitted on all rows and carry the
-        temperatures learned from the folds.
+        temperatures learned from the folds. Every fit weighs a Trusted
+        Auto-accept below a Human Label; the reported metrics count Human
+        Labels only, so the model is never graded on its own Predictions.
 
         Args:
             progress_callback: Called with ``training_folds``, ``fitting_stack``
@@ -235,8 +245,8 @@ class EnsembleCategorizer:
 
         Returns:
             The training summary: out-of-fold accuracy and log-loss of the
-            stack, its auto-approve rate and error at the configured threshold,
-            the temperatures, and the sample counts.
+            stack, its auto-approve rate and error at the configured threshold
+            (all on Human Labels), the temperatures, and the sample counts.
         """
 
         def progress(phase: str) -> None:
@@ -244,25 +254,25 @@ class EnsembleCategorizer:
                 progress_callback(phase)
 
         print("🔍 Preparing training data for ensemble...")
-        transactions, labels = self.prepare_training_data()
+        transactions, labels, weights = self.prepare_training_data()
         classes = np.unique(labels)
         class_ids = [int(c) for c in classes]
         y = np.searchsorted(classes, labels)
         print(f"📝 Training stacked ensemble on {len(transactions)} transactions, {len(classes)} categories...")
 
         progress("training_folds")
-        oof = self._out_of_fold_voters(transactions, labels, y, class_ids)
+        oof = self._out_of_fold_voters(transactions, labels, y, class_ids, weights)
 
         progress("fitting_stack")
         print("🎚️ Fitting temperatures on out-of-fold predictions...")
-        lgbm_temperature = TemperatureScaler().fit(oof.lgbm, y)
-        self.nb_temperature = TemperatureScaler().fit(oof.nb, y)
+        lgbm_temperature = TemperatureScaler().fit(oof.lgbm, y, weights)
+        self.nb_temperature = TemperatureScaler().fit(oof.nb, y, weights)
         oof = self._scale(oof, lgbm_temperature)
         print(f"  LightGBM T={lgbm_temperature.temperature_:.2f}, Naive Bayes T={self.nb_temperature.temperature_:.2f}")
 
         print("🧠 Fitting the stack...")
-        self.stack = StackLR(c=self.config.stack_l2_c).fit(oof, y, len(classes))
-        self.training_summary = self._summarise(oof, y, len(classes))
+        self.stack = StackLR(c=self.config.stack_l2_c).fit(oof, y, len(classes), weights)
+        self.training_summary = self._summarise(oof, y, len(classes), weights)
         self.training_summary.update(
             {
                 "temperature_lgbm": lgbm_temperature.temperature_,
@@ -282,10 +292,10 @@ class EnsembleCategorizer:
 
         progress("training_final")
         print("🚀 Training final voters on all rows...")
-        self.lgbm_component.fit(transactions, labels, calibrate=False)
+        self.lgbm_component.fit(transactions, labels, calibrate=False, sample_weight=weights)
         self.lgbm_component.calibrator = lgbm_temperature
         self.nb_component = self._new_nb()
-        self.nb_component.fit(transactions, labels)
+        self.nb_component.fit(transactions, labels, weights)
         self.seen_counts = seen_counts(transactions)
 
         print("🏪 Updating merchant mappings...")
@@ -298,7 +308,12 @@ class EnsembleCategorizer:
         return summary
 
     def _out_of_fold_voters(
-        self, transactions: list[TransactionInput], labels: np.ndarray, y: np.ndarray, class_ids: list[int]
+        self,
+        transactions: list[TransactionInput],
+        labels: np.ndarray,
+        y: np.ndarray,
+        class_ids: list[int],
+        weights: np.ndarray,
     ) -> Voters:
         """Score every training row with voters that never saw it.
 
@@ -325,11 +340,11 @@ class EnsembleCategorizer:
             held_out = [transactions[i] for i in test_idx]
 
             lgbm = TransactionCategorizer(self.session, self.config)
-            lgbm.fit(fold_txns, fold_labels, calibrate=False)
+            lgbm.fit(fold_txns, fold_labels, calibrate=False, sample_weight=weights[train_idx])
             oof.lgbm[test_idx] = self._align_probas(lgbm.predict_proba(held_out), lgbm.classes_, class_ids)
 
             nb = self._new_nb()
-            nb.fit(fold_txns, fold_labels)
+            nb.fit(fold_txns, fold_labels, weights[train_idx])
             oof.nb[test_idx] = self._align_probas(nb.predict_proba(held_out), nb.classes_, class_ids)
 
             rules = self._training_split_rules(fold_txns, fold_labels)
@@ -352,18 +367,25 @@ class EnsembleCategorizer:
             amount=v.amount,
         )
 
-    def _summarise(self, oof: Voters, y: np.ndarray, n_classes: int) -> dict[str, Any]:
+    def _summarise(self, oof: Voters, y: np.ndarray, n_classes: int, weights: np.ndarray) -> dict[str, Any]:
         """Judge the stack on its own out-of-fold predictions over the out-of-fold voters.
 
         Scoring the stack in-sample would repeat, one level up, the mistake
-        of calibrating a model on its own training rows.
+        of calibrating a model on its own training rows. For the same reason
+        only Human Labels are scored: a Trusted Auto-accept is the
+        previous model's Prediction and would grade the model on itself.
         """
         n_folds = fold_count(y, self.n_folds)
         folds = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=OOF_SEED + 1)
         probs = np.zeros((len(y), n_classes))
         for train_idx, test_idx in folds.split(np.zeros(len(y)), y):
-            model = StackLR(c=self.config.stack_l2_c).fit(oof.subset(train_idx), y[train_idx], n_classes)
+            model = StackLR(c=self.config.stack_l2_c).fit(
+                oof.subset(train_idx), y[train_idx], n_classes, weights[train_idx]
+            )
             probs[test_idx] = model.predict_proba(oof.subset(test_idx))
+        human = weights == HUMAN_LABEL_WEIGHT
+        if human.any():  # with no Human Label at all, every row is the only yardstick left
+            probs, y = probs[human], y[human]
         rows = np.arange(len(y))
         correct = probs.argmax(axis=1) == y
         confidence = probs.max(axis=1)
@@ -375,6 +397,7 @@ class EnsembleCategorizer:
             "auto_threshold": threshold,
             "auto_rate": float(auto.mean()),
             "auto_error_rate": float((auto & ~correct).sum() / auto.sum()) if auto.any() else 0.0,
+            "n_evaluation_samples": len(y),
         }
 
     @staticmethod

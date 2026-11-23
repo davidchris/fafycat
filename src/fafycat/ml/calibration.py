@@ -101,12 +101,13 @@ class TemperatureScaler:
         self.bounds = bounds
         self.temperature_: float = 1.0
 
-    def fit(self, probs: np.ndarray, y: np.ndarray) -> TemperatureScaler:
+    def fit(self, probs: np.ndarray, y: np.ndarray, sample_weight: np.ndarray | None = None) -> TemperatureScaler:
         """Pick ``T`` by minimising the multiclass log-loss of ``probs`` against ``y``.
 
         Args:
             probs: Probabilities of shape ``(n_rows, K)``, ideally out-of-fold.
             y: Integer labels encoded ``0..K-1``, indexing the columns of ``probs``.
+            sample_weight: Weight of each row in the log-loss; equal weights when None.
 
         Returns:
             Self, fitted.
@@ -116,7 +117,7 @@ class TemperatureScaler:
 
         def nll(t: float) -> float:
             q = softmax(logp / t, axis=1)
-            return float(-np.log(np.clip(q[rows, y], EPS, 1.0)).mean())
+            return float(np.average(-np.log(np.clip(q[rows, y], EPS, 1.0)), weights=sample_weight))
 
         result = minimize_scalar(nll, bounds=self.bounds, method="bounded")
         self.temperature_ = float(result.x)

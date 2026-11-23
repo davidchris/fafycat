@@ -2,7 +2,7 @@
 
 from fastapi import Request
 
-from fafycat.ml.human_labels import count_human_labels
+from fafycat.ml.human_labels import count_training_labels
 from fafycat.web.components.layout import create_page_layout
 
 
@@ -27,7 +27,7 @@ def _get_ml_status_sync():
                 model_path = config.ml.model_dir / "categorizer.pkl"
 
             # Check training data readiness
-            reviewed_count = count_human_labels(db_session)
+            reviewed_count = count_training_labels(db_session)
 
             min_training_samples = 50
             training_ready = reviewed_count >= min_training_samples

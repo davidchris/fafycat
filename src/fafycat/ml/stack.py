@@ -164,20 +164,21 @@ class StackLR:
         """The level-1 feature matrix: ``[log lgbm | log nb | log rule | meta]``."""
         return np.column_stack([_logp(v.lgbm), _logp(v.nb), _logp(v.rule_probs()), meta_features(v)])
 
-    def fit(self, v: Voters, y: np.ndarray, n_classes: int) -> StackLR:
+    def fit(self, v: Voters, y: np.ndarray, n_classes: int, sample_weight: np.ndarray | None = None) -> StackLR:
         """Fit on out-of-fold voter outputs.
 
         Args:
             v: Voters for the training rows, each produced by models that never saw the row.
             y: Labels encoded ``0..n_classes-1``.
             n_classes: Number of category columns; classes absent from ``y`` predict 0.
+            sample_weight: Training weight per row; every row weighs 1 when None.
 
         Returns:
             Self, fitted.
         """
         self.n_classes_ = n_classes
         self.model_ = LogisticRegression(C=self.c, max_iter=self.max_iter)
-        self.model_.fit(self.design(v), y)
+        self.model_.fit(self.design(v), y, sample_weight=sample_weight)
         return self
 
     def predict_proba(self, v: Voters) -> np.ndarray:

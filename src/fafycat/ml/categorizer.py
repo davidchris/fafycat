@@ -20,11 +20,11 @@ from sklearn.preprocessing import LabelEncoder
 from sqlalchemy.orm import Session
 
 from ..core.config import MLConfig
-from ..core.database import CategoryORM, ModelMetadataORM, TransactionORM
+from ..core.database import CategoryORM, ModelMetadataORM
 from ..core.models import ModelMetrics, PredictionDetail, TransactionInput, TransactionPrediction
 from .calibration import TemperatureScaler, oof_probs
 from .feature_extractor import FeatureExtractor
-from .human_labels import human_label_criterion
+from .human_labels import HUMAN_LABEL_WEIGHT, training_labels
 from .merchant_mapper import RULE_OVERRIDE_CONFIDENCE, MerchantMapper
 from .model_identity import model_fingerprint, probs_by_category
 
@@ -67,13 +67,19 @@ class TransactionCategorizer:
         self.model_version = "1.0"
         self.model_id = "untrained"
 
-    def prepare_training_data(self) -> tuple[pd.DataFrame, np.ndarray]:
-        """Prepare training data from the human-labelled transactions.
+    def prepare_training_data(self) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
+        """Prepare training data from the Human Labels and Trusted Auto-accepts.
 
-        Auto-accepted and bulk-approved categories are left out; see
+        Fresh auto-accepts and bulk approves are left out; see
         :mod:`fafycat.ml.human_labels`.
+
+        Returns:
+            The features, the category ids, and the training weights (1 for a
+            Human Label, less for a Trusted Auto-accept).
         """
-        transactions = self.session.query(TransactionORM).filter(human_label_criterion()).all()
+        weighted = training_labels(self.session)
+        transactions = [txn for txn, _ in weighted]
+        weight_by_id = {txn.id: weight for txn, weight in weighted}
 
         if len(transactions) < self.config.min_training_samples:
             raise ValueError(
@@ -134,13 +140,14 @@ class TransactionCategorizer:
         # Convert to DataFrame
         df = pd.DataFrame(features_list)
         y = np.array(categories)
+        weights = np.array([weight_by_id[txn.id] for txn in filtered_transactions])
 
-        return df, y
+        return df, y, weights
 
     def train(self, test_size: float = 0.2) -> ModelMetrics:
         """Train the categorization model."""
         print("Preparing training data...")
-        X_df, y = self.prepare_training_data()
+        X_df, y, weights = self.prepare_training_data()
 
         print(f"Training on {len(X_df)} transactions...")
 
@@ -153,10 +160,16 @@ class TransactionCategorizer:
             # Use all data for training (no test split)
             X_train, X_test = X_df, X_df
             y_train, y_test = y_encoded, y_encoded
+            w_train, w_test = weights, weights
         else:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X_df, y_encoded, test_size=test_size, stratify=y_encoded, random_state=42
+            X_train, X_test, y_train, y_test, w_train, w_test = train_test_split(
+                X_df, y_encoded, weights, test_size=test_size, stratify=y_encoded, random_state=42
             )
+        # Metrics count Human Labels only: a Trusted Auto-accept would grade the model on its own Prediction.
+        # With no Human Label in the split there is nothing honest to score; fall back to every row.
+        human_test = w_test == HUMAN_LABEL_WEIGHT
+        if human_test.any():
+            X_test, y_test = X_test[human_test], y_test[human_test]
 
         # Prepare features
         X_train_prepared = self._prepare_features(X_train, fit=True)
@@ -166,7 +179,7 @@ class TransactionCategorizer:
         self.calibrator = self._fit_calibrator(X_train_prepared, y_train)
 
         print("Training LightGBM classifier...")
-        self.classifier.fit(X_train_prepared, y_train)
+        self.classifier.fit(X_train_prepared, y_train, sample_weight=w_train)
 
         # Calculate metrics
         print("Calculating metrics...")
@@ -184,7 +197,14 @@ class TransactionCategorizer:
 
         return metrics
 
-    def fit(self, transactions: list[TransactionInput], labels: np.ndarray, *, calibrate: bool = True) -> None:
+    def fit(
+        self,
+        transactions: list[TransactionInput],
+        labels: np.ndarray,
+        *,
+        calibrate: bool = True,
+        sample_weight: np.ndarray | None = None,
+    ) -> None:
         """Train the model on pre-split data without DB access.
 
         Args:
@@ -194,6 +214,7 @@ class TransactionCategorizer:
                 ensemble passes False for its fold models, which are only ever
                 read raw, and for its final model, whose temperature it fits
                 itself from the same folds.
+            sample_weight: Training weight per row; every row weighs 1 when None.
         """
         features_list = self.feature_extractor.extract_batch_features(transactions)
         X_df = pd.DataFrame(features_list)
@@ -203,7 +224,7 @@ class TransactionCategorizer:
 
         X_prepared = self._prepare_features(X_df, fit=True)
         self.calibrator = self._fit_calibrator(X_prepared, y_encoded) if calibrate else None
-        self.classifier.fit(X_prepared, y_encoded)
+        self.classifier.fit(X_prepared, y_encoded, sample_weight=sample_weight)
 
         self.is_trained = True
 
@@ -376,7 +397,11 @@ class TransactionCategorizer:
         accuracy = accuracy_score(y_test, y_pred)
 
         # Per-category metrics
-        precision, recall, _, support = precision_recall_fscore_support(y_test, y_pred, average=None, zero_division=0)
+        # Every class gets a column, even one absent from this test split.
+        labels = np.arange(len(self.classes_)) if self.classes_ is not None else None
+        precision, recall, _, support = precision_recall_fscore_support(
+            y_test, y_pred, labels=labels, average=None, zero_division=0
+        )
 
         # Get category names
         category_names = {}
@@ -404,7 +429,7 @@ class TransactionCategorizer:
         }
 
         # Confusion matrix
-        cm = confusion_matrix(y_test, y_pred)
+        cm = confusion_matrix(y_test, y_pred, labels=labels)
 
         # Feature importance
         feature_importance = dict(
