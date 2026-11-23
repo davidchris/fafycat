@@ -9,7 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 - **The model remembers recurring merchants again.** Since 0.4.0, training
-  dropped every auto-accept, so salary, Kindergeld, DSL and electricity
+  dropped every auto-accept, so categories of recurring payments
   lost their training data and could no longer be predicted. Training and
   Merchant Rules now also learn from Trusted Auto-accepts (uncorrected for
   two weeks, or from before the Audit Trail) at half weight. Training
