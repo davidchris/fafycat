@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from fafycat.core.database import AppSettingsORM, Base, CategoryORM, TransactionORM
+from fafycat.core.database import AppSettingsORM, Base, CategoryORM, ReviewEventORM, TransactionORM
 from fafycat.core.models import ReviewPriority, TransactionInput, TransactionPrediction
 from fafycat.ml.prediction_pipeline import (
     CategorizationSummary,
@@ -284,6 +284,38 @@ def test_predict_new_selects_only_given_ids_without_predictions(session: Session
     assert isinstance(new_a.review_priority, ReviewPriority)
     assert already_predicted.confidence_score == 0.99
     assert not_in_batch.predicted_category_id is None
+
+
+def test_import_holds_back_spot_checks_that_repredict_keeps_in_review(session: Session) -> None:
+    """1 in 20 confident imports waits for a human instead of auto-accepting, also after a repredict."""
+    names = [f"shop-{i:02d}" for i in range(40)]
+    session.add_all(make_txn(name) for name in names)
+    session.commit()
+    confident = FakeCategorizer(dict.fromkeys(names, 0.99))
+
+    summary = predict_new(session, confident, transaction_ids=[f"id-{n}" for n in names], threshold=0.90)
+    held_back = session.query(TransactionORM).filter(TransactionORM.review_priority == ReviewPriority.SPOT_CHECK)
+    held_back_ids = {str(t.id) for t in held_back}
+    repredict_unreviewed(session, confident, threshold=0.90)
+
+    assert (summary.auto_accepted, summary.needs_review) == (38, 2)
+    assert len(held_back_ids) == 2
+    for txn in session.query(TransactionORM).filter(TransactionORM.id.in_(held_back_ids)):
+        assert (txn.review_priority, txn.is_reviewed, txn.category_id) == (ReviewPriority.SPOT_CHECK, False, None)
+    auto_accepted_ids = {str(e.transaction_id) for e in session.query(ReviewEventORM)}
+    assert auto_accepted_ids.isdisjoint(held_back_ids)
+    assert len(auto_accepted_ids) == 38
+
+
+def test_small_import_still_gets_a_spot_check_by_random_rounding(session: Session, pin_spot_check_draw) -> None:
+    """One would-be auto-accept is a 5% share of one: held back when the rounding draw lands high."""
+    session.add(make_txn("lone"))
+    session.commit()
+    pin_spot_check_draw(0.99)
+
+    summary = predict_new(session, FakeCategorizer({"lone": 0.99}), transaction_ids=["id-lone"], threshold=0.90)
+
+    assert (summary.auto_accepted, summary.needs_review) == (0, 1)
 
 
 def test_predict_new_with_no_matching_ids_returns_empty_summary(session: Session) -> None:

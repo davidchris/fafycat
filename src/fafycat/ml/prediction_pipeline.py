@@ -6,11 +6,16 @@ the outcome. Entry points commit before returning.
 
 The rule is deliberately simple and fully visible: a Prediction at or above
 the Auto-approve Threshold is auto-accepted, everything else needs review.
-No sampling, no cap, no hidden "standard" tier. A transaction that already
-carries a human category (a labelled import, an earlier review) keeps it:
-the Prediction is recorded for the Audit Trail, nothing else changes.
+The one exception is the Spot Check: on import, :data:`SPOT_CHECK_SHARE` of
+the would-be auto-accepts, picked at random, wait for a human instead. Their
+reviews are an unbiased sample of how often auto-accepts are wrong, and they
+stay in review until a human saves them, even when re-predicted. A
+transaction that already carries a human category (a labelled import, an
+earlier review) keeps it: the Prediction is recorded for the Audit Trail,
+nothing else changes.
 """
 
+import random
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date
@@ -22,6 +27,16 @@ from ..core.audit_trail import KEPT_REVIEW, ReviewActor, record_prediction_event
 from ..core.config import AppConfig
 from ..core.database import AppSettingsORM, TransactionORM
 from ..core.models import ReviewPriority, TransactionInput, TransactionPrediction
+
+SPOT_CHECK_SHARE = 0.05
+"""Share of an import's would-be auto-accepts held back as Spot Checks.
+
+The count is rounded at random (19 would-be auto-accepts give 0.95, so one
+Spot Check 95% of the time), so small imports are sampled too.
+"""
+
+_rng = random.Random()
+"""Draws the Spot Checks; tests replace it to pin the draw."""
 
 
 class ConfidenceCategorizer(Protocol):
@@ -114,7 +129,7 @@ def predict_new(
         )
         .all()
     )
-    return _apply_predictions(db, txns, categorizer, threshold=threshold, trigger=trigger)
+    return _apply_predictions(db, txns, categorizer, threshold=threshold, trigger=trigger, spot_check=True)
 
 
 def repredict_unreviewed(
@@ -181,8 +196,13 @@ def _apply_predictions(
     *,
     threshold: float | None,
     trigger: str,
+    spot_check: bool = False,
 ) -> CategorizationSummary:
-    """Predict, bucket, persist with Audit Trail events, and commit."""
+    """Predict, bucket, persist with Audit Trail events, and commit.
+
+    With ``spot_check``, :data:`SPOT_CHECK_SHARE` of the would-be auto-accepts
+    become Spot Checks.
+    """
     if not txns:
         return CategorizationSummary()
 
@@ -191,10 +211,20 @@ def _apply_predictions(
     if threshold is None:
         threshold = get_auto_approve_threshold(db)
 
+    held_back: set[str] = set()
+    if spot_check:
+        would_auto_accept = [
+            str(txn.id)
+            for txn, prediction in zip(txns, predictions, strict=True)
+            if not (bool(txn.is_reviewed) and txn.category_id is not None) and prediction.confidence_score >= threshold
+        ]
+        count = int(len(would_auto_accept) * SPOT_CHECK_SHARE + _rng.random())
+        held_back = set(_rng.sample(would_auto_accept, count))
+
     counts: Counter[str] = Counter()
     for txn, prediction in zip(txns, predictions, strict=True):
         previous_category_id = txn.category_id
-        priority = _bucket_transaction(txn, prediction, threshold)
+        priority = _bucket_transaction(txn, prediction, threshold, spot_check=str(txn.id) in held_back)
         decision = priority.value if priority is not None else KEPT_REVIEW
         counts[decision] += 1
         record_prediction_event(
@@ -218,19 +248,20 @@ def _apply_predictions(
     db.commit()
     return CategorizationSummary(
         auto_accepted=counts[ReviewPriority.AUTO_ACCEPTED.value],
-        needs_review=counts[ReviewPriority.STANDARD.value],
+        needs_review=counts[ReviewPriority.STANDARD.value] + counts[ReviewPriority.SPOT_CHECK.value],
         already_reviewed=counts[KEPT_REVIEW],
     )
 
 
 def _bucket_transaction(
-    txn: TransactionORM, prediction: TransactionPrediction, threshold: float
+    txn: TransactionORM, prediction: TransactionPrediction, threshold: float, *, spot_check: bool = False
 ) -> ReviewPriority | None:
     """Write one transaction's Prediction and Review Priority; return the bucket.
 
-    Returns None when the transaction already carries a human category: the
-    Prediction is stored for comparison, but category, reviewed flag, and
-    Review Priority stay as the human left them.
+    A new Spot Check (``spot_check``) or an unreviewed earlier one stays in
+    review whatever its confidence. Returns None when the transaction already
+    carries a human category: the Prediction is stored for comparison, but
+    category, reviewed flag, and Review Priority stay as the human left them.
     """
     txn.predicted_category_id = prediction.predicted_category_id
     txn.confidence_score = prediction.confidence_score
@@ -238,7 +269,12 @@ def _bucket_transaction(
     if bool(txn.is_reviewed) and txn.category_id is not None:
         return None
 
-    priority = ReviewPriority.AUTO_ACCEPTED if prediction.confidence_score >= threshold else ReviewPriority.STANDARD
+    if spot_check or txn.review_priority == ReviewPriority.SPOT_CHECK:
+        priority = ReviewPriority.SPOT_CHECK
+    elif prediction.confidence_score >= threshold:
+        priority = ReviewPriority.AUTO_ACCEPTED
+    else:
+        priority = ReviewPriority.STANDARD
     txn.review_priority = priority
     txn.is_reviewed = priority is ReviewPriority.AUTO_ACCEPTED
     if priority is ReviewPriority.AUTO_ACCEPTED:

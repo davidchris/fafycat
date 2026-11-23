@@ -10,7 +10,7 @@ from fafycat.api.ml_insights import TrainingRecency, get_training_recency
 from fafycat.api.services import REVIEW_IMPACT_SORT, CategoryService, TransactionService
 from fafycat.core.config import AppConfig
 from fafycat.core.database import TransactionORM
-from fafycat.ml.human_labels import count_human_labels
+from fafycat.ml.human_labels import count_training_labels
 from fafycat.ml.prediction_pipeline import get_auto_approve_threshold
 from fafycat.web.components.layout import create_page_layout
 from fafycat.web.components.transaction_table import render_table
@@ -31,7 +31,7 @@ def _get_model_status_alert():
             model_path = config.ml.model_dir / model_filename
 
             # Check training data readiness
-            reviewed_count = count_human_labels(db_session)
+            reviewed_count = count_training_labels(db_session)
 
             min_training_samples = 50
             training_ready = reviewed_count >= min_training_samples
@@ -147,7 +147,7 @@ def _render_training_recency(session: Session) -> str:
     """
     recency = get_training_recency(session)
     min_samples = AppConfig().ml.min_training_samples
-    reviewed_count = count_human_labels(session)
+    reviewed_count = count_training_labels(session)
 
     if reviewed_count >= min_samples:
         action = """
@@ -234,7 +234,7 @@ def render_review_page(request: Request):
 
         <div class="mb-8">
             <h2 class="text-lg font-semibold mb-4">Needs review ({transaction_count} transactions)</h2>
-            <p class="text-secondary mb-4">Predictions at or above {threshold:.0%} confidence are auto-accepted. Everything else is listed here until you save a category, ordered so that one review resolves the most: merchants with many pending transactions and uncertain predictions come first.</p>
+            <p class="text-secondary mb-4">Predictions at or above {threshold:.0%} confidence are auto-accepted, except a few random Spot Checks per import that check the auto-accepts. Everything else is listed here until you save a category, ordered so that one review resolves the most: merchants with many pending transactions and uncertain predictions come first.</p>
             {transactions_html}
         </div>
 

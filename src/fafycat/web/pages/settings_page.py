@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from fafycat.api.ml_insights import get_calibration_report
 from fafycat.core.database import get_categories
-from fafycat.ml.human_labels import count_human_labels
+from fafycat.ml.human_labels import count_training_labels
 from fafycat.web.components.layout import create_page_layout
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def _get_ml_model_status(db: Session) -> dict:
         "status": "Unable to check model status",
     }
     try:
-        reviewed_count = count_human_labels(db)
+        reviewed_count = count_training_labels(db)
         status.update(
             training_ready=reviewed_count >= min_training_samples,
             reviewed_transactions=reviewed_count,

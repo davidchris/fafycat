@@ -1,7 +1,7 @@
 """Rule-based merchant mapping system.
 
 A Merchant Rule maps a cleaned merchant name to a category. Rules are derived
-data: rebuilt from human-labelled transactions (see
+data: rebuilt from the training labels (Human Labels and Trusted Auto-accepts, see
 :mod:`fafycat.ml.human_labels`) on every training run, never edited by hand.
 In the ensemble a rule is a third voter beside LightGBM and Naive Bayes; the
 stack reads its vote as meta features. The single-model Categorizer, the
@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from ..core.database import CategoryORM, MerchantMappingORM, TransactionORM
 from ..core.models import MerchantMapping
 from .feature_extractor import MerchantCleaner
-from .human_labels import human_label_criterion
+from .human_labels import training_label_criterion
 
 RULE_OVERRIDE_CONFIDENCE = 0.98
 """Confidence at which a rule decides alone in the single-model Categorizer.
@@ -89,7 +89,7 @@ def refresh_rule_for_pattern(session: Session, pattern: str, min_occurrences: in
         session.query(TransactionORM.category_id, func.count(TransactionORM.id), func.max(TransactionORM.date))
         .filter(
             TransactionORM.merchant_pattern == pattern,
-            human_label_criterion(),
+            training_label_criterion(),
         )
         .group_by(TransactionORM.category_id)
         .all()
@@ -321,13 +321,13 @@ class MerchantMapper:
         self._load_mappings()
 
     def reviewed_transactions(self) -> list[tuple[str, int, date]]:
-        """Every human-labelled transaction as ``(merchant_name, category_id, date)``.
+        """Every training-label transaction as ``(merchant_name, category_id, date)``.
 
         Ready for :func:`derive_rules`.
         """
         rows = (
             self.session.query(TransactionORM.name, TransactionORM.category_id, TransactionORM.date)
-            .filter(human_label_criterion())
+            .filter(training_label_criterion())
             .all()
         )
         return [(str(name), int(cast(int, category_id)), cast(date, seen)) for name, category_id, seen in rows]

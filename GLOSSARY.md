@@ -29,11 +29,19 @@ A human confirming or correcting a transaction's predicted category. A review pr
 _Avoid_: approval, validation
 
 **Human Label**:
-A transaction category a human decided: a review, a propagation of a review, or a labelled import. The latest Review Event's actor tells; a transaction from before the Audit Trail counts unless it is an auto-accept the reviewer never changed. Only Human Labels train the Categorizer, form Merchant Rules, and fill the calibration table. Auto-accepts and bulk approves copy the model's own Prediction and are not Human Labels.
+A transaction category a human decided: a review, a propagation of a review, or a labelled import. The latest Review Event's actor tells; a transaction from before the Audit Trail counts unless it is an auto-accept the reviewer never changed. Only Human Labels grade the model: the training metrics and the calibration table. Auto-accepts and bulk approves copy the model's own Prediction and are not Human Labels.
 _Avoid_: reviewed transaction (it includes auto-accepts), ground truth
 
+**Trusted Auto-accept**:
+An auto-accept that nobody corrected for two weeks, or a legacy auto-accept from before the Audit Trail. Trusted Auto-accepts train the Categorizer and form Merchant Rules beside the Human Labels, at a lower weight, but never grade the model.
+_Avoid_: pseudo-label, silver label
+
+**Spot Check**:
+A would-be auto-accept that is held back at random on import and waits for a review. It measures how often auto-accepts are wrong.
+_Avoid_: audit sample, quality check
+
 **Review Priority**:
-The bucket the Prediction Pipeline assigns a transaction: `auto_accepted` (at or above the Auto-approve Threshold) or `standard` (needs review). `high` and `quality_check` are legacy values from the retired Strategic Selection step and may still appear on older rows.
+The bucket the Prediction Pipeline assigns a transaction: `auto_accepted` (at or above the Auto-approve Threshold), `standard` (needs review), or `spot_check` (a Spot Check). `high` and `quality_check` are legacy values from the retired Strategic Selection step and may still appear on older rows.
 _Avoid_: review status, priority level
 
 **Auto-accept**:
@@ -45,7 +53,7 @@ The confidence score at or above which a Prediction is eligible for auto-accept.
 _Avoid_: confidence threshold
 
 **Merchant Rule**:
-A mapping from a Merchant Pattern to a category, derived from Human Labels on every training run and refreshed for one pattern after each review. A rule matches a merchant exactly, or partially when every word of its pattern appears as a whole word in the merchant's pattern; a partial match speaks with less confidence, and the most specific matching rule wins. In the ensemble a rule is a third voter beside LightGBM and Naive Bayes; the stack reads its vote as meta features, and every Prediction Event records the vote.
+A mapping from a Merchant Pattern to a category, derived from Human Labels and Trusted Auto-accepts on every training run and refreshed for one pattern after each review. A rule matches a merchant exactly, or partially when every word of its pattern appears as a whole word in the merchant's pattern; a partial match speaks with less confidence, and the most specific matching rule wins. In the ensemble a rule is a third voter beside LightGBM and Naive Bayes; the stack reads its vote as meta features, and every Prediction Event records the vote.
 _Avoid_: merchant mapping (the table name), pattern
 
 **Audit Trail**:
