@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from fafycat.core.database import AppSettingsORM, Base, CategoryORM, ReviewEventORM, TransactionORM
 from fafycat.core.models import ReviewPriority, TransactionInput, TransactionPrediction
-from fafycat.ml import prediction_pipeline
 from fafycat.ml.prediction_pipeline import (
     CategorizationSummary,
     get_auto_approve_threshold,
@@ -308,11 +307,11 @@ def test_import_holds_back_spot_checks_that_repredict_keeps_in_review(session: S
     assert len(auto_accepted_ids) == 38
 
 
-def test_small_import_still_gets_a_spot_check_by_random_rounding(session: Session, monkeypatch) -> None:
+def test_small_import_still_gets_a_spot_check_by_random_rounding(session: Session, pin_spot_check_draw) -> None:
     """One would-be auto-accept is a 5% share of one: held back when the rounding draw lands high."""
     session.add(make_txn("lone"))
     session.commit()
-    monkeypatch.setattr(prediction_pipeline.random, "random", lambda: 0.99)
+    pin_spot_check_draw(0.99)
 
     summary = predict_new(session, FakeCategorizer({"lone": 0.99}), transaction_ids=["id-lone"], threshold=0.90)
 

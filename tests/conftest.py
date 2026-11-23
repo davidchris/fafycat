@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import random
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
@@ -14,6 +15,7 @@ from fafycat.api.ml import get_categorizer, reset_singletons
 from fafycat.app import create_app
 from fafycat.core.config import AppConfig
 from fafycat.core.database import Base, DatabaseManager
+from fafycat.ml import prediction_pipeline
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -38,6 +40,31 @@ def _isolate_fafycat_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setenv("FAFYCAT_CONFIG", str(tmp_path / "no-fafycat-config.toml"))
     # TestClient sends ``Host: testserver``; allow it the way a user allows a LAN host name.
     monkeypatch.setenv("FAFYCAT_ALLOWED_HOSTS", "testserver")
+
+
+def _pinned_rng(draw: float) -> random.Random:
+    """A seeded RNG whose rounding draw is always ``draw``.
+
+    Set on the instance, not in a subclass: a subclass overriding ``random()``
+    makes ``sample()`` draw from it too, and a constant draw never finishes.
+    """
+    rng = random.Random(0)
+    rng.random = lambda: draw
+    return rng
+
+
+@pytest.fixture(autouse=True)
+def pin_spot_check_draw(monkeypatch: pytest.MonkeyPatch) -> Callable[[float], None]:
+    """Round the Spot Check share down, so bucket counts are exact.
+
+    Returns a function that pins another rounding draw for the current test.
+    """
+
+    def pin(draw: float) -> None:
+        monkeypatch.setattr(prediction_pipeline, "_rng", _pinned_rng(draw))
+
+    pin(0.0)
+    return pin
 
 
 @pytest.fixture

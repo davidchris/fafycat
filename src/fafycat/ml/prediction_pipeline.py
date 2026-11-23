@@ -35,6 +35,9 @@ The count is rounded at random (19 would-be auto-accepts give 0.95, so one
 Spot Check 95% of the time), so small imports are sampled too.
 """
 
+_rng = random.Random()
+"""Draws the Spot Checks; tests replace it to pin the draw."""
+
 
 class ConfidenceCategorizer(Protocol):
     """The Categorizer seam: anything exposing confidence-scored prediction."""
@@ -215,8 +218,8 @@ def _apply_predictions(
             for txn, prediction in zip(txns, predictions, strict=True)
             if not (bool(txn.is_reviewed) and txn.category_id is not None) and prediction.confidence_score >= threshold
         ]
-        count = int(len(would_auto_accept) * SPOT_CHECK_SHARE + random.random())
-        held_back = set(random.sample(would_auto_accept, count))
+        count = int(len(would_auto_accept) * SPOT_CHECK_SHARE + _rng.random())
+        held_back = set(_rng.sample(would_auto_accept, count))
 
     counts: Counter[str] = Counter()
     for txn, prediction in zip(txns, predictions, strict=True):
