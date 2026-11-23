@@ -4,9 +4,10 @@ Claude Code runs this as a PreToolUse hook (see ``.claude/settings.json``). The 
 arrives on stdin. The script exits 2, which blocks the tool call, when the outgoing text
 contains a private term. Outgoing text is:
 
-* ``git commit``: the command (with its message) and the added lines of the staged and
-  unstaged diffs.
-* ``git push``: the messages and added lines of the commits that the upstream does not have.
+* ``git commit``: the command (with its message), the added lines of the staged and unstaged
+  diffs, and the untracked files that a ``git add`` in the same command would stage.
+* ``git push``: the message, file names and added lines of each commit that the upstream does not
+  have, so text added in one commit and removed in a later one still counts.
 * ``gh ...``: the command and any ``--body-file`` / ``-F`` file it reads.
 * the GitHub tools of T3 Code that write PRs, issues and comments: their whole input.
 
@@ -35,6 +36,7 @@ GIT_COMMIT = re.compile(r"\bgit\b[^|;&]*\bcommit\b")
 GIT_PUSH = re.compile(r"\bgit\b[^|;&]*\bpush\b")
 GH = re.compile(r"(^|[\s;&|(])gh\s")
 FILE_FLAGS = ("--body-file", "-F", "--input")
+MAX_FILE_BYTES = 1_000_000
 
 
 def _terms_dir() -> Path:
@@ -70,6 +72,37 @@ def _git(cwd: str, *args: str) -> str:
 
 def _added_lines(diff: str) -> str:
     return "\n".join(line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
+
+
+def _published_log(log: str) -> str:
+    """Keep what ``git log -p -U0`` would publish: messages, file names and added lines, not removed ones."""
+    return "\n".join(line for line in log.splitlines() if not line.startswith(("-", "@@", "index ")))
+
+
+def _untracked_files_added_by(command: str, cwd: str) -> str:
+    """Return the content of untracked files that a ``git add`` in the command would stage.
+
+    The hook runs before the command, so such files are in neither diff yet.
+    """
+    texts = []
+    for segment in re.split(r"&&|\|\||[;|\n]", command):
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            continue
+        if tokens[:2] != ["git", "add"]:
+            continue
+        args = tokens[2:]
+        everything = any(arg in ("-A", "--all") for arg in args)
+        pathspecs = [] if everything else [arg for arg in args if not arg.startswith("-")]
+        if not everything and not pathspecs:
+            continue
+        listed = _git(cwd, "ls-files", "--others", "--exclude-standard", "-z", "--", *pathspecs)
+        for name in filter(None, listed.split("\0")):
+            path = Path(cwd, name)
+            if path.is_file() and path.stat().st_size <= MAX_FILE_BYTES:
+                texts.append(f"{name}\n{path.read_text(errors='replace')}")
+    return "\n".join(texts)
 
 
 def _push_base(cwd: str) -> str:
@@ -109,11 +142,10 @@ def outgoing_text(hook_input: dict) -> list[tuple[str, str]]:
         texts.append(("commit command", command))
         texts.append(("staged diff", _added_lines(_git(cwd, "diff", "--cached", "-U0", "--no-color", "--no-ext-diff"))))
         texts.append(("unstaged diff", _added_lines(_git(cwd, "diff", "-U0", "--no-color", "--no-ext-diff"))))
+        texts.append(("untracked files to be added", _untracked_files_added_by(command, cwd)))
     if GIT_PUSH.search(command) and (base := _push_base(cwd)):
-        texts.append(("pushed commit messages", _git(cwd, "log", "--format=%B", f"{base}..HEAD")))
-        texts.append(
-            ("pushed diff", _added_lines(_git(cwd, "diff", "-U0", "--no-color", "--no-ext-diff", base, "HEAD")))
-        )
+        log = _git(cwd, "log", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%B", f"{base}..HEAD")
+        texts.append(("pushed commits", _published_log(log)))
     if GH.search(command):
         texts.append(("gh command", command))
         texts.extend(("gh body file", text) for text in _files_read_by_gh(command, cwd))
