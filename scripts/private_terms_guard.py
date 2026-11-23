@@ -4,12 +4,15 @@ Claude Code runs this as a PreToolUse hook (see ``.claude/settings.json``). The 
 arrives on stdin. The script exits 2, which blocks the tool call, when the outgoing text
 contains a private term. Outgoing text is:
 
-* ``git commit``: the command (with its message), the added lines of the staged and unstaged
-  diffs, and the untracked files that a ``git add`` in the same command would stage.
-* ``git push``: the message, file names and added lines of each commit that the upstream does not
-  have, so text added in one commit and removed in a later one still counts.
+* ``git commit``: the command (with its ``-m`` message), a ``-F``/``--file`` message file, the
+  added lines of the staged and unstaged diffs, and the untracked files that a ``git add`` in
+  the same command would stage.
+* ``git push``: the message, file names and added lines of each commit that no remote-tracking
+  branch has yet, so a first push and text added in one commit and removed in a later one count.
 * ``gh ...``: the command and any ``--body-file`` / ``-F`` file it reads.
 * the GitHub tools of T3 Code that write PRs, issues and comments: their whole input.
+
+Git commands are checked in the repository they run in, after ``cd <dir>`` and ``git -C <dir>``.
 
 Private terms are the category names in the configured database, plus one term per line in
 ``private-terms.txt`` next to the fafycat config file (``~/.config/fafycat/`` by default).
@@ -32,10 +35,8 @@ from fafycat.core.config import resolve_config, sqlite_path
 WRITING_MCP_TOOLS = re.compile(
     r"mcp__t3-code__(pull_request_(create|update|respond|review|merge)|create_issue|comment_on_issue)$"
 )
-GIT_COMMIT = re.compile(r"\bgit\b[^|;&]*\bcommit\b")
-GIT_PUSH = re.compile(r"\bgit\b[^|;&]*\bpush\b")
-GH = re.compile(r"(^|[\s;&|(])gh\s")
-FILE_FLAGS = ("--body-file", "-F", "--input")
+PUBLISHING_COMMAND = re.compile(r"\bgit\b.*\b(commit|push)\b|(^|[\s;&|(])gh\s", re.DOTALL)
+GH_FILE_FLAGS = ("--body-file", "-F", "--input")
 MAX_FILE_BYTES = 1_000_000
 
 
@@ -79,53 +80,87 @@ def _published_log(log: str) -> str:
     return "\n".join(line for line in log.splitlines() if not line.startswith(("-", "@@", "index ")))
 
 
-def _untracked_files_added_by(command: str, cwd: str) -> str:
-    """Return the content of untracked files that a ``git add`` in the command would stage.
+def _read_file(cwd: str, name: str) -> str:
+    path = Path(cwd, Path(name).expanduser())
+    if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
+        return ""
+    return path.read_text(errors="replace")
+
+
+def _simple_commands(command: str, cwd: str) -> list[tuple[list[str], str]]:
+    """Split a shell command into simple commands, each with the directory it runs in.
+
+    Follows ``cd`` so that ``cd repo && git commit`` is checked in ``repo``. Quoted operators,
+    such as a ``|`` inside a commit message, stay part of their word.
+    """
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()<>\n")
+    lexer.whitespace, lexer.whitespace_split = " \t\r", True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return []
+    commands, current = [], []
+    for token in [*tokens, ";"]:
+        if token and set(token) <= set(";&|()\n"):
+            while current and re.match(r"^\w+=", current[0]):
+                current = current[1:]
+            if current[:1] == ["cd"]:
+                cwd = str(Path(cwd, Path(current[1] if len(current) > 1 else "~").expanduser()))
+            elif current:
+                commands.append((current, cwd))
+            current = []
+        else:
+            current.append(token)
+    return commands
+
+
+def _git_subcommand(tokens: list[str], cwd: str) -> tuple[str, list[str], str] | None:
+    """Return (subcommand, its arguments, the directory git runs in) for a git command, else None."""
+    if Path(tokens[0]).name != "git":
+        return None
+    i = 1
+    while i < len(tokens) and tokens[i].startswith("-"):
+        if tokens[i] == "-C" and i + 1 < len(tokens):
+            cwd = str(Path(cwd, Path(tokens[i + 1]).expanduser()))
+        i += 2 if tokens[i] in ("-C", "-c") else 1
+    return (tokens[i], tokens[i + 1 :], cwd) if i < len(tokens) else None
+
+
+def _untracked_files_added_by(args: list[str], cwd: str) -> str:
+    """Return the content of untracked files that ``git add <args>`` would stage.
 
     The hook runs before the command, so such files are in neither diff yet.
     """
-    texts = []
-    for segment in re.split(r"&&|\|\||[;|\n]", command):
-        try:
-            tokens = shlex.split(segment)
-        except ValueError:
-            continue
-        if tokens[:2] != ["git", "add"]:
-            continue
-        args = tokens[2:]
-        everything = any(arg in ("-A", "--all") for arg in args)
-        pathspecs = [] if everything else [arg for arg in args if not arg.startswith("-")]
-        if not everything and not pathspecs:
-            continue
-        listed = _git(cwd, "ls-files", "--others", "--exclude-standard", "-z", "--", *pathspecs)
-        for name in filter(None, listed.split("\0")):
-            path = Path(cwd, name)
-            if path.is_file() and path.stat().st_size <= MAX_FILE_BYTES:
-                texts.append(f"{name}\n{path.read_text(errors='replace')}")
-    return "\n".join(texts)
+    everything = any(arg in ("-A", "--all") for arg in args)
+    pathspecs = [] if everything else [arg for arg in args if not arg.startswith("-")]
+    if not everything and not pathspecs:
+        return ""
+    listed = _git(cwd, "ls-files", "--others", "--exclude-standard", "-z", "--", *pathspecs)
+    return "\n".join(f"{name}\n{_read_file(cwd, name)}" for name in filter(None, listed.split("\0")))
 
 
-def _push_base(cwd: str) -> str:
-    for ref in ("@{upstream}", "origin/HEAD"):
-        base = _git(cwd, "merge-base", ref, "HEAD").strip()
-        if base:
-            return base
-    return ""
+def _commit_message_files(args: list[str], cwd: str) -> str:
+    """Return the messages that ``git commit -F <file>`` / ``--file=<file>`` would read."""
+    names = [value for flag, value in zip(args, args[1:], strict=False) if flag in ("-F", "--file")]
+    names += [arg.removeprefix("--file=") for arg in args if arg.startswith("--file=")]
+    return "\n".join(_read_file(cwd, name) for name in names if name != "-")
 
 
-def _files_read_by_gh(command: str, cwd: str) -> list[str]:
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return []
-    texts = []
-    for flag, value in zip(tokens, tokens[1:], strict=False):
-        if flag not in FILE_FLAGS:
-            continue
-        path = Path(cwd, value.split("=@", 1)[-1].removeprefix("@")).expanduser()
-        if path.is_file():
-            texts.append(path.read_text(errors="replace"))
-    return texts
+def _pushed_revisions(args: list[str], cwd: str) -> list[str]:
+    """Return the local revisions ``git push <args>`` would publish (HEAD when none is named)."""
+    if any(arg in ("--all", "--branches", "--mirror") for arg in args):
+        return ["--branches"]
+    positional = [arg for arg in args if not arg.startswith("-")]
+    sources = [refspec.lstrip("+").split(":", 1)[0] for refspec in positional[1:]]
+    revisions = [src for src in sources if src and _git(cwd, "rev-parse", "--verify", "--quiet", f"{src}^{{commit}}")]
+    return revisions or ["HEAD"]
+
+
+def _gh_body_files(args: list[str], cwd: str) -> str:
+    """Return the files a ``gh`` command reads its text from (``--body-file``, ``-F body=@file``)."""
+    names = [value for flag, value in zip(args, args[1:], strict=False) if flag in GH_FILE_FLAGS]
+    names += [arg.split("=", 1)[1] for arg in args if arg.startswith("--body-file=")]
+    return "\n".join(_read_file(cwd, name.split("=@", 1)[-1].removeprefix("@")) for name in names)
 
 
 def outgoing_text(hook_input: dict) -> list[tuple[str, str]]:
@@ -137,18 +172,42 @@ def outgoing_text(hook_input: dict) -> list[tuple[str, str]]:
     if tool != "Bash":
         return []
     command = tool_input.get("command", "")
-    texts = []
-    if GIT_COMMIT.search(command):
-        texts.append(("commit command", command))
-        texts.append(("staged diff", _added_lines(_git(cwd, "diff", "--cached", "-U0", "--no-color", "--no-ext-diff"))))
-        texts.append(("unstaged diff", _added_lines(_git(cwd, "diff", "-U0", "--no-color", "--no-ext-diff"))))
-        texts.append(("untracked files to be added", _untracked_files_added_by(command, cwd)))
-    if GIT_PUSH.search(command) and (base := _push_base(cwd)):
-        log = _git(cwd, "log", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%B", f"{base}..HEAD")
-        texts.append(("pushed commits", _published_log(log)))
-    if GH.search(command):
-        texts.append(("gh command", command))
-        texts.extend(("gh body file", text) for text in _files_read_by_gh(command, cwd))
+    # The raw command holds -m messages and gh bodies even when it cannot be tokenised.
+    texts = [("command", command)] if PUBLISHING_COMMAND.search(command) else []
+    added, commits = [], []
+    for tokens, directory in _simple_commands(command, cwd):
+        if Path(tokens[0]).name == "gh":
+            texts.append(("gh body file", _gh_body_files(tokens, directory)))
+        if not (git := _git_subcommand(tokens, directory)):
+            continue
+        subcommand, args, directory = git
+        if subcommand == "add":
+            added.append(_untracked_files_added_by(args, directory))
+        elif subcommand == "commit":
+            commits.append(directory)
+            texts.append(("commit message file", _commit_message_files(args, directory)))
+        elif subcommand == "push":
+            revisions = _pushed_revisions(args, directory)
+            log = _git(
+                directory,
+                "log",
+                "-p",
+                "-U0",
+                "--no-color",
+                "--no-ext-diff",
+                "--format=%B",
+                *revisions,
+                "--not",
+                "--remotes",
+            )
+            texts.append(("pushed commits", _published_log(log)))
+    for directory in dict.fromkeys(commits):
+        texts.append(
+            ("staged diff", _added_lines(_git(directory, "diff", "--cached", "-U0", "--no-color", "--no-ext-diff")))
+        )
+        texts.append(("unstaged diff", _added_lines(_git(directory, "diff", "-U0", "--no-color", "--no-ext-diff"))))
+    if commits:
+        texts.append(("untracked files to be added", "\n".join(added)))
     return texts
 
 
